@@ -7,7 +7,7 @@ export const dynamic = 'force-dynamic';
 
 export async function GET() {
   const matches = getRunnerManager().repo.listMatches().map((match) => projectMatch(match, 'public'));
-  return NextResponse.json({ matches });
+  return NextResponse.json({ matches, aiProvider: process.env.AI_PROVIDER === 'real' ? 'real' : 'mock' });
 }
 
 export async function POST(request: Request) {
@@ -17,11 +17,13 @@ export async function POST(request: Request) {
     if (body.speed !== undefined && !allowedSpeeds.has(body.speed)) {
       return NextResponse.json({ error: { code: 'INVALID_SPEED', message: '速度が不正です。' } }, { status: 400 });
     }
-    const match = getRunnerManager().create({ seed: body.seed, speed: body.speed, ai: 'mock' });
-    return NextResponse.json({ id: match.id, seed: match.seed }, { status: 201 });
+    const ai = process.env.AI_PROVIDER === 'real' ? 'real' : 'mock';
+    const match = getRunnerManager().create({ seed: body.seed, speed: body.speed, ai });
+    return NextResponse.json({ id: match.id, seed: match.seed, ai }, { status: 201 });
   } catch (error) {
     const code = error instanceof Error ? error.message : 'CREATE_FAILED';
-    const status = code === 'MATCH_LIMIT_REACHED' ? 409 : 500;
-    return NextResponse.json({ error: { code, message: code === 'MATCH_LIMIT_REACHED' ? '同時進行できる試合は2件までです。' : '試合を開始できませんでした。' } }, { status });
+    const status = code === 'MATCH_LIMIT_REACHED' ? 409 : code === 'REAL_AI_NOT_ALLOWED' ? 503 : 500;
+    const message = code === 'MATCH_LIMIT_REACHED' ? '同時進行できる試合は2件までです。' : code === 'REAL_AI_NOT_ALLOWED' ? '実AIの起動条件が不足しています。' : '試合を開始できませんでした。';
+    return NextResponse.json({ error: { code, message } }, { status });
   }
 }

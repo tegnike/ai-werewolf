@@ -3,7 +3,11 @@
 import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AgentAvatar } from './AgentAvatar';
+import { AudioControls } from './AudioControls';
 import type { UiEvent, UiMatch } from './types';
+import { useAmbientBgm } from './useAmbientBgm';
+import { useMatchVoice } from './useMatchVoice';
+import { voiceForSeat } from '@/domain/voices';
 
 const roleLabel: Record<string, string> = { villager: '村人', werewolf: '人狼', seer: '占い師', medium: '霊媒師', bodyguard: '狩人', madman: '狂人' };
 const phaseLabel: Record<string, string> = { setup: '準備', night_zero: '第0夜', dawn: '夜明け', discussion: '議論', vote: '投票', runoff: '決選投票', execution: '処刑', medium: '霊媒', wolf_chat: '人狼会話', night_actions: '夜の行動', finished: '終了' };
@@ -33,6 +37,10 @@ export function MatchViewer({ matchId, mode }: { matchId: string; mode: 'live' |
   const [error, setError] = useState('');
   const sourceRef = useRef<EventSource | null>(null);
   const terminal = match ? ['finished', 'aborted', 'aborted_budget'].includes(match.status) : false;
+  const audioPhase = events.at(-1)?.phase ?? 'setup';
+  const audioMood = ['night_zero', 'wolf_chat', 'night_actions', 'medium'].includes(audioPhase) ? 'night' : 'day';
+  const { bgmEnabled, setBgmEnabled, duckBgm } = useAmbientBgm(audioMood);
+  const { voiceEnabled, setVoiceEnabled, voiceAvailable, speakingSeat } = useMatchVoice(events, duckBgm);
 
   const load = useCallback(async () => {
     const response = await fetch(`/api/match/${matchId}?view=${view}`, { cache: 'no-store' });
@@ -108,7 +116,7 @@ export function MatchViewer({ matchId, mode }: { matchId: string; mode: 'live' |
       <header className="viewer-header">
         <Link href="/" className="mini-logo"><span>AI</span>人狼</Link>
         <div className="round-status"><span>{day === 0 ? '第0夜' : `${day}日目`}</span><i /> <strong>{phaseLabel[phase] ?? phase}</strong><em className={match.status}>{match.status === 'running' ? 'LIVE' : match.status.toUpperCase()}</em></div>
-        <div className="view-switch" aria-label="観戦視点"><button className={view === 'public' ? 'active' : ''} onClick={() => setView('public')}>公開視点</button><button className={view === 'gm' ? 'active' : ''} onClick={() => setView('gm')}>GM視点</button></div>
+        <div className="header-actions"><AudioControls compact bgmEnabled={bgmEnabled} voiceEnabled={voiceEnabled} voiceAvailable={voiceAvailable} speakingSeat={speakingSeat} onBgmChange={setBgmEnabled} onVoiceChange={setVoiceEnabled} /><div className="view-switch" aria-label="観戦視点"><button className={view === 'public' ? 'active' : ''} onClick={() => setView('public')}>公開視点</button><button className={view === 'gm' ? 'active' : ''} onClick={() => setView('gm')}>GM視点</button></div></div>
       </header>
       <div className="viewer-grid">
         <section className="board-panel">
@@ -117,7 +125,8 @@ export function MatchViewer({ matchId, mode }: { matchId: string; mode: 'live' |
           <div className="agent-board" aria-live="polite">
             {Array.from({ length: 9 }, (_, index) => {
               const number = index + 1; const seat = `seat-${number}`; const dead = executionSeats.has(seat) || victimSeats.has(seat); const role = roleMap.get(seat);
-              return <article className={`agent-card ${dead ? 'dead' : ''}`} key={seat}><div className="agent-top"><AgentAvatar index={number} dead={dead} /><div><span className="seat-label">SEAT {String(number).padStart(2, '0')}</span><h2>Agent {number}</h2></div><span className={`life-badge ${dead ? 'dead' : ''}`}>{dead ? '死亡' : '生存'}</span></div>{role && <div className={`role-badge ${role}`}>{roleLabel[role]}</div>}<blockquote>{latestSpeech.get(seat) ?? (dead ? '発言を終了しました' : '次の発言を待っています…')}</blockquote></article>;
+              const voice = voiceForSeat(seat as `seat-${1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9}`);
+              return <article className={`agent-card ${dead ? 'dead' : ''} ${speakingSeat === seat ? 'speaking' : ''}`} key={seat}><div className="agent-top"><AgentAvatar index={number} dead={dead} /><div><span className="seat-label">SEAT {String(number).padStart(2, '0')}</span><h2>Agent {number}</h2><small className="voice-name">VOICE: {voice?.speakerName}</small></div><span className={`life-badge ${dead ? 'dead' : ''}`}>{speakingSeat === seat ? '発声中' : dead ? '死亡' : '生存'}</span></div>{role && <div className={`role-badge ${role}`}>{roleLabel[role]}</div>}<blockquote>{latestSpeech.get(seat) ?? (dead ? '発言を終了しました' : '次の発言を待っています…')}</blockquote></article>;
             })}
           </div>
           {latestVote && <section className="vote-panel"><div><span className="section-kicker">VOTE RESULT</span><h2>{latestVote.payload.round === 2 ? '決選投票' : '投票結果'}</h2></div><div className="vote-bars">{Object.entries((latestVote.payload.tally ?? {}) as Record<string, number>).sort((a, b) => b[1] - a[1]).map(([seat, count]) => <div className="vote-bar" key={seat}><span>{seatName(seat)}</span><i style={{ width: `${Math.max(12, count * 24)}%` }} /><strong>{count}</strong></div>)}</div></section>}

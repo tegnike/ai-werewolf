@@ -5,8 +5,8 @@ export default defineConfig({
   timeout: 45_000,
   fullyParallel: false,
   workers: 1,
-  webServer: { command: 'DATABASE_PATH=./data/e2e.db npm run dev', port: 3000, reuseExistingServer: true, timeout: 120_000 },
-  use: { baseURL: 'http://127.0.0.1:3000', trace: 'retain-on-failure' },
+  webServer: { command: 'PORT=3101 DATABASE_PATH=./data/e2e.db npm run dev', port: 3101, reuseExistingServer: false, timeout: 120_000 },
+  use: { baseURL: 'http://127.0.0.1:3101', trace: 'retain-on-failure' },
   projects: [
     { name: 'desktop-1440', use: { ...devices['Desktop Chrome'], viewport: { width: 1440, height: 900 } } },
     { name: 'desktop-1280', use: { ...devices['Desktop Chrome'], viewport: { width: 1280, height: 720 } } },

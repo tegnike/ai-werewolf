@@ -3,6 +3,8 @@
 import Link from 'next/link';
 import { FormEvent, useEffect, useState } from 'react';
 import type { UiMatch } from './types';
+import { AudioControls } from './AudioControls';
+import { useAmbientBgm } from './useAmbientBgm';
 
 const statusLabel: Record<string, string> = {
   running: '進行中', paused: '一時停止', paused_error: 'エラー停止', finished: '終了', aborted: '中断', aborted_budget: '上限停止',
@@ -15,11 +17,14 @@ export function HomeScreen() {
   const [speed, setSpeed] = useState(1500);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [aiProvider, setAiProvider] = useState<'mock' | 'real'>('mock');
+  const { bgmEnabled, setBgmEnabled } = useAmbientBgm('night');
 
   const refresh = async () => {
     const response = await fetch('/api/matches', { cache: 'no-store' });
-    const data = await response.json() as { matches: UiMatch[] };
+    const data = await response.json() as { matches: UiMatch[]; aiProvider?: 'mock' | 'real' };
     setMatches(data.matches);
+    setAiProvider(data.aiProvider ?? 'mock');
   };
   useEffect(() => { void refresh(); }, []);
 
@@ -45,6 +50,8 @@ export function HomeScreen() {
         <div className="hero-art" aria-hidden="true"><div className="moon" /><div className="table-ring">{Array.from({ length: 9 }, (_, i) => <i key={i} style={{ '--i': i } as React.CSSProperties} />)}</div></div>
       </section>
 
+      <div className="home-audio-row"><span className={`provider-pill ${aiProvider}`}>{aiProvider === 'real' ? '● OPENAI REAL AI' : '○ MOCK AI'}</span><AudioControls compact bgmEnabled={bgmEnabled} onBgmChange={setBgmEnabled} /></div>
+
       <section className="launch-grid">
         <form className="start-card" onSubmit={start}>
           <div className="section-kicker">NEW MATCH</div><h2>新しい試合を始める</h2>
@@ -56,7 +63,7 @@ export function HomeScreen() {
           </div></fieldset>
           <button className="primary-button" disabled={loading}>{loading ? '村を準備中…' : 'AI人狼を開始'} <span>→</span></button>
           {error && <p className="form-error" role="alert">{error}</p>}
-          <p className="mock-note">通常のWeb画面は安全なMockAIで動作します。実AIはCLIの最終受け入れ試験専用です。</p>
+          <p className="mock-note">現在の思考エンジン: <strong>{aiProvider === 'real' ? 'OpenAI gpt-5.6-luna（API利用料金が発生）' : '決定論的MockAI'}</strong></p>
         </form>
 
         <section className="history-card">

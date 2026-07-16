@@ -23,7 +23,25 @@ npm run dev
 
 [http://localhost:3000](http://localhost:3000) をPCブラウザで開いてください。基準表示は1440×900px、最低幅は1280pxです。
 
-通常のWeb画面、開発、CI、テスト、シミュレーションはすべて決定論的なMockAIを使い、OpenAI APIを呼びません。
+`AI_PROVIDER=real`、`ALLOW_REAL_AI=1`、`OPENAI_API_KEY`を設定して起動すると、Web画面の試合もOpenAI APIを使います。設定がない開発・CI・テスト・反復シミュレーションは決定論的なMockAIを使い、OpenAI APIを呼びません。
+
+```bash
+export OPENAI_API_KEY='your-key'
+AI_PROVIDER=real ALLOW_REAL_AI=1 npm run dev
+```
+
+実AIでは試合ごとにAPI利用料金が発生します。本番モデルは `gpt-5.6-luna`、reasoning effortは `low` 固定です。
+
+## BGMとVOICEVOX
+
+- ホームと観戦画面には、外部音源を使わないWeb Audio製のオリジナル環境BGMがあります。
+- 観戦画面ではAgent 1〜9を、それぞれ異なるVOICEVOXキャラクターへ固定しています。
+- BGMとVOICEは画面右上で独立してON/OFFできます。設定はブラウザへ保存されます。
+- ブラウザの自動再生制限で音が始まらない場合、画面を一度クリックすると開始します。
+- VOICEVOX Engineは既定で `http://127.0.0.1:50021` を使います。変更時は `VOICEVOX_URL` を設定してください。
+- 公開視点では公開発言だけ、GM視点では表示中の新しい人狼会話も読み上げます。
+
+9人の割り当ては、四国めたん、ずんだもん、春日部つむぎ、雨晴はう、波音リツ、玄野武宏、白上虎太郎、青山龍星、冥鳴ひまりです。
 
 ## 検証
 
@@ -39,7 +57,7 @@ docker build .
 
 同じseedとMockAIからは同じイベントpayload列が生成されます。試合はSQLiteへ保存され、終了後のリプレイは保存イベントだけを再生します。
 
-## 実AIの最終受け入れ試験
+## CLIでの実AI受け入れ試験
 
 実AIには利用料金が発生します。lint、typecheck、全テスト、MockAI 30試合、Next.js build、Docker buildがすべて成功した後に限り、1試合だけ実行してください。
 
@@ -48,7 +66,7 @@ export OPENAI_API_KEY='your-key'
 ALLOW_REAL_AI=1 npm run sim -- --matches 1 --ai real --seed-base 1000
 ```
 
-`--ai real` と `ALLOW_REAL_AI=1` の両方がなければ実AIは起動しません。本番モデルは `gpt-5.6-luna`、reasoning effortは `low` 固定です。別モデルへのフォールバックやランダム代替行動はありません。物理API呼び出しはリトライを含め240回未満で停止します。
+CLIは `--ai real` と `ALLOW_REAL_AI=1` の両方がなければ実AIを起動しません。別モデルへのフォールバックやランダム代替行動はありません。物理API呼び出しはリトライを含め240回未満で停止します。
 
 ## 構成
 
