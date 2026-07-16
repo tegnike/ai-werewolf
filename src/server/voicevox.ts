@@ -2,6 +2,7 @@ import { AGENT_VOICES, voiceForSeat } from '@/domain/voices';
 import type { SeatId } from '@/domain/types';
 
 const VOICEVOX_URL = process.env.VOICEVOX_URL ?? 'http://127.0.0.1:50021';
+export const VOICEVOX_SPEED_SCALE = 1.1;
 
 export interface VoicevoxStatus {
   available: boolean;
@@ -29,7 +30,7 @@ export async function synthesizeAgentSpeech(seat: SeatId, text: string): Promise
   });
   if (!queryResponse.ok) throw new Error(`VOICEVOX_QUERY_${queryResponse.status}`);
   const query = await queryResponse.json() as Record<string, unknown>;
-  query.speedScale = 1.16;
+  query.speedScale = VOICEVOX_SPEED_SCALE;
   query.volumeScale = 0.92;
   query.prePhonemeLength = 0.08;
   query.postPhonemeLength = 0.12;
