@@ -1,0 +1,50 @@
+{
+  "name": "ai-werewolf",
+  "version": "0.1.0",
+  "private": true,
+  "description": "9体のAIが標準的な人狼を自律プレイする観戦Webアプリ",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "node .next/standalone/server.js",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:unit": "vitest run test/unit",
+    "test:integration": "vitest run test/integration",
+    "test:leak": "vitest run test/leak",
+    "test:e2e": "playwright test",
+    "sim": "tsx scripts/sim.ts",
+    "db:migrate": "tsx scripts/migrate.ts"
+  },
+  "dependencies": {
+    "@tailwindcss/postcss": "4.3.2",
+    "better-sqlite3": "12.11.1",
+    "next": "15.5.20",
+    "openai": "6.47.0",
+    "pino": "10.3.1",
+    "react": "19.2.7",
+    "react-dom": "19.2.7",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@eslint/eslintrc": "3.3.3",
+    "@playwright/test": "1.61.1",
+    "@types/better-sqlite3": "7.6.13",
+    "@types/node": "22.18.11",
+    "@types/react": "19.2.14",
+    "@types/react-dom": "19.2.3",
+    "eslint": "9.39.2",
+    "eslint-config-next": "15.5.20",
+    "postcss": "8.5.10",
+    "tailwindcss": "4.3.2",
+    "tsx": "4.21.0",
+    "typescript": "5.9.3",
+    "vitest": "4.1.10"
+  },
+  "engines": {"node": ">=22"},
+  "overrides": {
+    "next": {"postcss": "8.5.10"},
+    "esbuild": "0.28.1"
+  }
+}

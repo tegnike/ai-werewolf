@@ -1,0 +1,12 @@
+services:
+  ai-werewolf:
+    build: .
+    ports: ["3000:3000"]
+    environment:
+      DATABASE_PATH: /data/ai-werewolf.db
+      AI_PROVIDER: mock
+      ALLOW_REAL_AI: "0"
+    volumes: ["ai-werewolf-data:/data"]
+    restart: unless-stopped
+volumes:
+  ai-werewolf-data:
