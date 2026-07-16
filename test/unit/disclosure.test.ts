@@ -24,19 +24,25 @@ function mediumContext(): DecisionContext {
 }
 
 describe('能力結果の公開', () => {
-  it('初回にCOなしで結果だけを断定する発言を拒否する', () => {
-    expect(() => validateSpeechDisclosure(seerContext(), { speech: '征司さんが人狼だったよ。' })).toThrow('CO is required');
+  it('初回に役職を名乗らず結果だけを断定する発言を拒否する', () => {
+    expect(() => validateSpeechDisclosure(seerContext(), { speech: '征司さんが人狼だったよ。' })).toThrow('claim is required');
   });
 
-  it('初回COと結果が同じ発言にあれば許可する', () => {
-    expect(() => validateSpeechDisclosure(seerContext(), { speech: '占い師COです。征司さんは人狼でした。' })).not.toThrow();
+  it('初回の役職名乗りと結果が同じ発言にあれば許可する', () => {
+    expect(() => validateSpeechDisclosure(seerContext(), { speech: '私は占い師です。征司さんは人狼でした。' })).not.toThrow();
   });
 
-  it('公開履歴でCO済みなら結果だけの続報を許可する', () => {
-    expect(() => validateSpeechDisclosure(seerContext(['八木 こはる: 占い師COです。']), { speech: '今日の結果は人狼でした。' })).not.toThrow();
+  it('公開履歴で役職を名乗り済みなら結果だけの続報を許可する', () => {
+    expect(() => validateSpeechDisclosure(seerContext(['八木 こはる: 私が占い師です。']), { speech: '今日の結果は人狼でした。' })).not.toThrow();
   });
 
-  it('霊媒師もCOなしの白結果公開を拒否する', () => {
-    expect(() => validateSpeechDisclosure(mediumContext(), { speech: '征司さんは人狼ではありませんでした。' })).toThrow('CO is required');
+  it('霊媒師も役職を名乗らない白結果公開を拒否する', () => {
+    expect(() => validateSpeechDisclosure(mediumContext(), { speech: '征司さんは人狼ではありませんでした。' })).toThrow('claim is required');
+  });
+
+  it('アルファベット略語を含む発言は役職にかかわらず拒否する', () => {
+    const context = { ...seerContext(), actor: { ...seerContext().actor, role: 'villager' as const } };
+    expect(() => validateSpeechDisclosure(context, { speech: '陽太さんの占いCOが遅いです。' })).toThrow('abbreviated role claim is forbidden');
+    expect(() => validateSpeechDisclosure(context, { speech: '征司さんは霊媒ＣＯでした。' })).toThrow('abbreviated role claim is forbidden');
   });
 });

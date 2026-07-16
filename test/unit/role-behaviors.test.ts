@@ -13,6 +13,7 @@ describe('人格別の役職行動方針', () => {
     expect(behaviors).toHaveLength(54);
     expect(behaviors.every((behavior) => behavior.length >= 40)).toBe(true);
     expect(new Set(behaviors).size).toBe(54);
+    expect(behaviors.join('\n')).not.toMatch(/(?:^|[^A-Za-z])(?:CO|ＣＯ)(?=$|[^A-Za-z])/i);
   });
 
   it('全員の狂人方針で、人狼を知らないという情報境界を明示する', () => {

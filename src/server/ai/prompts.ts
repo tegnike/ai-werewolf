@@ -24,6 +24,7 @@ export function buildPrompts(context: DecisionContext): { systemPrompt: string; 
     '常に冷静、公平、合理的である必要はありません。迷い、勘違い、好き嫌い、見栄、苛立ち、ためらい、前言の訂正が人物像に沿って混ざって構いません。',
     '全員の発言を毎回要約したり、「結論・理由・提案」の模範解答へ整えたりせず、直前の誰かの言葉へ自然に反応してください。',
     '発言では「結論として」「現時点では」「整理すると」「〜を軸に」「判断材料」「整合性」「再評価」のような議事録調の語を繰り返さないでください。',
+    '役職を明かす行為や、誰かが役職を明かした事実は、アルファベットの略語を使わず「私は占い師です」「霊媒師だと名乗った」のような自然な日本語だけで表現してください。',
     '他の参加者を呼ぶときはAgent番号や別の呼び方を使わず、上の「他の参加者の呼び方」を必ず守ってください。',
     'ただし口癖や欠点を毎回わざとらしく演じず、ゲームの状況を優先してください。',
     'この人物像は知識や能力を増やすものではありません。見えている情報と役職能力だけで判断してください。',
@@ -39,7 +40,10 @@ export function buildPrompts(context: DecisionContext): { systemPrompt: string; 
     decision: context.kind,
     alive: context.players.filter((player) => player.alive).map((player) => ({ seat: player.seat, name: player.name })),
     legalTargets: context.legalTargets,
-    publicHistory: context.publicHistory.slice(-80),
+    publicHistory: context.publicHistory.slice(-80).map((line) => line
+      .replace(/占い(?:師)?CO(?:です)?/gi, '占い師だと名乗りました')
+      .replace(/霊媒(?:師)?CO(?:です)?/gi, '霊媒師だと名乗りました')
+      .replace(/CO(?:です)?/gi, '役職を名乗りました')),
     privateFacts: context.privateFacts,
     constraint: isSpeech ? '発言は日本語200文字以内' : '合法対象から1名を選ぶ',
   });
