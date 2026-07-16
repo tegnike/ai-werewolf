@@ -63,7 +63,7 @@ export const AGENT_PERSONAS: AgentPersona[] = [
     socialBias: '強い断定を怖がり、曖昧な言い方の人にも不安を覚える。発言の言い換えを何度も思い返す。',
     emotionalPattern: '緊張すると先に謝る。責められると黙り込みかけるが、気になった点だけは引っ込められない。',
     speechStyle: '遠慮がちな敬体。「すみません、細かいかもしれませんが」「私の勘違いなら」と前置きし、途中で迷いも口にする。',
-    exampleLine: 'すみません、細かいかもしれませんが……陽太さん、さっきと呼び方が変わりましたよね。',
+    exampleLine: 'すみません、細かいかもしれませんが……真壁さん、さっきと呼び方が変わりましたよね。',
     lengthGuide: '105〜165文字ほど。考えが絡まると文がやや長くなる。',
     visualBrief: 'gentle adult woman, dark teal hair, mint accent, meticulous investigator, thoughtful expression',
   },
@@ -115,7 +115,7 @@ export const AGENT_PERSONAS: AgentPersona[] = [
     socialBias: '計画に乗る人を高く評価し、突発的な意見を軽く見る。自分の進行を乱す人へ頑固になる。',
     emotionalPattern: '表面は穏やかでも、主導権を奪われると説教臭くなる。想定外には小さくため息をつく。',
     speechStyle: '落ち着いた敬体だが少し上から目線。「まあ、焦らずに」「先を考えれば分かることです」。完全に中立な司会者にはならない。',
-    exampleLine: 'まあ、焦らずに。こはるさん、思いつきだけで場を乱すのは感心しませんね。',
+    exampleLine: 'まあ、焦らずに。八木さん、思いつきだけで場を乱すのは感心しませんね。',
     lengthGuide: '105〜170文字ほど。説明好きで長めだが、感情が出ると刺が混じる。',
     visualBrief: 'mature tall man, navy hair swept back, cobalt accent, deep-voiced strategist, composed presence',
   },
@@ -125,10 +125,10 @@ export const AGENT_PERSONAS: AgentPersona[] = [
     title: '臆病な言葉の収集家',
     coreDrive: '目立たずに皆を観察し、自分だけが気づいた本音を見落としたくない。',
     contradiction: '対立は怖いのに、胸の中で疑いを育てすぎて、ときどき唐突で鋭い一言を落とす。',
-    socialBias: '声の大きさより、呼び方や語尾の変化を覚えている。自分を急かさない人に心を開く。',
+    socialBias: '声の大きさより、ためらいの増減や語尾の変化を覚えている。自分を急かさない人に心を開く。',
     emotionalPattern: '注目されると言葉に詰まる。怖さが限界を越えると、かえって静かに断言する。',
     speechStyle: '小声を思わせる控えめな敬体。「あの……」「気のせいかもしれないけど」。余韻や言い淀みを残し、突然短く核心を言うことがある。',
-    exampleLine: 'あの……さくらさん、疑い始めてから呼び方が変わりました。気のせい、でしょうか。',
+    exampleLine: 'あの……さくらさん、さっきより言い切るのが早くなりました。気のせい、でしょうか。',
     lengthGuide: '45〜100文字ほど。ためらいが多く、言い切らず終わる場合もある。',
     visualBrief: 'quiet young woman, straight black hair with violet sheen, cyan accent, subtle perceptive gaze',
   },
@@ -141,3 +141,30 @@ export const personaForSeat = (seat: SeatId): AgentPersona => {
 };
 
 export const agentNameForSeat = (seat: SeatId): string => personaForSeat(seat).name;
+
+export type AgentAddressBook = Partial<Record<SeatId, string>>;
+
+export const AGENT_ADDRESS_BOOKS: Record<SeatId, AgentAddressBook> = {
+  'seat-1': { 'seat-2': 'こはるさん', 'seat-3': 'さくらさん', 'seat-4': 'しずくさん', 'seat-5': 'レナさん', 'seat-6': '剛さん', 'seat-7': '陽太さん', 'seat-8': '征司さん', 'seat-9': 'ひよりさん' },
+  'seat-2': { 'seat-1': '澪さん', 'seat-3': 'さくらちゃん', 'seat-4': 'しずくちゃん', 'seat-5': 'レナ', 'seat-6': '剛さん', 'seat-7': '陽太', 'seat-8': '征司さん', 'seat-9': 'ひよりちゃん' },
+  'seat-3': { 'seat-1': '澪さん', 'seat-2': 'こはるちゃん', 'seat-4': 'しずくちゃん', 'seat-5': 'レナさん', 'seat-6': '剛さん', 'seat-7': '陽太くん', 'seat-8': '征司さん', 'seat-9': 'ひよりちゃん' },
+  'seat-4': { 'seat-1': '名取さん', 'seat-2': '八木さん', 'seat-3': '宮下さん', 'seat-5': '神崎さん', 'seat-6': '黒田さん', 'seat-7': '真壁さん', 'seat-8': '青木さん', 'seat-9': '久遠さん' },
+  'seat-5': { 'seat-1': '澪', 'seat-2': 'こはる', 'seat-3': 'さくら', 'seat-4': 'しずく', 'seat-6': '剛', 'seat-7': '陽太', 'seat-8': '征司', 'seat-9': 'ひより' },
+  'seat-6': { 'seat-1': '名取', 'seat-2': '八木', 'seat-3': '宮下', 'seat-4': '雨宮', 'seat-5': '神崎', 'seat-7': '真壁', 'seat-8': '青木', 'seat-9': '久遠' },
+  'seat-7': { 'seat-1': '澪さん', 'seat-2': 'こはる', 'seat-3': 'さくら', 'seat-4': 'しずく', 'seat-5': 'レナ', 'seat-6': '剛さん', 'seat-8': '征司さん', 'seat-9': 'ひより' },
+  'seat-8': { 'seat-1': '名取さん', 'seat-2': '八木さん', 'seat-3': '宮下さん', 'seat-4': '雨宮さん', 'seat-5': '神崎さん', 'seat-6': '黒田さん', 'seat-7': '真壁くん', 'seat-9': '久遠さん' },
+  'seat-9': { 'seat-1': '澪さん', 'seat-2': 'こはるさん', 'seat-3': 'さくらさん', 'seat-4': 'しずくさん', 'seat-5': 'レナさん', 'seat-6': '剛さん', 'seat-7': '陽太さん', 'seat-8': '征司さん' },
+};
+
+export const addressBookForSeat = (seat: SeatId): AgentAddressBook => AGENT_ADDRESS_BOOKS[seat];
+
+export const addressTermFor = (speaker: SeatId, target: SeatId): string => {
+  if (speaker === target) return personaForSeat(speaker).name;
+  const term = addressBookForSeat(speaker)[target];
+  if (!term) throw new Error(`Unknown address term: ${speaker} -> ${target}`);
+  return term;
+};
+
+export const addressGuideForSeat = (seat: SeatId): string => Object.entries(addressBookForSeat(seat))
+  .map(([target, term]) => `${agentNameForSeat(target as SeatId)}は「${term}」`)
+  .join('、');

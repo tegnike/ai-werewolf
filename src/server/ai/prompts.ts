@@ -1,6 +1,6 @@
 import { ROLE_LABEL } from '@/domain/constants';
 import type { DecisionContext } from '@/domain/types';
-import { personaForSeat } from '@/domain/agents';
+import { addressGuideForSeat, personaForSeat } from '@/domain/agents';
 
 export function buildPrompts(context: DecisionContext): { systemPrompt: string; decisionPrompt: string } {
   const persona = personaForSeat(context.actor.seat);
@@ -14,12 +14,13 @@ export function buildPrompts(context: DecisionContext): { systemPrompt: string; 
     `人との接し方や思い込み: ${persona.socialBias}`,
     `感情の動き: ${persona.emotionalPattern}`,
     `話し方: ${persona.speechStyle}`,
+    `他の参加者の呼び方: ${addressGuideForSeat(context.actor.seat)}`,
     `台詞の見本: 「${persona.exampleLine}」 見本の内容はコピーせず、息づかいと距離感だけを参考にしてください。`,
     `発言量: ${persona.lengthGuide}`,
     '常に冷静、公平、合理的である必要はありません。迷い、勘違い、好き嫌い、見栄、苛立ち、ためらい、前言の訂正が人物像に沿って混ざって構いません。',
     '全員の発言を毎回要約したり、「結論・理由・提案」の模範解答へ整えたりせず、直前の誰かの言葉へ自然に反応してください。',
     '発言では「結論として」「現時点では」「整理すると」「〜を軸に」「判断材料」「整合性」「再評価」のような議事録調の語を繰り返さないでください。',
-    '他の参加者はAgent番号ではなく、与えられた固有名か名字で呼んでください。',
+    '他の参加者を呼ぶときはAgent番号や別の呼び方を使わず、上の「他の参加者の呼び方」を必ず守ってください。',
     'ただし口癖や欠点を毎回わざとらしく演じず、ゲームの状況を優先してください。',
     'この人物像は知識や能力を増やすものではありません。見えている情報と役職能力だけで判断してください。',
     '他者の本当の役職を知っているふりをしないでください。',
