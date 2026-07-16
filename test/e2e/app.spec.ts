@@ -23,10 +23,12 @@ test('ホームから試合を開始して公開／GM視点とリプレイを表
   await page.getByRole('button', { name: 'GM視点' }).click();
   await expect(page.getByText(/村人|人狼|占い師|霊媒師|狩人|狂人/).first()).toBeVisible();
   await expect(page.getByText('GAME SET')).toBeVisible({ timeout: 30_000 });
+  await expect(page.locator('.timeline-event.dawn').filter({ hasText: '1日目' })).toHaveCount(0);
   await expect(page.getByRole('link', { name: 'リプレイを見る →' })).toBeVisible();
   const replayUrl = page.url().replace('/match/', '/replay/');
   await page.goto(replayUrl);
   await expect(page.getByLabel('リプレイ位置')).toBeVisible();
+  await expect(page.locator('.timeline-event.dawn').filter({ hasText: '1日目' })).toHaveCount(0);
 });
 
 test('Spaceキーで一時停止・再開し、中断できる', async ({ page }) => {

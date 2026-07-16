@@ -5,8 +5,11 @@ export interface PublicEvent {
 }
 
 export function projectEvents(events: MatchEvent[], view: ViewMode): Array<MatchEvent | PublicEvent> {
-  if (view === 'gm') return events;
-  return events.filter((event) => event.visibility === 'public').map((event) => ({
+  // 修正前に保存された試合にも第0夜明けのdawnイベントが残っているため、
+  // 新規生成の防止だけでなくAPI射影でも1日目の夜明けを除外する。
+  const presentable = events.filter((event) => !(event.day === 1 && event.type === 'dawn'));
+  if (view === 'gm') return presentable;
+  return presentable.filter((event) => event.visibility === 'public').map((event) => ({
     matchId: event.matchId, seq: event.seq, day: event.day, phase: event.phase,
     type: event.type, payload: event.payload, createdAt: event.createdAt,
   }));

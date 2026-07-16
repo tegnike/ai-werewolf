@@ -14,4 +14,17 @@ describe('公開viewの秘密情報分離', () => {
     expect(json).not.toMatch(/"role"\s*:/);
     expect(json).not.toContain('config_json');
   });
+
+  it('旧試合に残る1日目の夜明けは公開・GM両視点から除外する', () => {
+    const legacyDawn = {
+      matchId: 'legacy', seq: 6, day: 1, phase: 'dawn' as const, type: 'dawn', visibility: 'public' as const,
+      audienceSeats: [], payload: { victim: null, message: '犠牲者はいません。' }, createdAt: '2026-07-16T00:00:00.000Z',
+    };
+    const firstSpeech = {
+      ...legacyDawn, seq: 7, phase: 'discussion' as const, type: 'discussion_speech', payload: { seat: 'seat-1', speech: '話しましょう。' },
+    };
+
+    expect(projectEvents([legacyDawn, firstSpeech], 'public').map((event) => event.seq)).toEqual([7]);
+    expect(projectEvents([legacyDawn, firstSpeech], 'gm').map((event) => event.seq)).toEqual([7]);
+  });
 });
