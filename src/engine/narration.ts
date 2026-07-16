@@ -1,4 +1,5 @@
 import { MAX_SPEECH_CODE_POINTS } from '@/domain/constants';
+import { agentNameForSeat } from '@/domain/agents';
 import type { SeatId } from '@/domain/types';
 
 export function normalizeSpeech(value: string): string {
@@ -9,5 +10,5 @@ export function normalizeSpeech(value: string): string {
 
 export function seatName(seat: SeatId | null): string {
   if (!seat) return 'なし';
-  return `Agent ${Number(seat.split('-')[1])}`;
+  return agentNameForSeat(seat);
 }

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { ROLE_DECK } from '@/domain/constants';
+import { AGENT_PERSONAS } from '@/domain/agents';
 import { setupPlayers } from '@/engine/setup';
 
 describe('9人配役', () => {
@@ -9,6 +10,6 @@ describe('9人配役', () => {
     expect(first).toEqual(second);
     expect(first).toHaveLength(9);
     expect(first.map((player) => player.role).sort()).toEqual([...ROLE_DECK].sort());
-    expect(first.map((player) => player.name)).toEqual(Array.from({ length: 9 }, (_, index) => `Agent ${index + 1}`));
+    expect(first.map((player) => player.name)).toEqual(AGENT_PERSONAS.map((persona) => persona.name));
   });
 });

@@ -4,16 +4,28 @@ import { personaForSeat } from '@/domain/agents';
 
 export function buildPrompts(context: DecisionContext): { systemPrompt: string; decisionPrompt: string } {
   const persona = personaForSeat(context.actor.seat);
+  const isSpeech = context.kind.includes('speech');
   const systemPrompt = [
-    'あなたは一般的な9人人狼の匿名AIプレイヤーです。',
+    'あなたは一般的な9人人狼へ参加している一人の人間として振る舞います。AIアシスタントのように話してはいけません。',
     `あなたは${context.actor.name}、役職は${ROLE_LABEL[context.actor.role]}です。`,
     '与えられた公開情報と自分だけの非公開情報だけを使って判断してください。',
-    `あなたの会話上の個性は「${persona.title}」です。${persona.temperament}`,
+    `人物像: 「${persona.title}」。${persona.coreDrive}`,
+    `内面の矛盾と欠点: ${persona.contradiction}`,
+    `人との接し方や思い込み: ${persona.socialBias}`,
+    `感情の動き: ${persona.emotionalPattern}`,
     `話し方: ${persona.speechStyle}`,
+    `台詞の見本: 「${persona.exampleLine}」 見本の内容はコピーせず、息づかいと距離感だけを参考にしてください。`,
     `発言量: ${persona.lengthGuide}`,
-    'この個性は知識や能力を増やすものではありません。見えている情報と役職能力だけで判断してください。',
+    '常に冷静、公平、合理的である必要はありません。迷い、勘違い、好き嫌い、見栄、苛立ち、ためらい、前言の訂正が人物像に沿って混ざって構いません。',
+    '全員の発言を毎回要約したり、「結論・理由・提案」の模範解答へ整えたりせず、直前の誰かの言葉へ自然に反応してください。',
+    '発言では「結論として」「現時点では」「整理すると」「〜を軸に」「判断材料」「整合性」「再評価」のような議事録調の語を繰り返さないでください。',
+    '他の参加者はAgent番号ではなく、与えられた固有名か名字で呼んでください。',
+    'ただし口癖や欠点を毎回わざとらしく演じず、ゲームの状況を優先してください。',
+    'この人物像は知識や能力を増やすものではありません。見えている情報と役職能力だけで判断してください。',
     '他者の本当の役職を知っているふりをしないでください。',
-    '内部の思考過程は書かず、要求された結論と短い理由だけを返してください。',
+    isSpeech
+      ? '内部の思考過程や分析報告は書かず、その場で本人が実際に口にする台詞だけを返してください。'
+      : '内部の思考過程は書かず、合法対象からの決定と短い理由だけを返してください。',
   ].join('\n');
   const decisionPrompt = JSON.stringify({
     day: context.day,
@@ -23,7 +35,7 @@ export function buildPrompts(context: DecisionContext): { systemPrompt: string; 
     legalTargets: context.legalTargets,
     publicHistory: context.publicHistory.slice(-80),
     privateFacts: context.privateFacts,
-    constraint: context.kind.includes('speech') ? '発言は日本語200文字以内' : '合法対象から1名を選ぶ',
+    constraint: isSpeech ? '発言は日本語200文字以内' : '合法対象から1名を選ぶ',
   });
   return { systemPrompt, decisionPrompt };
 }

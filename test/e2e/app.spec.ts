@@ -10,9 +10,10 @@ test('ホームから試合を開始して公開／GM視点とリプレイを表
   await page.getByText('最速').click();
   await page.getByRole('button', { name: /AI人狼を開始/ }).click();
   await expect(page).toHaveURL(/\/match\//);
-  await expect(page.getByRole('heading', { name: 'Agent 1' })).toBeVisible();
-  await expect(page.getByAltText('Agent 1の立ち絵')).toBeVisible();
-  await expect(page.getByText('冷静な調停役')).toBeVisible();
+  await expect(page.getByRole('heading', { name: '名取 澪' })).toBeVisible();
+  await expect(page.getByAltText('名取 澪の立ち絵')).toBeVisible();
+  await expect(page.getByText('世話焼きの心配性')).toBeVisible();
+  await expect(page.locator('audio[data-bgm-player="true"]')).toHaveAttribute('src', '/assets/bgm_village.ogg');
   await expect(page.getByRole('button', { name: /VOICE ON/ })).toBeVisible();
   await expect(page.getByLabel('VOICE音量')).toBeVisible();
   await expect(page.getByLabel('VOICE音量')).toHaveValue('90');
@@ -32,7 +33,7 @@ test('Spaceキーで一時停止・再開し、中断できる', async ({ page }
   await page.goto('/');
   await page.getByRole('button', { name: /AI人狼を開始/ }).click();
   await expect(page).toHaveURL(/\/match\//);
-  await expect(page.getByRole('heading', { name: 'Agent 1' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: '名取 澪' })).toBeVisible();
   await page.keyboard.press('Space');
   await expect(page.getByText('PAUSED')).toBeVisible();
   await page.keyboard.press('Space');

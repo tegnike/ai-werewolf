@@ -2,6 +2,10 @@ import type { UiEvent } from './types';
 
 const isSpokenEvent = (event: UiEvent): boolean => ['discussion_speech', 'werewolf_chat'].includes(event.type);
 
+export function presentationCursorAfterLoad(currentSeq: number, maxLoadedSeq: number, initialized: boolean): number {
+  return initialized ? currentSeq : maxLoadedSeq;
+}
+
 export function presentationLimit(events: UiEvent[], currentSeq: number, voiceReady: boolean, voiceBusy: boolean): number {
   const maxSeq = Math.max(0, ...events.map((event) => event.seq));
   if (!voiceReady) return maxSeq;

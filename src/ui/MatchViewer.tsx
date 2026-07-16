@@ -8,19 +8,23 @@ import type { UiEvent, UiMatch } from './types';
 import { useAmbientBgm } from './useAmbientBgm';
 import { useMatchVoice } from './useMatchVoice';
 import { voiceForSeat } from '@/domain/voices';
-import { personaForSeat } from '@/domain/agents';
-import { presentationLimit } from './presentation';
+import { agentNameForSeat, personaForSeat } from '@/domain/agents';
+import { presentationCursorAfterLoad, presentationLimit } from './presentation';
 
 const roleLabel: Record<string, string> = { villager: '村人', werewolf: '人狼', seer: '占い師', medium: '霊媒師', bodyguard: '狩人', madman: '狂人' };
 const phaseLabel: Record<string, string> = { setup: '準備', night_zero: '第0夜', dawn: '夜明け', discussion: '議論', vote: '投票', runoff: '決選投票', execution: '処刑', medium: '霊媒', wolf_chat: '人狼会話', night_actions: '夜の行動', finished: '終了' };
 const eventLabel: Record<string, string> = { dawn: '夜明け', discussion_speech: '発言', vote_reveal: '開票', execution: '処刑', match_finished: '決着', anomaly_flag: '異常終了', werewolf_chat: '人狼会話', seer_result: '占い', medium_result: '霊媒', guard_choice: '護衛', attack_choice: '襲撃選択', night_resolved: '夜の解決', werewolf_reveal: '人狼確認', decision_note: '最終決定' };
 
 function seatNumber(seat: unknown): number { return Number(String(seat ?? '').split('-')[1]) || 0; }
-function seatName(seat: unknown): string { const value = seatNumber(seat); return value ? `Agent ${value}` : 'なし'; }
+function seatName(seat: unknown): string {
+  const value = seatNumber(seat);
+  return value ? agentNameForSeat(`seat-${value}` as `seat-${1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9}`) : 'なし';
+}
 function eventText(event: UiEvent): string {
   const p = event.payload;
   if (event.type === 'discussion_speech') return `${seatName(p.seat)}「${String(p.speech)}」`;
-  if (event.type === 'dawn' || event.type === 'execution') return String(p.message);
+  if (event.type === 'dawn') return p.victim ? `${seatName(p.victim)}が犠牲になりました。` : '犠牲者はいません。';
+  if (event.type === 'execution') return p.seat ? `${seatName(p.seat)}が処刑されました。` : '同数のため処刑はありません。';
   if (event.type === 'vote_reveal') return Object.entries((p.tally ?? {}) as Record<string, number>).map(([seat, count]) => `${seatName(seat)} ${count}票`).join(' · ');
   if (event.type === 'match_finished') return `${p.winner === 'village' ? '村人陣営' : p.winner === 'werewolf' ? '人狼陣営' : '引き分け'}で決着`;
   if (event.type === 'werewolf_chat') return `${seatName(p.seat)}「${String(p.speech)}」`;
@@ -39,7 +43,6 @@ export function MatchViewer({ matchId, mode }: { matchId: string; mode: 'live' |
   const [error, setError] = useState('');
   const [presentedSeq, setPresentedSeq] = useState(0);
   const presentationInitialized = useRef(false);
-  const loadedView = useRef<'public' | 'gm' | null>(null);
   const sourceRef = useRef<EventSource | null>(null);
   const terminal = match ? ['finished', 'aborted', 'aborted_budget'].includes(match.status) : false;
   const audioPhase = events.at(-1)?.phase ?? 'setup';
@@ -54,11 +57,9 @@ export function MatchViewer({ matchId, mode }: { matchId: string; mode: 'live' |
     if (!response.ok || !data.match || !data.events) { setError(data.error?.message ?? '試合を読み込めません。'); return; }
     const maxLoadedSeq = Math.max(0, ...data.events.map((event) => event.seq));
     setMatch(data.match); setEvents(data.events); setCursor((value) => value === Number.MAX_SAFE_INTEGER ? maxLoadedSeq : value);
-    if (!presentationInitialized.current || loadedView.current !== view) {
-      presentationInitialized.current = true;
-      loadedView.current = view;
-      setPresentedSeq(maxLoadedSeq);
-    }
+    const alreadyInitialized = presentationInitialized.current;
+    presentationInitialized.current = true;
+    setPresentedSeq((current) => presentationCursorAfterLoad(current, maxLoadedSeq, alreadyInitialized));
   }, [matchId, view]);
 
   useEffect(() => {
@@ -145,7 +146,7 @@ export function MatchViewer({ matchId, mode }: { matchId: string; mode: 'live' |
               const number = index + 1; const seat = `seat-${number}`; const dead = executionSeats.has(seat) || victimSeats.has(seat); const role = roleMap.get(seat);
               const voice = voiceForSeat(seat as `seat-${1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9}`);
               const persona = personaForSeat(seat as `seat-${1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9}`);
-              return <article className={`agent-card ${dead ? 'dead' : ''} ${speakingSeat === seat ? 'speaking' : ''}`} key={seat}><div className="agent-top"><AgentAvatar index={number} dead={dead} /><div><span className="seat-label">SEAT {String(number).padStart(2, '0')}</span><h2>Agent {number}</h2><small className="persona-name">{persona.title}</small><small className="voice-name">VOICE: {voice?.speakerName}</small></div><span className={`life-badge ${dead ? 'dead' : ''}`}>{speakingSeat === seat ? '発声中' : dead ? '死亡' : '生存'}</span></div>{role && <div className={`role-badge ${role}`}>{roleLabel[role]}</div>}<blockquote>{latestSpeech.get(seat) ?? (dead ? '発言を終了しました' : '次の発言を待っています…')}</blockquote></article>;
+              return <article className={`agent-card ${dead ? 'dead' : ''} ${speakingSeat === seat ? 'speaking' : ''}`} key={seat}><div className="agent-top"><AgentAvatar index={number} name={persona.name} dead={dead} /><div><span className="seat-label">SEAT {String(number).padStart(2, '0')}</span><h2>{persona.name}</h2><small className="persona-name">{persona.title}</small><small className="voice-name">VOICE: {voice?.speakerName}</small></div><span className={`life-badge ${dead ? 'dead' : ''}`}>{speakingSeat === seat ? '発声中' : dead ? '死亡' : '生存'}</span></div>{role && <div className={`role-badge ${role}`}>{roleLabel[role]}</div>}<blockquote>{latestSpeech.get(seat) ?? (dead ? '発言を終了しました' : '次の発言を待っています…')}</blockquote></article>;
             })}
           </div>
           {latestVote && <section className="vote-panel"><div><span className="section-kicker">VOTE RESULT</span><h2>{latestVote.payload.round === 2 ? '決選投票' : '投票結果'}</h2></div><div className="vote-bars">{Object.entries((latestVote.payload.tally ?? {}) as Record<string, number>).sort((a, b) => b[1] - a[1]).map(([seat, count]) => <div className="vote-bar" key={seat}><span>{seatName(seat)}</span><i style={{ width: `${Math.max(12, count * 24)}%` }} /><strong>{count}</strong></div>)}</div></section>}

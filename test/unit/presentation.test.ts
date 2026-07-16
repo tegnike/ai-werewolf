@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { UiEvent } from '@/ui/types';
-import { presentationLimit } from '@/ui/presentation';
+import { presentationCursorAfterLoad, presentationLimit } from '@/ui/presentation';
 
 const event = (seq: number, type: string): UiEvent => ({ matchId: 'test', seq, type, day: 1, phase: 'discussion', visibility: 'public', payload: {}, createdAt: '2026-07-16T00:00:00.000Z' });
 
@@ -14,5 +14,10 @@ describe('音声とログの同期', () => {
 
   it('読み上げ無効時は最新まで表示する', () => {
     expect(presentationLimit(events, 9, false, false)).toBe(13);
+  });
+
+  it('視点を切り替えて再読込しても表示位置を進めない', () => {
+    expect(presentationCursorAfterLoad(11, 13, true)).toBe(11);
+    expect(presentationCursorAfterLoad(0, 13, false)).toBe(13);
   });
 });
