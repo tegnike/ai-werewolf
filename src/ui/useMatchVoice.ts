@@ -5,7 +5,7 @@ import type { UiEvent } from './types';
 
 interface SpeechItem { seq: number; seat: string; speech: string }
 
-export function useMatchVoice(events: UiEvent[], duckBgm: (active: boolean) => void, onSpeechStart: (seq: number) => void) {
+export function useMatchVoice(events: UiEvent[], onSpeechStart: (seq: number) => void) {
   const [enabled, setEnabledState] = useState(true);
   const enabledRef = useRef(true);
   const [speakingSeat, setSpeakingSeat] = useState<string | null>(null);
@@ -13,6 +13,7 @@ export function useMatchVoice(events: UiEvent[], duckBgm: (active: boolean) => v
   const [volume, setVolumeState] = useState(0.9);
   const volumeRef = useRef(0.9);
   const [busy, setBusy] = useState(false);
+  const [speakingSeq, setSpeakingSeq] = useState<number | null>(null);
   const lastObservedSeq = useRef<number | null>(null);
   const queue = useRef<SpeechItem[]>([]);
   const pumping = useRef(false);
@@ -37,8 +38,8 @@ export function useMatchVoice(events: UiEvent[], duckBgm: (active: boolean) => v
     pumping.current = false;
     setBusy(false);
     setSpeakingSeat(null);
-    duckBgm(false);
-  }, [duckBgm]);
+    setSpeakingSeq(null);
+  }, []);
 
   const pump = useCallback(async () => {
     if (pumping.current || !enabledRef.current || available === false) return;
@@ -60,7 +61,7 @@ export function useMatchVoice(events: UiEvent[], duckBgm: (active: boolean) => v
           audio.onerror = () => resolve();
           void audio.play().then(() => {
             setSpeakingSeat(item.seat);
-            duckBgm(true);
+            setSpeakingSeq(item.seq);
             onSpeechStart(item.seq);
           }).catch(() => {
             onSpeechStart(item.seq);
@@ -68,7 +69,7 @@ export function useMatchVoice(events: UiEvent[], duckBgm: (active: boolean) => v
           });
         });
         setSpeakingSeat(null);
-        duckBgm(false);
+        setSpeakingSeq(null);
         URL.revokeObjectURL(url);
         currentAudio.current = null;
       } catch { setAvailable(false); break; }
@@ -76,8 +77,8 @@ export function useMatchVoice(events: UiEvent[], duckBgm: (active: boolean) => v
     pumping.current = false;
     setBusy(false);
     setSpeakingSeat(null);
-    duckBgm(false);
-  }, [available, duckBgm, onSpeechStart]);
+    setSpeakingSeq(null);
+  }, [available, onSpeechStart]);
 
   useEffect(() => {
     const maxSeq = Math.max(0, ...events.map((event) => event.seq));
@@ -103,5 +104,5 @@ export function useMatchVoice(events: UiEvent[], duckBgm: (active: boolean) => v
     setVolumeState(value);
     if (currentAudio.current) currentAudio.current.volume = value;
   }, []);
-  return { voiceEnabled: enabled, setVoiceEnabled: setEnabled, voiceAvailable: available, speakingSeat, voiceVolume: volume, setVoiceVolume: setVolume, voiceBusy: busy };
+  return { voiceEnabled: enabled, setVoiceEnabled: setEnabled, voiceAvailable: available, speakingSeat, speakingSeq, voiceVolume: volume, setVoiceVolume: setVolume, voiceBusy: busy };
 }

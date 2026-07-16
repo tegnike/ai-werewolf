@@ -7,11 +7,6 @@ const BGM_SOURCE = '/assets/bgm_village.ogg';
 class AmbientBgm {
   private audio: HTMLAudioElement | null = null;
   private volume = 0.7;
-  private ducked = false;
-
-  private targetVolume(): number {
-    return this.volume * (this.ducked ? 0.28 : 1);
-  }
 
   private ensureAudio(): HTMLAudioElement {
     if (this.audio) return this.audio;
@@ -22,7 +17,7 @@ class AmbientBgm {
     audio.hidden = true;
     audio.dataset.bgmPlayer = 'true';
     audio.dataset.state = 'ready';
-    audio.volume = this.targetVolume();
+    audio.volume = this.volume;
     audio.addEventListener('playing', () => { audio.dataset.state = 'playing'; });
     audio.addEventListener('pause', () => { audio.dataset.state = 'paused'; });
     audio.addEventListener('error', () => { audio.dataset.state = 'error'; });
@@ -34,7 +29,7 @@ class AmbientBgm {
   async start(mood: 'day' | 'night'): Promise<void> {
     const audio = this.ensureAudio();
     audio.dataset.mood = mood;
-    audio.volume = this.targetVolume();
+    audio.volume = this.volume;
     if (!audio.paused) return;
     audio.dataset.state = 'starting';
     try {
@@ -51,14 +46,9 @@ class AmbientBgm {
     this.audio.currentTime = 0;
   }
 
-  duck(active: boolean): void {
-    this.ducked = active;
-    if (this.audio) this.audio.volume = this.targetVolume();
-  }
-
   setVolume(value: number): void {
     this.volume = Math.max(0, Math.min(1, value));
-    if (this.audio) this.audio.volume = this.targetVolume();
+    if (this.audio) this.audio.volume = this.volume;
   }
 }
 
@@ -111,11 +101,10 @@ export function useAmbientBgm(mood: 'day' | 'night') {
     if (value) void sharedBgm.start(mood);
     else sharedBgm.stop();
   }, [mood]);
-  const duck = useCallback((active: boolean) => sharedBgm.duck(active), []);
   const setVolume = useCallback((value: number) => {
     window.localStorage.setItem('werewolf-bgm-volume', String(value));
     setVolumeState(value);
     sharedBgm.setVolume(value);
   }, []);
-  return { bgmEnabled: enabled, setBgmEnabled: setEnabled, bgmVolume: volume, setBgmVolume: setVolume, duckBgm: duck };
+  return { bgmEnabled: enabled, setBgmEnabled: setEnabled, bgmVolume: volume, setBgmVolume: setVolume };
 }

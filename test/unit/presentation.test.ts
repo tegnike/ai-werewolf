@@ -8,12 +8,23 @@ describe('音声とログの同期', () => {
   const events = [event(10, 'dawn'), event(11, 'discussion_speech'), event(12, 'decision_note'), event(13, 'discussion_speech')];
 
   it('次の発話イベント直前で表示を止める', () => {
-    expect(presentationLimit(events, 9, true, false)).toBe(10);
-    expect(presentationLimit(events, 11, true, true)).toBe(12);
+    expect(presentationLimit(events, 9, true, false, null)).toBe(10);
+    expect(presentationLimit(events, 11, true, true, null)).toBe(12);
+  });
+
+  it('発話中は後続の投票ログや次の発話が到着しても表示を進めない', () => {
+    const withVoteAndWolfSpeech = [
+      event(11, 'discussion_speech'),
+      { ...event(12, 'vote_reveal'), phase: 'vote' },
+      { ...event(13, 'execution'), phase: 'execution' },
+      { ...event(14, 'werewolf_chat'), phase: 'wolf_chat' },
+    ];
+    expect(presentationLimit(withVoteAndWolfSpeech, 11, true, true, 11)).toBe(11);
+    expect(presentationLimit(withVoteAndWolfSpeech, 11, true, true, null)).toBe(13);
   });
 
   it('読み上げ無効時は最新まで表示する', () => {
-    expect(presentationLimit(events, 9, false, false)).toBe(13);
+    expect(presentationLimit(events, 9, false, false, null)).toBe(13);
   });
 
   it('視点を切り替えて再読込しても表示位置を進めない', () => {

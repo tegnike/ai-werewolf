@@ -77,9 +77,9 @@ export function MatchViewer({ matchId, mode }: { matchId: string; mode: 'live' |
   const presentedStatus = mode === 'replay' && match?.status === 'finished' && !visibleEvents.some((event) => event.type === 'match_finished') ? 'running' : match?.status;
   const presentedState = useMemo(() => derivePresentedState(visibleEvents, presentedStatus), [presentedStatus, visibleEvents]);
   const audioMood = ['night_zero', 'wolf_chat', 'night_actions', 'medium'].includes(presentedState.phase) ? 'night' : 'day';
-  const { bgmEnabled, setBgmEnabled, bgmVolume, setBgmVolume, duckBgm } = useAmbientBgm(audioMood);
+  const { bgmEnabled, setBgmEnabled, bgmVolume, setBgmVolume } = useAmbientBgm(audioMood);
   const revealSpeech = useCallback((seq: number) => setPresentedSeq((current) => Math.max(current, seq)), []);
-  const { voiceEnabled, setVoiceEnabled, voiceAvailable, speakingSeat, voiceVolume, setVoiceVolume, voiceBusy } = useMatchVoice(voiceEvents, duckBgm, revealSpeech);
+  const { voiceEnabled, setVoiceEnabled, voiceAvailable, speakingSeat, speakingSeq, voiceVolume, setVoiceVolume, voiceBusy } = useMatchVoice(voiceEvents, revealSpeech);
 
   const load = useCallback(async () => {
     const response = await fetch(`/api/match/${matchId}?view=${view}`, { cache: 'no-store' });
@@ -94,9 +94,9 @@ export function MatchViewer({ matchId, mode }: { matchId: string; mode: 'live' |
 
   useEffect(() => {
     if (mode !== 'live') return;
-    const limit = presentationLimit(voiceEvents, presentedSeq, voiceEnabled && voiceAvailable !== false, voiceBusy);
+    const limit = presentationLimit(voiceEvents, presentedSeq, voiceEnabled && voiceAvailable !== false, voiceBusy, speakingSeq);
     if (limit !== presentedSeq) setPresentedSeq(limit);
-  }, [mode, presentedSeq, voiceAvailable, voiceBusy, voiceEnabled, voiceEvents]);
+  }, [mode, presentedSeq, speakingSeq, voiceAvailable, voiceBusy, voiceEnabled, voiceEvents]);
 
   useEffect(() => { void load(); }, [load]);
   useEffect(() => {
