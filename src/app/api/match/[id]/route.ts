@@ -14,5 +14,6 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   const repo = getRunnerManager().repo;
   const match = repo.getMatch(id);
   if (!match) return NextResponse.json({ error: { code: 'NOT_FOUND', message: '試合が見つかりません。' } }, { status: 404 });
-  return NextResponse.json({ match: projectMatch(match, view), events: projectEvents(repo.events(id, fromSeq), view) });
+  const revealSecrets = ['finished', 'aborted', 'aborted_budget'].includes(match.status);
+  return NextResponse.json({ match: projectMatch(match, view), events: projectEvents(repo.events(id, fromSeq), view, revealSecrets) });
 }

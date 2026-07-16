@@ -4,14 +4,40 @@ export interface PublicEvent {
   matchId: string; seq: number; day: number; phase: string; type: string; payload: Record<string, unknown>; createdAt: string;
 }
 
-export function projectEvents(events: MatchEvent[], view: ViewMode): Array<MatchEvent | PublicEvent> {
+function publicPayload(event: MatchEvent): Record<string, unknown> {
+  const payload = event.payload;
+  const fields: Record<string, string[]> = {
+    dawn: ['victim', 'message'],
+    discussion_speech: ['seat', 'name', 'round', 'speech'],
+    execution: ['seat', 'message'],
+    anomaly_flag: ['winner', 'roles', 'anomaly'],
+    match_finished: ['winner', 'roles', 'anomaly'],
+  };
+
+  if (event.type === 'vote_reveal') {
+    const votes = Array.isArray(payload.votes)
+      ? payload.votes.flatMap((vote) => {
+        if (!vote || typeof vote !== 'object') return [];
+        const item = vote as Record<string, unknown>;
+        return typeof item.voter === 'string' && typeof item.target === 'string'
+          ? [{ voter: item.voter, target: item.target }]
+          : [];
+      })
+      : [];
+    return { round: payload.round, votes, tally: payload.tally };
+  }
+
+  return Object.fromEntries((fields[event.type] ?? []).flatMap((key) => key in payload ? [[key, payload[key]]] : []));
+}
+
+export function projectEvents(events: MatchEvent[], view: ViewMode, revealSecrets = false): Array<MatchEvent | PublicEvent> {
   // 修正前に保存された試合にも第0夜明けのdawnイベントが残っているため、
   // 新規生成の防止だけでなくAPI射影でも1日目の夜明けを除外する。
   const presentable = events.filter((event) => !(event.day === 1 && event.type === 'dawn'));
-  if (view === 'gm') return presentable;
+  if (view === 'gm' || revealSecrets) return presentable;
   return presentable.filter((event) => event.visibility === 'public').map((event) => ({
     matchId: event.matchId, seq: event.seq, day: event.day, phase: event.phase,
-    type: event.type, payload: event.payload, createdAt: event.createdAt,
+    type: event.type, payload: publicPayload(event), createdAt: event.createdAt,
   }));
 }
 

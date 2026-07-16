@@ -12,7 +12,19 @@ describe('公開viewの秘密情報分離', () => {
     const json = JSON.stringify(projected);
     expect(json).not.toContain('audienceSeats');
     expect(json).not.toMatch(/"role"\s*:/);
+    expect(json).not.toContain('statedReason');
     expect(json).not.toContain('config_json');
+  });
+
+  it('終了後の公開viewでは役職と非公開行動を答え合わせできる', async () => {
+    const { events } = await runMock('reveal');
+    const projected = projectEvents(events, 'public', true);
+    expect(projected.some((event) => event.type === 'match_created')).toBe(true);
+    expect(projected.some((event) => event.type === 'werewolf_chat')).toBe(true);
+    expect(projected.some((event) => event.type === 'seer_result')).toBe(true);
+    expect(projected.some((event) => event.type === 'night_resolved')).toBe(true);
+    expect(JSON.stringify(projected)).toMatch(/"role"\s*:/);
+    expect(JSON.stringify(projected)).toContain('statedReason');
   });
 
   it('旧試合に残る1日目の夜明けは公開・GM両視点から除外する', () => {

@@ -11,6 +11,15 @@ test('ホームから試合を開始して公開／GM視点とリプレイを表
   await page.getByRole('button', { name: /AI人狼を開始/ }).click();
   await expect(page).toHaveURL(/\/match\//);
   await expect(page.getByRole('heading', { name: '名取 澪' })).toBeVisible();
+  await page.getByRole('button', { name: '？ ルール' }).click();
+  await expect(page.getByRole('dialog', { name: '観戦ガイド' })).toBeVisible();
+  await expect(page.getByRole('button', { name: '観戦ガイドを閉じる' })).toBeFocused();
+  await expect(page.getByRole('heading', { name: '9人の配役' })).toBeVisible();
+  await expect(page.getByText('狂人 ×1')).toBeVisible();
+  await expect(page.getByText('公開視点', { exact: true }).last()).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('dialog', { name: '観戦ガイド' })).toBeHidden();
+  await expect(page.getByText(/生存 \d\/9/)).toBeVisible();
   await expect(page.getByAltText('名取 澪の立ち絵')).toBeVisible();
   await expect(page.getByText('世話焼きの心配性')).toBeVisible();
   await expect(page.locator('audio[data-bgm-player="true"]')).toHaveAttribute('src', '/assets/bgm_village.ogg');
@@ -23,11 +32,24 @@ test('ホームから試合を開始して公開／GM視点とリプレイを表
   await page.getByRole('button', { name: 'GM視点' }).click();
   await expect(page.getByText(/村人|人狼|占い師|霊媒師|狩人|狂人/).first()).toBeVisible();
   await expect(page.getByText('GAME SET')).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByRole('heading', { name: '全員の正体と結末' })).toBeVisible();
+  await expect(page.getByRole('region', { name: '村人陣営の配役' })).toBeVisible();
+  await expect(page.getByRole('region', { name: '人狼陣営の配役' })).toBeVisible();
+  await expect(page.locator('.epilogue-team li')).toHaveCount(9);
+  await expect(page.locator('.epilogue-team li').filter({ hasText: '狂人（判定は人間）' })).toHaveCount(1);
+  await expect(page.locator('.epilogue-fate')).toHaveCount(9);
   await expect(page.locator('.timeline-event.dawn').filter({ hasText: '1日目' })).toHaveCount(0);
+  await expect(page.locator('.voter-chips span').first()).toBeVisible();
+  await expect(page.locator('.timeline-day').first()).toBeVisible();
+  await page.getByRole('button', { name: '公開視点' }).click();
+  await expect(page.getByText('REVEALED SECRET').first()).toBeVisible();
+  await expect(page.locator('.card-vote').first()).toBeVisible();
   await expect(page.getByRole('link', { name: 'リプレイを見る →' })).toBeVisible();
   const replayUrl = page.url().replace('/match/', '/replay/');
   await page.goto(replayUrl);
   await expect(page.getByLabel('リプレイ位置')).toBeVisible();
+  await page.getByLabel('リプレイ位置').fill('0');
+  await expect(page.getByRole('heading', { name: '全員の正体と結末' })).toHaveCount(0);
   await expect(page.locator('.timeline-event.dawn').filter({ hasText: '1日目' })).toHaveCount(0);
 });
 
@@ -36,6 +58,7 @@ test('Spaceキーで一時停止・再開し、中断できる', async ({ page }
   await page.getByRole('button', { name: /AI人狼を開始/ }).click();
   await expect(page).toHaveURL(/\/match\//);
   await expect(page.getByRole('heading', { name: '名取 澪' })).toBeVisible();
+  await expect(page.locator('.viewer-shell')).toHaveClass(/night/);
   await page.keyboard.press('Space');
   await expect(page.getByText('PAUSED')).toBeVisible();
   await page.keyboard.press('Space');

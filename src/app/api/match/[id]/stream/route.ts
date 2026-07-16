@@ -13,12 +13,14 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   const headerSeq = Number(request.headers.get('Last-Event-ID') ?? 0);
   const fromSeq = Math.max(headerSeq, Number(url.searchParams.get('fromSeq') ?? 0));
   const repo = getRunnerManager().repo;
-  if (!repo.getMatch(id)) return new Response(JSON.stringify({ error: { code: 'NOT_FOUND', message: '試合が見つかりません。' } }), { status: 404 });
+  const match = repo.getMatch(id);
+  if (!match) return new Response(JSON.stringify({ error: { code: 'NOT_FOUND', message: '試合が見つかりません。' } }), { status: 404 });
+  const revealSecrets = ['finished', 'aborted', 'aborted_budget'].includes(match.status);
   const encoder = new TextEncoder();
   let unsubscribe = () => {};
   let ping: ReturnType<typeof setInterval>;
   const encodeEvent = (event: MatchEvent) => {
-    const projected = projectEvents([event], view)[0];
+    const projected = projectEvents([event], view, revealSecrets)[0];
     return projected ? encoder.encode(`id: ${event.seq}\nevent: match\ndata: ${JSON.stringify(projected)}\n\n`) : null;
   };
   const stream = new ReadableStream<Uint8Array>({
