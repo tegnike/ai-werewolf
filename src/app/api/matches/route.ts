@@ -22,8 +22,9 @@ export async function POST(request: Request) {
     return NextResponse.json({ id: match.id, seed: match.seed, ai }, { status: 201 });
   } catch (error) {
     const code = error instanceof Error ? error.message : 'CREATE_FAILED';
-    const status = code === 'MATCH_LIMIT_REACHED' ? 409 : code === 'REAL_AI_NOT_ALLOWED' ? 503 : 500;
-    const message = code === 'MATCH_LIMIT_REACHED' ? '同時進行できる試合は2件までです。' : code === 'REAL_AI_NOT_ALLOWED' ? '実AIの起動条件が不足しています。' : '試合を開始できませんでした。';
+    const realAiUnavailable = code === 'REAL_AI_NOT_ALLOWED' || code === 'REAL_AI_NOT_CONFIGURED';
+    const status = code === 'MATCH_LIMIT_REACHED' ? 409 : realAiUnavailable ? 503 : 500;
+    const message = code === 'MATCH_LIMIT_REACHED' ? '同時進行できる試合は2件までです。' : realAiUnavailable ? '実AIの起動条件が不足しています。サーバー設定を確認してください。' : '試合を開始できませんでした。';
     return NextResponse.json({ error: { code, message } }, { status });
   }
 }

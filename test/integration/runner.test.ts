@@ -11,7 +11,13 @@ import type { MatchEvent, MatchRecord } from '@/domain/types';
 
 let directory = '';
 beforeEach(() => { directory = fs.mkdtempSync(path.join(os.tmpdir(), 'werewolf-test-')); process.env.DATABASE_PATH = path.join(directory, 'test.db'); });
-afterEach(() => { closeDatabaseForTests(); fs.rmSync(directory, { recursive: true, force: true }); delete process.env.DATABASE_PATH; });
+afterEach(() => {
+  closeDatabaseForTests();
+  fs.rmSync(directory, { recursive: true, force: true });
+  delete process.env.DATABASE_PATH;
+  delete process.env.ALLOW_REAL_AI;
+  delete process.env.OPENAI_API_KEY;
+});
 
 async function waitFor(repo: MatchRepo, id: string, status: string) {
   for (let index = 0; index < 300; index += 1) {
@@ -79,5 +85,23 @@ describe('MatchRunner', () => {
     expect(repo.events(record.id)).toHaveLength(0);
     manager.control(record.id, 'resume');
     await waitFor(repo, record.id, 'finished');
+  });
+
+  it('APIキーがない実AI試合はDBへrunning状態を残さず作成を拒否する', () => {
+    process.env.ALLOW_REAL_AI = '1';
+    delete process.env.OPENAI_API_KEY;
+    const manager = new MatchRunnerManager();
+    expect(() => manager.create({ seed: 'missing-key', speed: 0, ai: 'real' })).toThrow('REAL_AI_NOT_CONFIGURED');
+    expect(manager.repo.listMatches()).toHaveLength(0);
+  });
+
+  it('停止済みpaused_error試合はretryで新しいRunnerから復旧する', async () => {
+    const repo = new MatchRepo();
+    const now = new Date().toISOString();
+    repo.createMatch({ id: 'retry-match', seed: 'retry', status: 'paused_error', winner: null, speed: 0, apiCalls: 0, error: { code: 'runner_error', message: 'stopped' }, config: { ai: 'mock' }, createdAt: now, updatedAt: now, finishedAt: null });
+    const manager = new MatchRunnerManager(repo);
+    manager.control('retry-match', 'retry');
+    await waitFor(repo, 'retry-match', 'finished');
+    expect(repo.events('retry-match').length).toBeGreaterThan(20);
   });
 });
