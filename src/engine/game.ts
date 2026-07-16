@@ -46,12 +46,13 @@ function topCandidates(tally: Record<string, number>): SeatId[] {
 function privateFactsFor(
   actor: Player,
   state: GameState,
-  histories: { seer: string[]; medium: string[]; guard: string[]; wolf: string[] },
+  histories: { seer: string[]; medium: string[]; guard: string[]; wolf: string[]; wolfAttack: string[] },
 ): string[] {
   const facts = [`自分の役職: ${actor.role}`];
   if (actor.role === 'werewolf') {
     facts.push(`仲間: ${state.players.filter((player) => player.role === 'werewolf' && player.seat !== actor.seat).map((player) => player.name).join(', ')}`);
     facts.push(...histories.wolf.slice(-20));
+    facts.push(...histories.wolfAttack);
   }
   if (actor.role === 'seer') facts.push(...histories.seer);
   if (actor.role === 'medium') facts.push(...histories.medium);
@@ -69,7 +70,9 @@ export async function runGame(
   const players = setupPlayers(seed);
   let state = createInitialState(players);
   const publicHistory: string[] = [];
-  const histories = { seer: [] as string[], medium: [] as string[], guard: [] as string[], wolf: [] as string[] };
+  const histories = {
+    seer: [] as string[], medium: [] as string[], guard: [] as string[], wolf: [] as string[], wolfAttack: [] as string[],
+  };
   let pendingVictim: SeatId | null = null;
 
   const emit = async (
@@ -248,13 +251,17 @@ export async function runGame(
       const decision = await ai.target(context(guard, day, 'night_actions', 'guard', `d${day}-guard`, legalGuardTargets(state)));
       guardTarget = decision.targetSeat;
       state = { ...state, lastGuard: guardTarget };
-      histories.guard.push(`${day}日目: ${seatName(guardTarget)}を護衛`);
       await emit(day, 'night_actions', 'guard_choice', { seat: guard.seat, targetSeat: guardTarget, statedReason: decision.statedReason }, 'private', [guard.seat]);
     }
 
-    pendingVictim = guardTarget === attackTarget ? null : attackTarget;
+    const guarded = guardTarget === attackTarget;
+    pendingVictim = guarded ? null : attackTarget;
+    histories.wolfAttack.push(`${day}日目の最終襲撃: ${seatName(attackTarget)} → ${guarded ? '護衛され襲撃失敗' : '襲撃成功'}`);
+    if (guardTarget) {
+      histories.guard.push(`${day}日目: ${seatName(guardTarget)}を護衛 → ${guarded ? '護衛成功' : '護衛対象への襲撃なし'}`);
+    }
     await emit(day, 'night_actions', 'night_resolved', {
-      attackTarget, guardTarget, seerTarget, victim: pendingVictim, guarded: guardTarget === attackTarget,
+      attackTarget, guardTarget, seerTarget, victim: pendingVictim, guarded,
     }, 'private');
   }
 
