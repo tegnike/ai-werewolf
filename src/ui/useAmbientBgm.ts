@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 
 type AudioContextConstructor = typeof AudioContext;
 
@@ -8,6 +8,12 @@ class AmbientBgm {
   private context: AudioContext | null = null;
   private master: GainNode | null = null;
   private timer: ReturnType<typeof setInterval> | null = null;
+  private volume = 0.7;
+  private ducked = false;
+
+  private targetGain(): number {
+    return 0.24 * this.volume * (this.ducked ? 0.32 : 1);
+  }
 
   async start(mood: 'day' | 'night'): Promise<void> {
     if (this.context) {
@@ -19,7 +25,7 @@ class AmbientBgm {
     const context = new AudioContextClass();
     const master = context.createGain();
     master.gain.setValueAtTime(0.0001, context.currentTime);
-    master.gain.exponentialRampToValueAtTime(0.035, context.currentTime + 2.5);
+    master.gain.exponentialRampToValueAtTime(Math.max(0.0001, this.targetGain()), context.currentTime + 1.4);
     master.connect(context.destination);
     const filter = context.createBiquadFilter();
     filter.type = 'lowpass';
@@ -68,11 +74,23 @@ class AmbientBgm {
   }
 
   duck(active: boolean): void {
+    this.ducked = active;
     if (!this.context || !this.master) return;
     this.master.gain.cancelScheduledValues(this.context.currentTime);
-    this.master.gain.linearRampToValueAtTime(active ? 0.012 : 0.035, this.context.currentTime + 0.25);
+    this.master.gain.linearRampToValueAtTime(this.targetGain(), this.context.currentTime + 0.25);
+  }
+
+  setVolume(value: number): void {
+    this.volume = Math.max(0, Math.min(1, value));
+    if (!this.context || !this.master) return;
+    this.master.gain.cancelScheduledValues(this.context.currentTime);
+    this.master.gain.linearRampToValueAtTime(Math.max(0.0001, this.targetGain()), this.context.currentTime + 0.12);
   }
 }
+
+// Client-side navigation across the home and match screens must not discard the
+// AudioContext unlocked by the user's first click.
+const sharedBgm = new AmbientBgm();
 
 function storedBoolean(key: string, fallback: boolean): boolean {
   if (typeof window === 'undefined') return fallback;
@@ -80,14 +98,25 @@ function storedBoolean(key: string, fallback: boolean): boolean {
   return value === null ? fallback : value === '1';
 }
 
-export function useAmbientBgm(mood: 'day' | 'night') {
-  const bgmRef = useRef<AmbientBgm | null>(null);
-  const [enabled, setEnabledState] = useState(false);
+function storedVolume(key: string, fallback: number): number {
+  if (typeof window === 'undefined') return fallback;
+  const stored = window.localStorage.getItem(key);
+  if (stored === null) return fallback;
+  const value = Number(stored);
+  return Number.isFinite(value) && value >= 0 && value <= 1 ? value : fallback;
+}
 
-  useEffect(() => { setEnabledState(storedBoolean('werewolf-bgm', true)); }, []);
+export function useAmbientBgm(mood: 'day' | 'night') {
+  const [enabled, setEnabledState] = useState(true);
+  const [volume, setVolumeState] = useState(0.7);
+
   useEffect(() => {
-    bgmRef.current ??= new AmbientBgm();
-    const bgm = bgmRef.current;
+    setEnabledState(storedBoolean('werewolf-bgm', true));
+    setVolumeState(storedVolume('werewolf-bgm-volume', 0.7));
+  }, []);
+  useEffect(() => {
+    const bgm = sharedBgm;
+    bgm.setVolume(volume);
     if (enabled) {
       void bgm.start(mood);
       const unlock = () => void bgm.start(mood);
@@ -96,13 +125,17 @@ export function useAmbientBgm(mood: 'day' | 'night') {
       return () => { window.removeEventListener('pointerdown', unlock); window.removeEventListener('keydown', unlock); };
     }
     bgm.stop();
-  }, [enabled, mood]);
-  useEffect(() => () => bgmRef.current?.stop(), []);
+  }, [enabled, mood, volume]);
 
   const setEnabled = useCallback((value: boolean) => {
     window.localStorage.setItem('werewolf-bgm', value ? '1' : '0');
     setEnabledState(value);
   }, []);
-  const duck = useCallback((active: boolean) => bgmRef.current?.duck(active), []);
-  return { bgmEnabled: enabled, setBgmEnabled: setEnabled, duckBgm: duck };
+  const duck = useCallback((active: boolean) => sharedBgm.duck(active), []);
+  const setVolume = useCallback((value: number) => {
+    window.localStorage.setItem('werewolf-bgm-volume', String(value));
+    setVolumeState(value);
+    sharedBgm.setVolume(value);
+  }, []);
+  return { bgmEnabled: enabled, setBgmEnabled: setEnabled, bgmVolume: volume, setBgmVolume: setVolume, duckBgm: duck };
 }

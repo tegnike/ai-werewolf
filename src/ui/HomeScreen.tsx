@@ -18,7 +18,7 @@ export function HomeScreen() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [aiProvider, setAiProvider] = useState<'mock' | 'real'>('mock');
-  const { bgmEnabled, setBgmEnabled } = useAmbientBgm('night');
+  const { bgmEnabled, setBgmEnabled, bgmVolume, setBgmVolume } = useAmbientBgm('night');
 
   const refresh = async () => {
     const response = await fetch('/api/matches', { cache: 'no-store' });
@@ -50,7 +50,7 @@ export function HomeScreen() {
         <div className="hero-art" aria-hidden="true"><div className="moon" /><div className="table-ring">{Array.from({ length: 9 }, (_, i) => <i key={i} style={{ '--i': i } as React.CSSProperties} />)}</div></div>
       </section>
 
-      <div className="home-audio-row"><span className={`provider-pill ${aiProvider}`}>{aiProvider === 'real' ? '● OPENAI REAL AI' : '○ MOCK AI'}</span><AudioControls compact bgmEnabled={bgmEnabled} onBgmChange={setBgmEnabled} /></div>
+      <div className="home-audio-row"><span className={`provider-pill ${aiProvider}`}>{aiProvider === 'real' ? '● OPENAI REAL AI' : '○ MOCK AI'}</span><AudioControls compact bgmEnabled={bgmEnabled} bgmVolume={bgmVolume} onBgmChange={setBgmEnabled} onBgmVolumeChange={setBgmVolume} /></div>
 
       <section className="launch-grid">
         <form className="start-card" onSubmit={start}>

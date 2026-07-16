@@ -5,10 +5,14 @@ import type { UiEvent } from './types';
 
 interface SpeechItem { seq: number; seat: string; speech: string }
 
-export function useMatchVoice(events: UiEvent[], duckBgm: (active: boolean) => void) {
-  const [enabled, setEnabledState] = useState(false);
+export function useMatchVoice(events: UiEvent[], duckBgm: (active: boolean) => void, onSpeechStart: (seq: number) => void) {
+  const [enabled, setEnabledState] = useState(true);
+  const enabledRef = useRef(true);
   const [speakingSeat, setSpeakingSeat] = useState<string | null>(null);
   const [available, setAvailable] = useState<boolean | null>(null);
+  const [volume, setVolumeState] = useState(0.9);
+  const volumeRef = useRef(0.9);
+  const [busy, setBusy] = useState(false);
   const lastObservedSeq = useRef<number | null>(null);
   const queue = useRef<SpeechItem[]>([]);
   const pumping = useRef(false);
@@ -16,7 +20,14 @@ export function useMatchVoice(events: UiEvent[], duckBgm: (active: boolean) => v
 
   useEffect(() => {
     const stored = window.localStorage.getItem('werewolf-voice');
-    setEnabledState(stored === null ? true : stored === '1');
+    const initialEnabled = stored === null ? true : stored === '1';
+    enabledRef.current = initialEnabled;
+    setEnabledState(initialEnabled);
+    const storedVoiceVolume = window.localStorage.getItem('werewolf-voice-volume');
+    const storedVolume = storedVoiceVolume === null ? Number.NaN : Number(storedVoiceVolume);
+    const initialVolume = Number.isFinite(storedVolume) && storedVolume >= 0 && storedVolume <= 1 ? storedVolume : 0.9;
+    volumeRef.current = initialVolume;
+    setVolumeState(initialVolume);
     void fetch('/api/voicevox', { cache: 'no-store' }).then((response) => response.json()).then((data: { available: boolean }) => setAvailable(data.available)).catch(() => setAvailable(false));
   }, []);
 
@@ -24,37 +35,49 @@ export function useMatchVoice(events: UiEvent[], duckBgm: (active: boolean) => v
     queue.current = [];
     if (currentAudio.current) { currentAudio.current.pause(); currentAudio.current = null; }
     pumping.current = false;
+    setBusy(false);
     setSpeakingSeat(null);
     duckBgm(false);
   }, [duckBgm]);
 
   const pump = useCallback(async () => {
-    if (pumping.current || !enabled || available === false) return;
+    if (pumping.current || !enabledRef.current || available === false) return;
     pumping.current = true;
-    while (queue.current.length > 0 && enabled) {
+    setBusy(true);
+    while (queue.current.length > 0 && enabledRef.current) {
       const item = queue.current.shift();
       if (!item) break;
       try {
-        setSpeakingSeat(item.seat);
-        duckBgm(true);
         const response = await fetch('/api/voicevox', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ seat: item.seat, text: item.speech }) });
         if (!response.ok) { setAvailable(false); break; }
+        if (!enabledRef.current) break;
         const url = URL.createObjectURL(await response.blob());
         const audio = new Audio(url);
+        audio.volume = volumeRef.current;
         currentAudio.current = audio;
         await new Promise<void>((resolve) => {
           audio.onended = () => resolve();
           audio.onerror = () => resolve();
-          void audio.play().catch(() => resolve());
+          void audio.play().then(() => {
+            setSpeakingSeat(item.seat);
+            duckBgm(true);
+            onSpeechStart(item.seq);
+          }).catch(() => {
+            onSpeechStart(item.seq);
+            resolve();
+          });
         });
+        setSpeakingSeat(null);
+        duckBgm(false);
         URL.revokeObjectURL(url);
         currentAudio.current = null;
       } catch { setAvailable(false); break; }
     }
     pumping.current = false;
+    setBusy(false);
     setSpeakingSeat(null);
     duckBgm(false);
-  }, [available, duckBgm, enabled]);
+  }, [available, duckBgm, onSpeechStart]);
 
   useEffect(() => {
     const maxSeq = Math.max(0, ...events.map((event) => event.seq));
@@ -71,7 +94,14 @@ export function useMatchVoice(events: UiEvent[], duckBgm: (active: boolean) => v
 
   const setEnabled = useCallback((value: boolean) => {
     window.localStorage.setItem('werewolf-voice', value ? '1' : '0');
+    enabledRef.current = value;
     setEnabledState(value);
   }, []);
-  return { voiceEnabled: enabled, setVoiceEnabled: setEnabled, voiceAvailable: available, speakingSeat };
+  const setVolume = useCallback((value: number) => {
+    window.localStorage.setItem('werewolf-voice-volume', String(value));
+    volumeRef.current = value;
+    setVolumeState(value);
+    if (currentAudio.current) currentAudio.current.volume = value;
+  }, []);
+  return { voiceEnabled: enabled, setVoiceEnabled: setEnabled, voiceAvailable: available, speakingSeat, voiceVolume: volume, setVoiceVolume: setVolume, voiceBusy: busy };
 }

@@ -66,4 +66,18 @@ describe('MatchRunner', () => {
     expect(new Set(events.map((event) => event.seq)).size).toBe(events.length);
     expect(events.map((event) => event.seq)).toEqual(Array.from({ length: events.length }, (_, index) => index + 1));
   });
+
+  it('一時停止中の試合を再起動時に勝手に再開しない', async () => {
+    const repo = new MatchRepo();
+    const now = new Date().toISOString();
+    const record: MatchRecord = { id: 'paused-match', seed: 'paused', status: 'paused', winner: null, speed: 0, apiCalls: 0, error: null, config: { ai: 'mock' }, createdAt: now, updatedAt: now, finishedAt: null };
+    repo.createMatch(record);
+    const manager = new MatchRunnerManager(repo);
+    manager.recover();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(repo.getMatch(record.id)?.status).toBe('paused');
+    expect(repo.events(record.id)).toHaveLength(0);
+    manager.control(record.id, 'resume');
+    await waitFor(repo, record.id, 'finished');
+  });
 });

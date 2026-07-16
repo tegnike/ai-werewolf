@@ -158,7 +158,7 @@ export class MatchRunnerManager {
   }
 
   recover(): void {
-    for (const match of this.repo.listMatches().filter((item) => item.status === 'running' || item.status === 'paused')) this.start(match.id);
+    for (const match of this.repo.listMatches().filter((item) => item.status === 'running')) this.start(match.id);
   }
 }
 
