@@ -1,10 +1,12 @@
 import { ROLE_LABEL } from '@/domain/constants';
 import type { DecisionContext } from '@/domain/types';
 import { addressGuideForSeat, personaForSeat } from '@/domain/agents';
+import { resultDisclosureGuidance } from './disclosure';
 
 export function buildPrompts(context: DecisionContext): { systemPrompt: string; decisionPrompt: string } {
   const persona = personaForSeat(context.actor.seat);
   const isSpeech = context.kind.includes('speech');
+  const disclosureGuidance = resultDisclosureGuidance(context);
   const systemPrompt = [
     'あなたは一般的な9人人狼へ参加している一人の人間として振る舞います。AIアシスタントのように話してはいけません。',
     `あなたは${context.actor.name}、役職は${ROLE_LABEL[context.actor.role]}です。`,
@@ -24,6 +26,7 @@ export function buildPrompts(context: DecisionContext): { systemPrompt: string; 
     'ただし口癖や欠点を毎回わざとらしく演じず、ゲームの状況を優先してください。',
     'この人物像は知識や能力を増やすものではありません。見えている情報と役職能力だけで判断してください。',
     '他者の本当の役職を知っているふりをしないでください。',
+    ...(disclosureGuidance ? [disclosureGuidance] : []),
     isSpeech
       ? '内部の思考過程や分析報告は書かず、その場で本人が実際に口にする台詞だけを返してください。'
       : '内部の思考過程は書かず、合法対象からの決定と短い理由だけを返してください。',

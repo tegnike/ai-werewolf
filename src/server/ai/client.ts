@@ -6,6 +6,7 @@ import type { DecisionContext, DecisionProvider, SpeechDecision, TargetDecision 
 import type { MatchRepo } from '@/server/repo';
 import { buildPrompts } from './prompts';
 import { SpeechDecisionSchema, targetDecisionSchema } from './schemas';
+import { validateSpeechDisclosure } from './disclosure';
 
 export class AmbiguousAICallError extends Error { code = 'ambiguous_ai_call'; }
 export class ApiBudgetError extends Error { code = 'aborted_budget'; }
@@ -38,13 +39,13 @@ export class RealAI implements DecisionProvider {
   }
 
   speech(context: DecisionContext): Promise<SpeechDecision> {
-    return this.request(context, SpeechDecisionSchema, 'speech_decision');
+    return this.request(context, SpeechDecisionSchema, 'speech_decision', (decision) => validateSpeechDisclosure(context, decision));
   }
   target(context: DecisionContext): Promise<TargetDecision> {
     return this.request(context, targetDecisionSchema(context.legalTargets), 'target_decision');
   }
 
-  private async request<T>(context: DecisionContext, schema: Parameters<typeof zodTextFormat>[0], schemaName: string): Promise<T> {
+  private async request<T>(context: DecisionContext, schema: Parameters<typeof zodTextFormat>[0], schemaName: string, validate?: (decision: T) => void): Promise<T> {
     const cached = this.repo.getAiCall(context.matchId, context.callKey);
     if (cached?.status === 'ok') return cached.response as T;
     if (cached?.status === 'in_flight') throw new AmbiguousAICallError('前回のAPI呼び出し結果が不明です。明示的な再試行が必要です。');
@@ -69,6 +70,7 @@ export class RealAI implements DecisionProvider {
         });
         requestId = response.id;
         const parsed = parsedOutput<T>(response);
+        validate?.(parsed);
         this.repo.completeAiCall(context.matchId, context.callKey, parsed, requestId);
         return parsed;
       } catch (error) {

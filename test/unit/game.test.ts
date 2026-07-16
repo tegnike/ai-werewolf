@@ -15,6 +15,11 @@ describe('ゲームエンジン', () => {
     expect(forbidden).toHaveLength(0);
     expect(events.filter((event) => event.day === 0 && event.type === 'seer_result')).toHaveLength(1);
   });
+  it('1日目は当然の犠牲者なしを省略し、公開イベントが発言から始まる', async () => {
+    const { events } = await runMock('day-one-start');
+    expect(events.some((event) => event.day === 1 && event.type === 'dawn')).toBe(false);
+    expect(events.find((event) => event.visibility === 'public')?.type).toBe('discussion_speech');
+  });
   it('各昼の生存者が2周発言する', async () => {
     const { events } = await runMock('speech-rounds');
     for (const day of new Set(events.filter((event) => event.type === 'discussion_speech').map((event) => event.day))) {

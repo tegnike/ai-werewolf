@@ -33,4 +33,15 @@ describe('実AI人格プロンプト', () => {
     expect(decisionPrompt).toContain('名取 澪');
     expect(decisionPrompt).toContain('八木 こはる');
   });
+
+  it('占い結果の初回公開では占い師COを同じ発言で要求する', () => {
+    const players = setupPlayers('persona-prompt');
+    const seer = { ...players[1], role: 'seer' as const };
+    const context: DecisionContext = {
+      matchId: 'test', callKey: 'd1-seer-speech', seed: 'persona-prompt', day: 1, phase: 'discussion', kind: 'speech',
+      actor: seer, players: players.map((player) => player.seat === seer.seat ? seer : player), legalTargets: [],
+      publicHistory: [], privateFacts: ['自分の役職: seer', '青木 征司: 人狼'], round: 1,
+    };
+    expect(buildPrompts(context).systemPrompt).toContain('必ず同じ発言内で「占い師COです」');
+  });
 });

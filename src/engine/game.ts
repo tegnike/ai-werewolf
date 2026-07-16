@@ -64,6 +64,7 @@ export async function runGame(
   seed: string,
   ai: DecisionProvider,
   hooks: RunHooks,
+  options: { includeDayOneDawn?: boolean } = {},
 ): Promise<SimulationResult> {
   const players = setupPlayers(seed);
   let state = createInitialState(players);
@@ -143,8 +144,10 @@ export async function runGame(
     if (pendingVictim) {
       state = { ...state, players: state.players.map((player) => player.seat === pendingVictim ? { ...player, alive: false } : player) };
     }
-    await emit(day, 'dawn', 'dawn', { victim: pendingVictim, message: pendingVictim ? `${seatName(pendingVictim)}が犠牲になりました。` : '犠牲者はいません。' });
-    publicHistory.push(pendingVictim ? `${seatName(pendingVictim)}が襲撃で死亡` : '夜の犠牲者なし');
+    if (day > 1 || options.includeDayOneDawn) {
+      await emit(day, 'dawn', 'dawn', { victim: pendingVictim, message: pendingVictim ? `${seatName(pendingVictim)}が犠牲になりました。` : '犠牲者はいません。' });
+      publicHistory.push(pendingVictim ? `${seatName(pendingVictim)}が襲撃で死亡` : '夜の犠牲者なし');
+    }
     const dawnWinner = checkVictory(state);
     if (dawnWinner) return finish(dawnWinner, day);
 

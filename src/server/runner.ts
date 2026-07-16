@@ -113,7 +113,8 @@ export class MatchRunner {
       };
 
       this.repo.updateStatus(this.matchId, 'running');
-      const result = await runGame(this.matchId, match.seed, ai, hooks);
+      const includeDayOneDawn = this.existing.some((event) => event.day === 1 && event.type === 'dawn');
+      const result = await runGame(this.matchId, match.seed, ai, hooks, { includeDayOneDawn });
       this.repo.updateStatus(this.matchId, 'finished', result.winner);
     } catch (error) {
       if (error instanceof AbortMatchError) {

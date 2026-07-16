@@ -50,7 +50,7 @@ describe('MatchRunner', () => {
     await waitFor(manager.repo, second.id, 'aborted');
   });
 
-  it('中断地点まで既存イベントを照合し、重複せず復旧する', async () => {
+  it('旧仕様の1日目dawnを含む中断地点も照合し、重複せず復旧する', async () => {
     const repo = new MatchRepo();
     const now = new Date().toISOString();
     const record: MatchRecord = { id: 'recovery-match', seed: 'recovery', status: 'running', winner: null, speed: 0, apiCalls: 0, error: null, config: { ai: 'mock' }, createdAt: now, updatedAt: now, finishedAt: null };
@@ -62,8 +62,9 @@ describe('MatchRunner', () => {
         repo.appendEvent(event);
       },
       checkpoint: async () => { if (seq === 20) throw new Error('simulated crash'); },
-    })).rejects.toThrow('simulated crash');
+    }, { includeDayOneDawn: true })).rejects.toThrow('simulated crash');
     expect(repo.maxSeq(record.id)).toBe(20);
+    expect(repo.events(record.id).some((event) => event.day === 1 && event.type === 'dawn')).toBe(true);
     const manager = new MatchRunnerManager(repo);
     manager.recover();
     await waitFor(repo, record.id, 'finished');
