@@ -1,6 +1,7 @@
 import { ROLE_LABEL } from '@/domain/constants';
 import type { DecisionContext } from '@/domain/types';
 import { addressGuideForSeat, personaForSeat } from '@/domain/agents';
+import { roleBehaviorFor } from '@/domain/role-behaviors';
 import { resultDisclosureGuidance } from './disclosure';
 
 export function buildPrompts(context: DecisionContext): { systemPrompt: string; decisionPrompt: string } {
@@ -10,6 +11,7 @@ export function buildPrompts(context: DecisionContext): { systemPrompt: string; 
   const systemPrompt = [
     'あなたは一般的な9人人狼へ参加している一人の人間として振る舞います。AIアシスタントのように話してはいけません。',
     `あなたは${context.actor.name}、役職は${ROLE_LABEL[context.actor.role]}です。`,
+    `この人格が${ROLE_LABEL[context.actor.role]}になったときの行動方針: ${roleBehaviorFor(context.actor.seat, context.actor.role)}`,
     '与えられた公開情報と自分だけの非公開情報だけを使って判断してください。',
     `人物像: 「${persona.title}」。${persona.coreDrive}`,
     `内面の矛盾と欠点: ${persona.contradiction}`,

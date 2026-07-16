@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { DecisionContext } from '@/domain/types';
+import { AGENT_PERSONAS } from '@/domain/agents';
+import { roleBehaviorFor } from '@/domain/role-behaviors';
 import { setupPlayers } from '@/engine/setup';
 import { buildPrompts } from '@/server/ai/prompts';
 
@@ -43,5 +45,29 @@ describe('実AI人格プロンプト', () => {
       publicHistory: [], privateFacts: ['自分の役職: seer', '青木 征司: 人狼'], round: 1,
     };
     expect(buildPrompts(context).systemPrompt).toContain('必ず同じ発言内で「占い師COです」');
+  });
+
+  it('実際の席と役職に対応する行動方針だけを機械的に差し込む', () => {
+    const basePlayers = setupPlayers('role-behavior-prompt');
+    const roles = ['villager', 'werewolf', 'seer', 'medium', 'bodyguard', 'madman'] as const;
+
+    for (const persona of AGENT_PERSONAS) {
+      for (const role of roles) {
+        const actor = { ...basePlayers.find((player) => player.seat === persona.seat)!, role };
+        const context: DecisionContext = {
+          matchId: 'test', callKey: `${persona.seat}-${role}`, seed: 'role-behavior-prompt', day: 1,
+          phase: 'discussion', kind: 'speech', actor,
+          players: basePlayers.map((player) => player.seat === actor.seat ? actor : player),
+          legalTargets: [], publicHistory: [], privateFacts: [], round: 1,
+        };
+        const prompt = buildPrompts(context).systemPrompt;
+
+        expect(prompt).toContain(`この人格が`);
+        expect(prompt).toContain(roleBehaviorFor(persona.seat, role));
+        for (const otherRole of roles.filter((candidate) => candidate !== role)) {
+          expect(prompt).not.toContain(roleBehaviorFor(persona.seat, otherRole));
+        }
+      }
+    }
   });
 });
