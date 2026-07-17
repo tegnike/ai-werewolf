@@ -158,14 +158,14 @@ describe('能力結果の公開', () => {
       speech: '澪さんの強い出方が気になります。', addressedTo: null, requestsReply: false,
       structure: {
         primaryAct: 'suspicion', questionTopic: null,
-        suspicion: { targetSeat: 'seat-1', basis: 'intuition' }, voteIntent: null, boardAnalysis: false,
+        suspicion: { targetSeat: 'seat-1', basis: 'intuition', evidenceDay: null }, voteIntent: null, boardAnalysis: false,
       },
     })).toThrow('opening_intuition_unmarked');
     expect(() => validateSpeechDisclosure(context, {
       speech: 'まだ材料がないので、澪さんを勘で仮置きします。', addressedTo: null, requestsReply: false,
       structure: {
         primaryAct: 'suspicion', questionTopic: null,
-        suspicion: { targetSeat: 'seat-1', basis: 'intuition' }, voteIntent: null, boardAnalysis: false,
+        suspicion: { targetSeat: 'seat-1', basis: 'intuition', evidenceDay: null }, voteIntent: null, boardAnalysis: false,
       },
     })).not.toThrow();
   });
@@ -185,16 +185,84 @@ describe('能力結果の公開', () => {
       speech: '澪さんの便乗が気になります。', addressedTo: null, requestsReply: false,
       structure: {
         primaryAct: 'suspicion', questionTopic: null,
-        suspicion: { targetSeat: 'seat-1', basis: 'interaction' }, voteIntent: null, boardAnalysis: false,
+        suspicion: { targetSeat: 'seat-1', basis: 'interaction', evidenceDay: 1 }, voteIntent: null, boardAnalysis: false,
       },
     })).toThrow('unspoken_target_behavior');
     expect(() => validateSpeechDisclosure(context, {
       speech: '澪さんはまだ発言前なので、勘の仮置きです。', addressedTo: null, requestsReply: false,
       structure: {
         primaryAct: 'suspicion', questionTopic: null,
-        suspicion: { targetSeat: 'seat-1', basis: 'intuition' }, voteIntent: null, boardAnalysis: false,
+        suspicion: { targetSeat: 'seat-1', basis: 'intuition', evidenceDay: null }, voteIntent: null, boardAnalysis: false,
       },
     })).not.toThrow();
+  });
+
+  it('2日目以降は未発言者でも前日以前の公開情報を疑いの根拠にできる', () => {
+    const base = seerContext();
+    const context: DecisionContext = {
+      ...base,
+      day: 4,
+      actor: { ...base.actor, role: 'villager' },
+      privateFacts: ['自分の役職: villager'],
+      discussion: { version: 'v3', stage: 'opening', turn: 1, remainingUnspokenSeats: ['seat-1'] },
+    };
+    expect(() => validateSpeechDisclosure(context, {
+      speech: '澪さんの3日目の投票理由が気になります。', addressedTo: null, requestsReply: false,
+      structure: {
+        primaryAct: 'suspicion', questionTopic: null,
+        suspicion: { targetSeat: 'seat-1', basis: 'vote_plan', evidenceDay: 3 }, voteIntent: null, boardAnalysis: false,
+      },
+    })).not.toThrow();
+    expect(() => validateSpeechDisclosure(context, {
+      speech: '澪さんの今日の便乗が気になります。', addressedTo: null, requestsReply: false,
+      structure: {
+        primaryAct: 'suspicion', questionTopic: null,
+        suspicion: { targetSeat: 'seat-1', basis: 'interaction', evidenceDay: 4 }, voteIntent: null, boardAnalysis: false,
+      },
+    })).toThrow('unspoken_target_behavior');
+  });
+
+  it('疑いの未来日と、勘以外で根拠日がない応答を拒否する', () => {
+    const base = seerContext();
+    const context: DecisionContext = {
+      ...base,
+      actor: { ...base.actor, role: 'villager' }, privateFacts: ['自分の役職: villager'],
+      discussion: { version: 'v3', stage: 'opening', turn: 2, remainingUnspokenSeats: [] },
+    };
+    expect(() => validateSpeechDisclosure(context, {
+      speech: '澪さんの発言が気になります。', addressedTo: null, requestsReply: false,
+      structure: {
+        primaryAct: 'suspicion', questionTopic: null,
+        suspicion: { targetSeat: 'seat-1', basis: 'speech_content', evidenceDay: 2 }, voteIntent: null, boardAnalysis: false,
+      },
+    })).toThrow('future_suspicion_evidence');
+    expect(() => validateSpeechDisclosure(context, {
+      speech: '澪さんの発言が気になります。', addressedTo: null, requestsReply: false,
+      structure: {
+        primaryAct: 'suspicion', questionTopic: null,
+        suspicion: { targetSeat: 'seat-1', basis: 'speech_content', evidenceDay: null }, voteIntent: null, boardAnalysis: false,
+      },
+    })).toThrow('suspicion_evidence_day_missing');
+  });
+
+  it('台詞にない投票予定・質問分類・盤面整理は再試行せず安全に破棄する', () => {
+    const base = seerContext();
+    const context: DecisionContext = {
+      ...base,
+      actor: { ...base.actor, role: 'villager' }, privateFacts: ['自分の役職: villager'],
+      discussion: { version: 'v3', stage: 'free', turn: 10, remainingUnspokenSeats: [] },
+    };
+    const speechDecision: SpeechDecision = {
+      speech: '今日は澪さんの説明をもう一度見直します。', addressedTo: null, requestsReply: false,
+      structure: {
+        primaryAct: 'vote_intent', questionTopic: 'gray_read', suspicion: null,
+        voteIntent: 'seat-1', boardAnalysis: true,
+      },
+    };
+    expect(() => validateSpeechDisclosure(context, speechDecision)).not.toThrow();
+    expect(speechDecision.structure).toMatchObject({
+      primaryAct: 'other', questionTopic: null, voteIntent: null, boardAnalysis: false,
+    });
   });
 
   it('本文に名前のない疑い先メタデータは再試行せず安全に破棄する', () => {

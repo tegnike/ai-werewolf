@@ -11,6 +11,6 @@ export interface UiEvent {
 }
 export interface UiMatch {
   id: string; seed: string; status: string; winner: string | null; speed: number; apiCalls: number;
-  error: { code: string; message: string; phase?: string; model?: string } | null;
+  error: { code: string; message: string; phase?: string; model?: string; reason?: string } | null;
   createdAt: string; updatedAt: string; finishedAt: string | null; ai?: string;
 }

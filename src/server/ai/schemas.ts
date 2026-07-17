@@ -43,6 +43,7 @@ export function speechDecisionSchema(
     suspicion: structureSeats.length > 0 ? z.object({
       targetSeat: z.enum(structureSeats as [SeatId, ...SeatId[]]),
       basis: suspicionBasisSchema,
+      evidenceDay: z.number().int().min(0).max(8).nullable(),
     }).nullable() : z.null(),
     voteIntent: nullableSeatSchema(structureSeats.filter((seat) => !blockedVoteIntentTargets.includes(seat))),
     boardAnalysis: z.boolean(),

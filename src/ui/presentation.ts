@@ -4,6 +4,23 @@ const isSpokenEvent = (event: UiEvent): boolean => ['discussion_speech', 'werewo
 
 export interface PresentedState { day: number; phase: string }
 
+export function aiErrorDescription(error: { message: string; reason?: string } | null | undefined): string {
+  if (!error) return 'AI判断に失敗しました。';
+  if (error.reason === 'claim_contract:unspoken_target_behavior') {
+    return 'AI応答の内容検証に失敗しました。未発言者に関する根拠の日付を確認できませんでした。';
+  }
+  if (error.reason === 'claim_contract:suspicion_evidence_day_missing' || error.reason === 'claim_contract:future_suspicion_evidence') {
+    return 'AI応答の内容検証に失敗しました。疑いの根拠日が不正です。';
+  }
+  if (error.reason?.startsWith('claim_contract:')) {
+    return 'AI応答の内容検証に失敗しました。発言と構造化情報が一致していません。';
+  }
+  if (error.reason?.startsWith('http_429')) return 'OpenAI APIの利用制限に達しました。時間を置いて再試行してください。';
+  if (/^http_5\d\d/.test(error.reason ?? '')) return 'OpenAI APIで一時的な障害が発生しました。';
+  if (error.reason === 'request_error') return 'AI応答の取得または解析に失敗しました。';
+  return error.message;
+}
+
 export function privateActionDescription(event: UiEvent): string | null {
   if (event.type !== 'private_action') return null;
   return `${String(event.payload.label ?? '非公開処理')}が行われました。`;
@@ -15,10 +32,10 @@ export function featuredSpeechEvent(events: UiEvent[], speakingSeq: number | nul
   return speeches.at(-1) ?? null;
 }
 
-export function focusPanelKind(featuredSpeech: UiEvent | null, hasVote: boolean, day: number, phase: string): 'speech' | 'vote' | null {
+export function focusPanelKind(featuredSpeech: UiEvent | null, hasCurrentDayVote: boolean, day: number, phase: string): 'speech' | 'vote' | null {
   const speechPhase = ['discussion', 'night_zero', 'wolf_chat'].includes(phase);
-  if (featuredSpeech && featuredSpeech.day === day && speechPhase) return 'speech';
-  if (hasVote) return 'vote';
+  if (featuredSpeech && featuredSpeech.day === day && (speechPhase || !hasCurrentDayVote)) return 'speech';
+  if (hasCurrentDayVote) return 'vote';
   return null;
 }
 

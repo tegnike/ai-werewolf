@@ -29,16 +29,20 @@ describe('見せ場の画面演出', () => {
     expect(cinematicCuesBetween(events, 0, 8).map((cue) => ({ seq: cue.seq, title: cue.title }))).toEqual([{ seq: 7, title: '1日目' }]);
   });
 
-  it('襲撃のあった夜明けを日数と犠牲者名で表示する', () => {
+  it('襲撃のあった夜明けは犠牲者名を先に大きく表示する', () => {
     expect(cinematicCueForEvent(event(20, 'dawn', { victim: 'seat-3' }))).toMatchObject({
-      title: '2日目', subtitle: '宮下 さくらが襲撃の犠牲になりました', tone: 'attack', sound: 'attack',
+      title: '宮下 さくら', subtitle: '襲撃の犠牲になりました', tone: 'attack', sound: 'attack',
     });
+    expect(cinematicCuesBetween([event(20, 'dawn', { victim: 'seat-3' })], 19, 20)
+      .map((cue) => cue.title)).toEqual(['宮下 さくら', '2日目']);
   });
 
-  it('犠牲者なしの夜明けは通常の日替わり演出にする', () => {
+  it('犠牲者なしも結果を先に表示してから日替わり演出にする', () => {
     expect(cinematicCueForEvent(event(20, 'dawn', { victim: null }))).toMatchObject({
-      title: '2日目', subtitle: '昨夜の犠牲者はいません', tone: 'day', sound: 'scene',
+      title: '犠牲者なし', subtitle: '昨夜は誰も襲撃されませんでした', tone: 'day', sound: 'scene',
     });
+    expect(cinematicCuesBetween([event(20, 'dawn', { victim: null })], 19, 20)
+      .map((cue) => cue.title)).toEqual(['犠牲者なし', '2日目']);
   });
 
   it('投票開始は演出せず、開票後に結果を読む時間を設けてから処刑を演出する', () => {

@@ -27,9 +27,9 @@ function playerName(value: unknown): string {
   return agentNameForSeat(`seat-${number}` as SeatId);
 }
 
-export function cinematicCueForEvent(event: UiEvent): CinematicCue | null {
+function cinematicCuesForEvent(event: UiEvent): CinematicCue[] {
   if (event.type === 'match_created' || (event.type === 'private_action' && event.payload.label === '配役決定')) {
-    return {
+    return [{
       seq: event.seq,
       eyebrow: 'GAME START / NIGHT ZERO',
       title: '第0夜',
@@ -37,25 +37,36 @@ export function cinematicCueForEvent(event: UiEvent): CinematicCue | null {
       tone: 'vote',
       sound: 'scene',
       durationMs: CINEMATIC_LONG_DURATION_MS,
-    };
+    }];
   }
 
   if (event.type === 'dawn') {
     const victim = event.payload.victim;
-    return {
-      seq: event.seq,
-      eyebrow: `DAWN / DAY ${event.day}`,
-      title: `${event.day}日目`,
-      subtitle: victim ? `${playerName(victim)}が襲撃の犠牲になりました` : '昨夜の犠牲者はいません',
-      tone: victim ? 'attack' : 'day',
-      sound: victim ? 'attack' : 'scene',
-      durationMs: CINEMATIC_LONG_DURATION_MS,
-    };
+    return [
+      {
+        seq: event.seq,
+        eyebrow: 'NIGHT RESULT',
+        title: victim ? playerName(victim) : '犠牲者なし',
+        subtitle: victim ? '襲撃の犠牲になりました' : '昨夜は誰も襲撃されませんでした',
+        tone: victim ? 'attack' : 'day',
+        sound: victim ? 'attack' : 'scene',
+        durationMs: CINEMATIC_LONG_DURATION_MS,
+      },
+      {
+        seq: event.seq,
+        eyebrow: `DAWN / DAY ${event.day}`,
+        title: `${event.day}日目`,
+        subtitle: '新しい一日の議論が始まります',
+        tone: 'day',
+        sound: 'scene',
+        durationMs: CINEMATIC_LONG_DURATION_MS,
+      },
+    ];
   }
 
   if (event.type === 'vote_reveal') {
     const runoff = event.payload.round === 2;
-    return {
+    return [{
       seq: event.seq,
       eyebrow: `DAY ${event.day} / ${runoff ? 'RUNOFF' : 'VOTE'} RESULT`,
       title: runoff ? '決選開票' : '開票',
@@ -64,12 +75,12 @@ export function cinematicCueForEvent(event: UiEvent): CinematicCue | null {
       sound: 'vote',
       durationMs: CINEMATIC_SHORT_DURATION_MS,
       gapAfterMs: CINEMATIC_VOTE_RESULT_GAP_MS,
-    };
+    }];
   }
 
   if (event.type === 'execution') {
     const executed = event.payload.seat;
-    return {
+    return [{
       seq: event.seq,
       eyebrow: `DAY ${event.day} / EXECUTION`,
       title: executed ? playerName(executed) : '処刑なし',
@@ -77,10 +88,14 @@ export function cinematicCueForEvent(event: UiEvent): CinematicCue | null {
       tone: executed ? 'execution' : 'vote',
       sound: executed ? 'execution' : 'scene',
       durationMs: CINEMATIC_LONG_DURATION_MS,
-    };
+    }];
   }
 
-  return null;
+  return [];
+}
+
+export function cinematicCueForEvent(event: UiEvent): CinematicCue | null {
+  return cinematicCuesForEvent(event)[0] ?? null;
 }
 
 export function cinematicCuesBetween(events: UiEvent[], afterSeq: number, throughSeq: number): CinematicCue[] {
@@ -106,7 +121,6 @@ export function cinematicCuesBetween(events: UiEvent[], afterSeq: number, throug
           durationMs: CINEMATIC_LONG_DURATION_MS,
         } satisfies CinematicCue];
       }
-      const cue = cinematicCueForEvent(event);
-      return cue ? [cue] : [];
+      return cinematicCuesForEvent(event);
     });
 }

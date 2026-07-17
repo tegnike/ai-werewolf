@@ -326,7 +326,7 @@ describe('ゲームエンジン', () => {
 
     const soloContexts = contexts.filter((context) =>
       context.kind === 'wolf_speech' && context.wolfChat?.mode === 'monologue');
-    expect(soloContexts).toHaveLength(2);
+    expect(soloContexts).toHaveLength(1);
     for (const context of soloContexts) {
       expect(context.wolfChat?.participantSeats).toEqual([context.actor.seat]);
       expect(context.privateFacts).toContain('生存中の人狼仲間: なし（自分だけ）');
@@ -335,6 +335,6 @@ describe('ゲームエンジン', () => {
 
     const wolfChatEvents = events.filter((event) => event.type === 'werewolf_chat');
     expect(wolfChatEvents.some((event) => event.payload.mode === 'dialogue')).toBe(true);
-    expect(wolfChatEvents.filter((event) => event.payload.mode === 'monologue')).toHaveLength(2);
+    expect(wolfChatEvents.filter((event) => event.payload.mode === 'monologue')).toHaveLength(1);
   });
 });

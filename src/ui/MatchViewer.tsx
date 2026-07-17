@@ -10,7 +10,7 @@ import { useAmbientBgm } from './useAmbientBgm';
 import { useMatchVoice } from './useMatchVoice';
 import { voiceForSeat } from '@/domain/voices';
 import { agentNameForSeat, personaForSeat } from '@/domain/agents';
-import { derivePresentedState, featuredSpeechEvent, focusPanelKind, presentationCursorAfterLoad, presentationLimit, privateActionDescription } from './presentation';
+import { aiErrorDescription, derivePresentedState, featuredSpeechEvent, focusPanelKind, presentationCursorAfterLoad, presentationLimit, privateActionDescription } from './presentation';
 import { buildEpilogue, epilogueRoleLabel, fateLabel, type SpectatorDeathRecord } from './epilogue';
 import { SpectatorGuide } from './SpectatorGuide';
 import { CinematicOverlay } from './CinematicOverlay';
@@ -189,7 +189,7 @@ export function MatchViewer({ matchId, mode }: { matchId: string; mode: 'live' |
       claim: (payload.claim ?? null) as SpeechClaim | null,
     });
   }
-  const latestVote = [...visibleEvents].reverse().find((event) => event.type === 'vote_reveal');
+  const latestVote = [...visibleEvents].reverse().find((event) => event.type === 'vote_reveal' && event.day === day);
   const latestVotes = voteEntries(latestVote);
   const latestVoteByVoter = new Map(latestVotes.map((vote) => [vote.voter, vote.target]));
   const latestTally = (latestVote?.payload.tally ?? {}) as Record<string, number>;
@@ -262,8 +262,8 @@ export function MatchViewer({ matchId, mode }: { matchId: string; mode: 'live' |
               </article>;
             })}
           </div>
-          {focusPanel === 'vote' && latestVote && <section className={`vote-panel ${latestVote.day < day ? 'stale' : ''}`}>
-            <div><span className="section-kicker">VOTE RESULT</span><h2>{latestVote.day}日目の{latestVote.payload.round === 2 ? '決選投票' : '投票結果'}</h2>{latestVote.day < day && <small>前日の結果</small>}</div>
+          {focusPanel === 'vote' && latestVote && <section className="vote-panel">
+            <div><span className="section-kicker">VOTE RESULT</span><h2>{latestVote.day}日目の{latestVote.payload.round === 2 ? '決選投票' : '投票結果'}</h2></div>
             <div className="vote-bars">{Object.entries(latestTally).sort((a, b) => b[1] - a[1]).map(([seat, count]) => {
               const voters = latestVotes.filter((vote) => vote.target === seat);
               return <div className="vote-bar" key={seat}>
@@ -291,7 +291,7 @@ export function MatchViewer({ matchId, mode }: { matchId: string; mode: 'live' |
       </div>
       <footer className="control-dock">
         <div className="seed-display"><span>SEED</span><strong>{match.seed}</strong></div>
-        {mode === 'live' ? <div className="live-controls">{terminal ? <Link className="dock-link" href={`/replay/${matchId}`}>リプレイを見る →</Link> : match.status === 'paused_error' ? <><div className="error-strip"><strong>{match.error?.model}</strong><span>{match.error?.message}</span></div><button onClick={() => void control('retry')}>再試行</button></> : <><button onClick={() => void control(match.status === 'paused' ? 'resume' : 'pause')}>{match.status === 'paused' ? '▶ 再開' : 'Ⅱ 一時停止'}</button><button className="danger" onClick={() => void control('abort')}>中断</button></>}</div> : <div className="replay-controls"><button onClick={() => setCursor(Math.max(0, events.filter((event) => event.seq < cursor).at(-1)?.seq ?? 0))}>‹</button><button className="play" onClick={() => setPlaying((value) => !value)}>{playing ? 'Ⅱ' : '▶'}</button><input aria-label="リプレイ位置" type="range" min="0" max={maxSeq} value={Math.min(cursor, maxSeq)} onChange={(event) => setCursor(Number(event.target.value))} /><span>{Math.min(cursor, maxSeq)} / {maxSeq}</span><button onClick={() => setCursor(events.find((event) => event.seq > cursor)?.seq ?? maxSeq)}>›</button></div>}
+        {mode === 'live' ? <div className="live-controls">{terminal ? <Link className="dock-link" href={`/replay/${matchId}`}>リプレイを見る →</Link> : match.status === 'paused_error' ? <><div className="error-strip"><strong>{match.error?.model}{match.error?.phase ? ` · ${phaseLabel[match.error.phase] ?? match.error.phase}` : ''}</strong><span>{aiErrorDescription(match.error)}</span></div><button onClick={() => void control('retry')}>再試行</button></> : <><button onClick={() => void control(match.status === 'paused' ? 'resume' : 'pause')}>{match.status === 'paused' ? '▶ 再開' : 'Ⅱ 一時停止'}</button><button className="danger" onClick={() => void control('abort')}>中断</button></>}</div> : <div className="replay-controls"><button onClick={() => setCursor(Math.max(0, events.filter((event) => event.seq < cursor).at(-1)?.seq ?? 0))}>‹</button><button className="play" onClick={() => setPlaying((value) => !value)}>{playing ? 'Ⅱ' : '▶'}</button><input aria-label="リプレイ位置" type="range" min="0" max={maxSeq} value={Math.min(cursor, maxSeq)} onChange={(event) => setCursor(Number(event.target.value))} /><span>{Math.min(cursor, maxSeq)} / {maxSeq}</span><button onClick={() => setCursor(events.find((event) => event.seq > cursor)?.seq ?? maxSeq)}>›</button></div>}
         <div className="api-count">API CALLS <strong>{match.apiCalls}</strong> / 240</div>
       </footer>
       {error && <div className="connection-toast">{error}</div>}

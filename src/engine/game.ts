@@ -729,7 +729,8 @@ export async function runGame(
     }
 
     const livingWolves = state.players.filter((player) => player.alive && player.role === 'werewolf');
-    for (let round = 1; round <= 2; round += 1) {
+    const wolfChatRounds = livingWolves.length === 1 ? 1 : 2;
+    for (let round = 1; round <= wolfChatRounds; round += 1) {
       for (const wolf of livingWolves) {
         const decision = await ai.speech(context(wolf, day, 'wolf_chat', 'wolf_speech', `d${day}-wolf-chat-r${round}-${wolf.seat}`, [], round));
         const speech = normalizeSpeech(decision.speech);

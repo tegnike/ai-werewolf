@@ -20,6 +20,21 @@ const retryableStatus = new Set([408, 409, 429, 500, 502, 503, 504]);
 const delays = [1_000, 2_000, 4_000, 8_000, 16_000];
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+export type AIRetryClass = 'contract' | 'structured_output' | 'transport' | 'non_retryable';
+
+export function aiRetryPolicy(error: unknown): { kind: AIRetryClass; limit: number } {
+  if (error instanceof ClaimContractError) return { kind: 'contract', limit: 2 };
+  const status = typeof error === 'object' && error && 'status' in error ? Number(error.status) : 0;
+  const description = String(error);
+  if ((status >= 200 && status < 300) || /refusal|parse|validation|zod|structured output/i.test(description)) {
+    return { kind: 'structured_output', limit: 3 };
+  }
+  if (status === 0 || retryableStatus.has(status) || /timeout|connection/i.test(description)) {
+    return { kind: 'transport', limit: 5 };
+  }
+  return { kind: 'non_retryable', limit: 1 };
+}
+
 function safeToken(value: unknown): string | null {
   return typeof value === 'string' && /^[a-zA-Z0-9_.\[\]-]{1,80}$/.test(value) ? value : null;
 }
@@ -91,6 +106,9 @@ export class RealAI implements DecisionProvider {
     const { systemPrompt, decisionPrompt } = buildPrompts(context);
     let repairInstruction = '';
     const repairInstructions: string[] = [];
+    const failureCounts: Record<AIRetryClass, number> = {
+      contract: 0, structured_output: 0, transport: 0, non_retryable: 0,
+    };
 
     for (let attempt = 0; attempt < 5; attempt += 1) {
       if (attempt > 0) await sleep(delays[attempt - 1]);
@@ -122,16 +140,15 @@ export class RealAI implements DecisionProvider {
           repairInstructions.push(error.repairHint);
           repairInstruction = repairInstructions.join(' ');
         }
-        const status = typeof error === 'object' && error && 'status' in error ? Number(error.status) : 0;
         if (!requestId && typeof error === 'object' && error && 'request_id' in error && typeof error.request_id === 'string') {
           requestId = error.request_id;
         }
         this.repo.failAiCall(context.matchId, context.callKey, requestId);
         // Responses APIがHTTP成功後のstructured-output復元で失敗した場合、SDK errorに
-        // 2xx statusだけが残ることがある。内容をランダム行動へ置換せず、同じmodelで有界再試行する。
-        const retryable = status === 0 || (status >= 200 && status < 300) || retryableStatus.has(status) ||
-          /refusal|parse|validation|zod|timeout|connection/i.test(String(error));
-        if (!retryable || attempt === 4) {
+        // 2xx statusだけが残ることがある。失敗種別ごとの上限内で同じmodelを再試行する。
+        const policy = aiRetryPolicy(error);
+        failureCounts[policy.kind] += 1;
+        if (failureCounts[policy.kind] >= policy.limit || attempt === 4) {
           throw new AIRequestError('AI判断を取得できませんでした。', context.phase, safeAIRequestReason(error));
         }
       }

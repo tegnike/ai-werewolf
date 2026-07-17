@@ -20,7 +20,7 @@ export function buildPrompts(context: DecisionContext): { systemPrompt: string; 
       ? [
           '生存している人狼はあなた一人だけです。死亡した仲間はこの会話を聞けず、返答もできません。今の発言は仲間との相談ではなく、完全な独り言として話してください。',
           '誰かへの呼びかけ、質問、同意や返事の要求、共同意思を表す「私たち」「俺たち」「僕たち」「我々」を使わず、自分の読みと次の襲撃方針を自分に言い聞かせる口調にしてください。',
-          `独り言は全2回のうち${context.round ?? 1}回目です。${context.round === 2 ? '前の独り言を踏まえ、自分一人で方針を決めてください。' : 'まず状況と候補を自分一人で考えてください。'}`,
+          '独り言は今夜1回だけです。状況と候補を整理し、自分一人で襲撃方針を決めてください。',
         ]
       : [
           '今は生存している人狼同士だけの秘密会話です。仲間の発言を踏まえ、襲撃方針を自然に相談してください。',
@@ -97,7 +97,7 @@ export function buildPrompts(context: DecisionContext): { systemPrompt: string; 
     ...(context.discussion?.boardDigest?.length ? [`現在の議論台帳: ${context.discussion.boardDigest.join(' / ')}`] : []),
     ...(context.discussion?.agenda?.length ? [`まだ不足している貢献の候補: ${context.discussion.agenda.join(' / ')}。これは台詞の指定ではありません。最新状況と人物像に合うものを選び、自分の言葉で話してください。`] : []),
     ...(!isSpeechIntent ? [
-      'structureは実際に口にする内容の自己分類です。primaryActは発言の主目的、questionTopicは本文で明確に返答を求めた質問、またはその質問への回答の話題だけを記録し、話題へ触れただけならnullにしてください。質問へ答えるだけならprimaryAct=answer、requestsReply=falseです。suspicionは本文で実際に疑う一人と根拠分類、voteIntentは本文で実際に投票予定を宣言する一人だけを記録してください。boardAnalysisは、役職を名乗った人数と今日の処刑対象範囲を本文で明示的に整理した場合だけtrueです。該当しない項目はnullまたはfalseにしてください。',
+      `structureは実際に口にする内容の自己分類です。primaryActは発言の主目的、questionTopicは本文で明確に返答を求めた質問、またはその質問への回答の話題だけを記録し、話題へ触れただけならnullにしてください。質問へ答えるだけならprimaryAct=answer、requestsReply=falseです。suspicionは本文で実際に疑う一人と根拠分類を記録し、公開情報を根拠にするならevidenceDayへその情報の日を入れてください。勘だけならbasis=intuition、evidenceDay=nullです。今日まだ発言していない人でも${context.day > 1 ? '前日以前' : '第0夜'}の公開情報は根拠にできますが、今日の未観測の態度は根拠にできません。voteIntentは本文で実際に投票予定を宣言する一人だけを記録してください。boardAnalysisは、役職を名乗った人数と今日の処刑対象範囲を本文で明示的に整理した場合だけtrueです。該当しない項目はnullまたはfalseにしてください。`,
     ] : [
       '自分が話したい内容が議論台帳ですでに質問・回答済みなら、具体的な新情報や訂正がない限りurgency=0を選んでください。',
     ]),

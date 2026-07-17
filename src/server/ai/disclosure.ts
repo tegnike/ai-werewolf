@@ -49,6 +49,17 @@ function validateDiscussionStructure(context: DecisionContext, decision: SpeechD
     structure.suspicion = null;
     if (structure.primaryAct === 'suspicion') structure.primaryAct = 'other';
   }
+  if (structure.suspicion) {
+    const { basis, evidenceDay } = structure.suspicion;
+    if (typeof evidenceDay === 'number' && evidenceDay > context.day) {
+      throw new ClaimContractError('future_suspicion_evidence', '疑いのevidenceDayには今日以前の日だけを指定してください。');
+    }
+    if (basis === 'intuition' && evidenceDay !== null && evidenceDay !== undefined) {
+      structure.suspicion.evidenceDay = null;
+    } else if (basis !== 'intuition' && evidenceDay === null) {
+      throw new ClaimContractError('suspicion_evidence_day_missing', '勘以外の公開情報を疑いの根拠にする場合は、その情報が出た日をevidenceDayへ指定してください。');
+    }
+  }
   if (context.day === 1 && context.discussion?.turn === 1 && structure.suspicion) {
     if (!['intuition', 'result', 'role_claim'].includes(structure.suspicion.basis)) {
       throw new ClaimContractError('opening_unseen_behavior', '今日の最初の発言では他者の今日の態度や反応をまだ観察できません。疑いを出すなら勘・仮置きだと明示するか、自分の能力結果・同じ発言で公開する役職情報だけを根拠にしてください。');
@@ -58,8 +69,10 @@ function validateDiscussionStructure(context: DecisionContext, decision: SpeechD
     }
   }
   if (structure.suspicion && context.discussion?.remainingUnspokenSeats?.includes(structure.suspicion.targetSeat)) {
-    if (!['intuition', 'result', 'role_claim'].includes(structure.suspicion.basis)) {
-      throw new ClaimContractError('unspoken_target_behavior', 'その相手は今日まだ発言していないため、今日の発言内容・反応・便乗・投票予定を疑いの根拠にできません。勘として仮置きするか、能力結果・公開済みの役職主張だけを根拠にしてください。');
+    const evidenceIsToday = structure.suspicion.evidenceDay === context.day ||
+      (structure.suspicion.evidenceDay === undefined && context.day === 1);
+    if (evidenceIsToday && !['intuition', 'result', 'role_claim'].includes(structure.suspicion.basis)) {
+      throw new ClaimContractError('unspoken_target_behavior', 'その相手は今日まだ発言していないため、今日の発言内容・反応・便乗・投票予定を疑いの根拠にできません。勘として仮置きするか、前日以前の公開情報の日をevidenceDayへ指定してください。');
     }
     if (structure.suspicion.basis === 'intuition' && !/(?:勘|直感|仮|材料.{0,8}(?:ない|ありません)|まだ.{0,8}(?:分から|わから|不明)|発言.{0,8}(?:前|ない|ありません))/.test(decision.speech)) {
       throw new ClaimContractError('unspoken_intuition_unmarked', '未発言者を公開情報なしで疑うなら、本文でも勘・直感・仮置きであることを明示してください。未発言者の態度を観察したように話してはいけません。');
@@ -84,16 +97,19 @@ function validateDiscussionStructure(context: DecisionContext, decision: SpeechD
     }
   }
   if (structure.voteIntent && (!mentionsSeat(context, decision.speech, structure.voteIntent) || !/(?:投票|入れ|処刑候補|吊)/.test(decision.speech))) {
-    throw new ClaimContractError('vote_intent_missing', 'voteIntentへ記録する相手は、本文でもその人へ投票する予定だと明言してください。宣言しない場合はvoteIntent=nullにしてください。');
+    structure.voteIntent = null;
+    if (structure.primaryAct === 'vote_intent') structure.primaryAct = 'other';
   }
   if (structure.primaryAct === 'question' && !decision.requestsReply) {
-    throw new ClaimContractError('question_without_reply', '質問を主目的にするなら本文で明確に返答を求め、addressedToとrequestsReply=trueを一致させてください。');
+    structure.primaryAct = 'other';
+    structure.questionTopic = null;
   }
   if (structure.questionTopic && structure.primaryAct !== 'answer' && !decision.requestsReply) {
-    throw new ClaimContractError('question_topic_without_question', '話題へ触れただけならquestionTopic=nullにしてください。明確に質問する場合だけ宛先とrequestsReply=trueを設定してください。');
+    structure.questionTopic = null;
   }
   if (structure.boardAnalysis && (!/(?:占い師|霊媒師|役職)/.test(decision.speech) || !/(?:今日|処刑|投票|吊)/.test(decision.speech))) {
-    throw new ClaimContractError('board_analysis_missing', 'boardAnalysis=trueにするなら、本文で役職主張の人数や内訳と、今日の処刑対象範囲を具体的に整理してください。');
+    structure.boardAnalysis = false;
+    if (structure.primaryAct === 'board_analysis') structure.primaryAct = 'other';
   }
 }
 

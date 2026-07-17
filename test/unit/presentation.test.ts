@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { UiEvent } from '@/ui/types';
-import { derivePresentedState, featuredSpeechEvent, focusPanelKind, presentationCursorAfterLoad, presentationLimit, privateActionDescription } from '@/ui/presentation';
+import { aiErrorDescription, derivePresentedState, featuredSpeechEvent, focusPanelKind, presentationCursorAfterLoad, presentationLimit, privateActionDescription } from '@/ui/presentation';
 
 const event = (seq: number, type: string): UiEvent => ({ matchId: 'test', seq, type, day: 1, phase: 'discussion', visibility: 'public', payload: {}, createdAt: '2026-07-16T00:00:00.000Z' });
 
@@ -44,6 +44,16 @@ describe('公開視点の非公開イベント表示', () => {
   });
 });
 
+describe('AIエラー表示', () => {
+  it('保存済みの安全なreasonを具体的な日本語へ変換する', () => {
+    expect(aiErrorDescription({
+      message: 'AI判断を取得できませんでした。', reason: 'claim_contract:unspoken_target_behavior',
+    })).toContain('根拠の日付');
+    expect(aiErrorDescription({ message: 'AI判断を取得できませんでした。', reason: 'http_429' }))
+      .toContain('利用制限');
+  });
+});
+
 describe('注目発言の選択', () => {
   const firstSpeech = { ...event(11, 'discussion_speech'), payload: { seat: 'seat-1', speech: '最初の発言' } };
   const secondSpeech = { ...event(13, 'discussion_speech'), payload: { seat: 'seat-2', speech: '次の発言' } };
@@ -63,6 +73,10 @@ describe('注目発言の選択', () => {
 
   it('投票フェーズでは発言を隠して投票だけを表示する', () => {
     expect(focusPanelKind(secondSpeech, true, 1, 'vote')).toBe('vote');
+  });
+
+  it('当日の開票前は投票フェーズへ先行しても前日の結果へ戻さない', () => {
+    expect(focusPanelKind(secondSpeech, false, 1, 'vote')).toBe('speech');
   });
 });
 

@@ -84,6 +84,7 @@ describe('実AI人格プロンプト', () => {
     expect(prompts.systemPrompt).toContain('inspection_reason=2回');
     expect(prompts.systemPrompt).toContain('質問だけで終えず');
     expect(prompts.systemPrompt).toContain('structureは実際に口にする内容の自己分類');
+    expect(prompts.systemPrompt).toContain('evidenceDay');
     expect(prompts.decisionPrompt).toContain('structureは本文に現れる');
   });
 
@@ -254,9 +255,16 @@ describe('実AI人格プロンプト', () => {
       speech: 'こはるさんの便乗が気になります。', addressedTo: null, requestsReply: false,
       structure: {
         primaryAct: 'suspicion', questionTopic: null,
-        suspicion: { targetSeat: 'seat-2', basis: 'interaction' }, voteIntent: null, boardAnalysis: false,
+        suspicion: { targetSeat: 'seat-2', basis: 'interaction', evidenceDay: 1 }, voteIntent: null, boardAnalysis: false,
       },
     }).success).toBe(true);
+    expect(schema.safeParse({
+      speech: 'こはるさんの便乗が気になります。', addressedTo: null, requestsReply: false,
+      structure: {
+        primaryAct: 'suspicion', questionTopic: null,
+        suspicion: { targetSeat: 'seat-2', basis: 'interaction' }, voteIntent: null, boardAnalysis: false,
+      },
+    }).success).toBe(false);
     expect(schema.safeParse({
       speech: 'どう思いますか？', addressedTo: 'seat-2', requestsReply: true,
       structure: { primaryAct: 'question', questionTopic: null, suspicion: null, voteIntent: null, boardAnalysis: false },

@@ -63,7 +63,12 @@ export interface SpeechStructure {
   primaryAct: SpeechAct;
   /** 質問をした、または質問へ答えた場合の話題。 */
   questionTopic: QuestionTopic | null;
-  suspicion: { targetSeat: SeatId; basis: SuspicionBasis } | null;
+  suspicion: {
+    targetSeat: SeatId;
+    basis: SuspicionBasis;
+    /** 根拠となる公開情報の日。勘だけの場合はnull。旧保存応答との互換のため任意。 */
+    evidenceDay?: number | null;
+  } | null;
   voteIntent: SeatId | null;
   /** 役職主張数や今日の処刑範囲を本文で明示的に整理したか。 */
   boardAnalysis: boolean;
