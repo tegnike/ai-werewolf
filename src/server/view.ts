@@ -8,7 +8,8 @@ function publicPayload(event: MatchEvent): Record<string, unknown> {
   const payload = event.payload;
   const fields: Record<string, string[]> = {
     dawn: ['victim', 'message'],
-    discussion_speech: ['seat', 'name', 'round', 'speech'],
+    discussion_speech: ['seat', 'name', 'round', 'stage', 'turn', 'speech', 'addressedTo', 'requestsReply'],
+    discussion_closed: ['openingSpeeches', 'freeSpeeches'],
     execution: ['seat', 'message'],
     anomaly_flag: ['winner', 'roles', 'anomaly'],
     match_finished: ['winner', 'roles', 'anomaly'],

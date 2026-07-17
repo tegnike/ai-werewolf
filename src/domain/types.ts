@@ -51,7 +51,16 @@ export interface GameState {
   pendingVictim: SeatId | null;
 }
 
-export type DecisionKind = 'speech' | 'wolf_speech' | 'vote' | 'runoff_vote' | 'attack' | 'attack_final' | 'seer' | 'guard';
+export type DecisionKind = 'speech' | 'speech_intent' | 'wolf_speech' | 'vote' | 'runoff_vote' | 'attack' | 'attack_final' | 'seer' | 'guard';
+export type SpeechMotivation = 'reply' | 'question' | 'challenge' | 'new_information' | 'clarify' | 'none';
+
+export interface DiscussionContext {
+  stage: 'opening' | 'free';
+  turn: number;
+  promptedBySeat?: SeatId;
+  motivation?: SpeechMotivation;
+  intendedTarget?: SeatId | null;
+}
 
 export interface DecisionContext {
   matchId: string;
@@ -66,13 +75,24 @@ export interface DecisionContext {
   publicHistory: string[];
   privateFacts: string[];
   round?: number;
+  discussion?: DiscussionContext;
 }
 
-export interface SpeechDecision { speech: string }
+export interface SpeechDecision {
+  speech: string;
+  addressedTo: SeatId | null;
+  requestsReply: boolean;
+}
+export interface SpeechIntentDecision {
+  urgency: 0 | 1 | 2 | 3;
+  motivation: SpeechMotivation;
+  targetSeat: SeatId | null;
+}
 export interface TargetDecision { targetSeat: SeatId; statedReason: string }
 
 export interface DecisionProvider {
   speech(context: DecisionContext): Promise<SpeechDecision>;
+  speechIntent(context: DecisionContext): Promise<SpeechIntentDecision>;
   target(context: DecisionContext): Promise<TargetDecision>;
 }
 

@@ -1,4 +1,5 @@
-import type { DecisionContext, DecisionProvider, SpeechDecision, TargetDecision } from '@/domain/types';
+import { addressBookForSeat } from '@/domain/agents';
+import type { DecisionContext, DecisionProvider, SeatId, SpeechDecision, SpeechIntentDecision, SpeechMotivation, TargetDecision } from '@/domain/types';
 import { stableIndex } from '@/engine/prng';
 
 const observations: Record<string, string[]> = {
@@ -54,7 +55,31 @@ export class MockAI implements DecisionProvider {
     const candidates = observations[context.actor.seat] ?? ['公開情報をもう一度確認します。'];
     const index = stableIndex(context.seed, context.callKey, candidates.length);
     const prefix = context.kind === 'wolf_speech' ? '襲撃方針として、' : '';
-    return { speech: `${prefix}${candidates[index]}` };
+    const speech = `${prefix}${candidates[index]}`;
+    const addressedTo = Object.entries(addressBookForSeat(context.actor.seat))
+      .find(([seat, term]) => context.legalTargets.includes(seat as SeatId) && speech.includes(term ?? ''))?.[0] as SeatId | undefined;
+    return {
+      speech,
+      addressedTo: addressedTo ?? null,
+      requestsReply: Boolean(addressedTo && /[?？]|教えて|答えて|聞かせ/.test(speech)),
+    };
+  }
+
+  async speechIntent(context: DecisionContext): Promise<SpeechIntentDecision> {
+    if (context.discussion?.promptedBySeat) {
+      const targetSeat = context.legalTargets.includes(context.discussion.promptedBySeat)
+        ? context.discussion.promptedBySeat
+        : null;
+      return { urgency: 3, motivation: 'reply', targetSeat };
+    }
+    const urgency = stableIndex(context.seed, context.callKey, 4) as 0 | 1 | 2 | 3;
+    if (urgency === 0) return { urgency, motivation: 'none', targetSeat: null };
+    const motivations: SpeechMotivation[] = ['question', 'challenge', 'new_information', 'clarify'];
+    const motivation = motivations[stableIndex(context.seed, `${context.callKey}-motivation`, motivations.length)];
+    const targetSeat = context.legalTargets.length > 0
+      ? context.legalTargets[stableIndex(context.seed, `${context.callKey}-target`, context.legalTargets.length)]
+      : null;
+    return { urgency, motivation, targetSeat };
   }
 
   async target(context: DecisionContext): Promise<TargetDecision> {

@@ -15,6 +15,7 @@ export function derivePresentedState(events: UiEvent[], matchStatus?: string): P
   }
   if (last.type === 'match_finished') return { day: last.day, phase: 'finished' };
   if (last.type === 'execution' && !terminal) return { day: last.day, phase: 'night_actions' };
+  if (last.type === 'discussion_closed' && !terminal) return { day: last.day, phase: 'vote' };
   if (last.type === 'discussion_speech' && !terminal) {
     const dead = new Set<string>();
     for (const event of ordered) {

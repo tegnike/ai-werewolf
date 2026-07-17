@@ -2,10 +2,10 @@ import OpenAI from 'openai';
 import { zodTextFormat } from 'openai/helpers/zod';
 import { createHash } from 'node:crypto';
 import { MODEL } from '@/domain/constants';
-import type { DecisionContext, DecisionProvider, SpeechDecision, TargetDecision } from '@/domain/types';
+import type { DecisionContext, DecisionProvider, SpeechDecision, SpeechIntentDecision, TargetDecision } from '@/domain/types';
 import type { MatchRepo } from '@/server/repo';
 import { buildPrompts } from './prompts';
-import { SpeechDecisionSchema, targetDecisionSchema } from './schemas';
+import { speechDecisionSchema, speechIntentDecisionSchema, targetDecisionSchema } from './schemas';
 import { validateSpeechDisclosure } from './disclosure';
 
 export class AmbiguousAICallError extends Error { code = 'ambiguous_ai_call'; }
@@ -39,7 +39,10 @@ export class RealAI implements DecisionProvider {
   }
 
   speech(context: DecisionContext): Promise<SpeechDecision> {
-    return this.request(context, SpeechDecisionSchema, 'speech_decision', (decision) => validateSpeechDisclosure(context, decision));
+    return this.request(context, speechDecisionSchema(context.legalTargets), 'speech_decision', (decision) => validateSpeechDisclosure(context, decision));
+  }
+  speechIntent(context: DecisionContext): Promise<SpeechIntentDecision> {
+    return this.request(context, speechIntentDecisionSchema(context.legalTargets), 'speech_intent_decision');
   }
   target(context: DecisionContext): Promise<TargetDecision> {
     return this.request(context, targetDecisionSchema(context.legalTargets), 'target_decision');

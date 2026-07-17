@@ -21,6 +21,7 @@ describe('実AI人格プロンプト', () => {
       publicHistory: ['名取 澪: 皆さんの話を聞きたいです。'],
       privateFacts: [],
       round: 1,
+      discussion: { stage: 'opening', turn: 2, promptedBySeat: 'seat-1' },
     };
 
     const { systemPrompt, decisionPrompt } = buildPrompts(context);
@@ -32,8 +33,30 @@ describe('実AI人格プロンプト', () => {
     expect(systemPrompt).toContain('神崎 レナは「レナ」');
     expect(systemPrompt).toContain('Agent番号や別の呼び方を使わず');
     expect(systemPrompt).toContain('議事録調の語を繰り返さない');
+    expect(systemPrompt).toContain('開始発言の一巡');
+    expect(systemPrompt).toContain('自由な割り込みや即時の応答は起きません');
+    expect(systemPrompt).toContain('名取 澪が先ほどあなたへ話を向けています');
     expect(decisionPrompt).toContain('名取 澪');
     expect(decisionPrompt).toContain('八木 こはる');
+  });
+
+  it('発言希望確認では台詞を作らず、黙る選択と4段階の緊急度を示す', () => {
+    const players = setupPlayers('intent-prompt');
+    const context: DecisionContext = {
+      matchId: 'test', callKey: 'd1-speech-intent-p1-seat-2', seed: 'intent-prompt', day: 1,
+      phase: 'discussion', kind: 'speech_intent', actor: players[1], players,
+      legalTargets: players.filter((player) => player.seat !== players[1].seat).map((player) => player.seat),
+      publicHistory: Array.from({ length: 40 }, (_, index) => `履歴-${String(index + 1).padStart(2, '0')}`), privateFacts: [],
+      discussion: { stage: 'free', turn: 1, promptedBySeat: 'seat-1' },
+    };
+
+    const prompts = buildPrompts(context);
+    expect(prompts.systemPrompt).toContain('実際の発言ではなく');
+    expect(prompts.systemPrompt).toContain('0=今は黙る');
+    expect(prompts.systemPrompt).toContain('台詞や長い理由は作らない');
+    expect(prompts.decisionPrompt).toContain('urgency=0');
+    expect(prompts.decisionPrompt).not.toContain('履歴-01');
+    expect(prompts.decisionPrompt).toContain('履歴-40');
   });
 
   it('占い結果の初回公開では自然な日本語で占い師を名乗らせる', () => {

@@ -38,7 +38,12 @@ describe('公開イベントからの観戦フェーズ導出', () => {
     expect(derivePresentedState([], 'running')).toEqual({ day: 0, phase: 'night_zero' });
   });
 
-  it('生存者全員の2周目発言が終わると投票中として表示する', () => {
+  it('議論終了イベントを受け取ると発言数にかかわらず投票中として表示する', () => {
+    const discussionClosed = { ...event(12, 'discussion_closed'), phase: 'vote' };
+    expect(derivePresentedState([event(11, 'discussion_speech'), discussionClosed], 'running')).toEqual({ day: 1, phase: 'vote' });
+  });
+
+  it('旧形式の試合は生存者全員の2周目発言から投票中と判定する', () => {
     const speeches = Array.from({ length: 18 }, (_, index) => ({
       ...event(index + 1, 'discussion_speech'), payload: { seat: `seat-${(index % 9) + 1}`, speech: '発言' },
     }));

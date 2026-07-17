@@ -1,6 +1,6 @@
 import { randomBytes, randomUUID } from 'node:crypto';
 import type {
-  DecisionContext, DecisionProvider, MatchEvent, MatchRecord, RunHooks, SpeechDecision, TargetDecision,
+  DecisionContext, DecisionProvider, MatchEvent, MatchRecord, RunHooks, SpeechDecision, SpeechIntentDecision, TargetDecision,
 } from '@/domain/types';
 import { runGame } from '@/engine/game';
 import { MockAI } from './ai/mock';
@@ -87,6 +87,7 @@ export class MatchRunner {
       const base: DecisionProvider = match.config.ai === 'real' ? new RealAI(this.repo) : new MockAI();
       const ai: DecisionProvider = {
         speech: (context): Promise<SpeechDecision> => this.controlledDecision(() => base.speech(context), context),
+        speechIntent: (context): Promise<SpeechIntentDecision> => this.controlledDecision(() => base.speechIntent(context), context),
         target: (context): Promise<TargetDecision> => this.controlledDecision(() => base.target(context), context),
       };
       const hooks: RunHooks = {

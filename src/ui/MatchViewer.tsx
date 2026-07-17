@@ -15,7 +15,7 @@ import { SpectatorGuide } from './SpectatorGuide';
 
 const roleLabel: Record<string, string> = { villager: '村人', werewolf: '人狼', seer: '占い師', medium: '霊媒師', bodyguard: '狩人', madman: '狂人' };
 const phaseLabel: Record<string, string> = { setup: '準備', night_zero: '第0夜', dawn: '夜明け', discussion: '議論', vote: '投票', runoff: '決選投票', execution: '処刑', medium: '霊媒', wolf_chat: '人狼会話', night_actions: '夜の行動', finished: '終了' };
-const eventLabel: Record<string, string> = { match_created: '配役決定', dawn: '夜明け', discussion_speech: '発言', vote_cast: '投票', vote_reveal: '開票', execution: '処刑', match_finished: '決着', anomaly_flag: '異常終了', werewolf_chat: '人狼会話', seer_result: '占い', medium_result: '霊媒', guard_choice: '護衛', attack_choice: '襲撃選択', night_resolved: '夜の解決', werewolf_reveal: '人狼確認', decision_note: '最終決定' };
+const eventLabel: Record<string, string> = { match_created: '配役決定', dawn: '夜明け', discussion_speech: '発言', discussion_closed: '議論終了', vote_cast: '投票', vote_reveal: '開票', execution: '処刑', match_finished: '決着', anomaly_flag: '異常終了', werewolf_chat: '人狼会話', seer_result: '占い', medium_result: '霊媒', guard_choice: '護衛', attack_choice: '襲撃選択', night_resolved: '夜の解決', werewolf_reveal: '人狼確認', decision_note: '最終決定' };
 
 interface VoteEntry { voter: string; target: string; statedReason?: string }
 
@@ -44,6 +44,7 @@ function voteResultText(event: UiEvent): string {
 function eventText(event: UiEvent): string {
   const p = event.payload;
   if (event.type === 'discussion_speech') return `${seatName(p.seat)}「${String(p.speech)}」`;
+  if (event.type === 'discussion_closed') return '議論を終えて投票へ進みます。';
   if (event.type === 'dawn') return p.victim ? `${seatName(p.victim)}が犠牲になりました。` : '犠牲者はいません。';
   if (event.type === 'execution') return p.seat ? `${seatName(p.seat)}が処刑されました。` : '同数のため処刑はありません。';
   if (event.type === 'vote_reveal') return `${p.round === 2 ? '決選投票: ' : ''}${voteResultText(event)}`;
