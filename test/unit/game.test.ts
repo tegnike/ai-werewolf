@@ -33,7 +33,7 @@ describe('ゲームエンジン', () => {
     expect(events.some((event) => event.day === 1 && event.type === 'dawn')).toBe(false);
     expect(events.find((event) => event.visibility === 'public')?.type).toBe('discussion_speech');
   });
-  it('各昼で全員が1回以上話し、人数別の総数と1人2回の上限を守る', async () => {
+  it('各昼で全員が1回以上話し、通常2回と合意対象だけの追加反論1回を守る', async () => {
     const { events } = await runMock('speech-rounds');
     for (const day of new Set(events.filter((event) => event.type === 'discussion_speech').map((event) => event.day))) {
       const speeches = events.filter((event) => event.day === day && event.type === 'discussion_speech');
@@ -42,13 +42,16 @@ describe('ゲームエンジン', () => {
       const closed = events.find((event) => event.day === day && event.type === 'discussion_closed')!;
       const minimum = Number(closed.payload.minimumSpeeches);
       const maximum = Number(closed.payload.maximumSpeeches);
+      const consensusDefenseExtraSpeeches = Number(closed.payload.consensusDefenseExtraSpeeches ?? 0);
       expect(counts.size).toBe(Number(closed.payload.openingSpeeches));
       expect(counts.size).toBe(maximum / 2);
-      expect([...counts.values()].every((count) => count >= 1 && count <= 2)).toBe(true);
+      expect([...counts.values()].every((count) => count >= 1 && count <= 3)).toBe(true);
+      expect([...counts.values()].filter((count) => count === 3)).toHaveLength(consensusDefenseExtraSpeeches);
+      expect(consensusDefenseExtraSpeeches).toBeLessThanOrEqual(1);
       expect(minimum).toBe(Math.max(counts.size, Math.ceil((14 * counts.size) / 9)));
       expect(maximum).toBe(Math.min(18, counts.size * 2));
       expect(speeches.length).toBeGreaterThanOrEqual(minimum);
-      expect(speeches.length).toBeLessThanOrEqual(maximum);
+      expect(speeches.length).toBeLessThanOrEqual(maximum + consensusDefenseExtraSpeeches);
       expect(closed.payload.totalSpeeches).toBe(speeches.length);
       expect(maximum).toBeLessThanOrEqual(18);
       if (day === 1) {
@@ -56,6 +59,75 @@ describe('ゲームエンジン', () => {
         expect(maximum).toBe(18);
       }
     }
+  });
+
+  it('3人目の同一投票予定後、2回発言済みの対象本人へ追加反論枠を1回だけ渡す', async () => {
+    const speechContexts: DecisionContext[] = [];
+    const targetByDay = new Map<number, DecisionContext['actor']['seat']>();
+    const intentCounts = new Map<number, number>();
+    const provider: DecisionProvider = {
+      async speech(context): Promise<SpeechDecision> {
+        speechContexts.push(structuredClone(context));
+        const target = targetByDay.get(context.day) ?? context.actor.seat;
+        targetByDay.set(context.day, target);
+        const isTarget = context.actor.seat === target;
+        const intentCount = intentCounts.get(context.day) ?? 0;
+        const replyTarget = context.legalTargets.find((seat) => seat !== target) ?? context.legalTargets[0] ?? null;
+
+        if (context.discussion?.turn === 1) {
+          return {
+            speech: '最初にあなたの考えを聞きたい。', addressedTo: replyTarget, requestsReply: true,
+            structure: { primaryAct: 'question', questionTopic: 'gray_read', suspicion: null, voteIntent: null, boardAnalysis: false },
+          };
+        }
+        if (!isTarget && context.discussion?.turn === 2) {
+          intentCounts.set(context.day, intentCount + 1);
+          return {
+            speech: '回答しつつ、現時点では最初の話者へ投票する。', addressedTo: target, requestsReply: true,
+            structure: { primaryAct: 'vote_intent', questionTopic: 'defense', suspicion: { targetSeat: target, basis: 'speech_content' }, voteIntent: target, boardAnalysis: false },
+          };
+        }
+        if (isTarget) {
+          return {
+            speech: context.discussion?.consensusDefense ? '集まった疑いへ具体的に反論する。' : '質問へ答え、判断材料を示す。',
+            addressedTo: null, requestsReply: false,
+            structure: { primaryAct: context.discussion?.consensusDefense ? 'defense' : 'answer', questionTopic: 'defense', suspicion: null, voteIntent: null, boardAnalysis: false },
+          };
+        }
+        if (intentCount < 3) {
+          intentCounts.set(context.day, intentCount + 1);
+          return {
+            speech: '発言内容を根拠に同じ候補へ投票予定を置く。', addressedTo: null, requestsReply: false,
+            structure: { primaryAct: 'vote_intent', questionTopic: null, suspicion: { targetSeat: target, basis: 'speech_content' }, voteIntent: target, boardAnalysis: false },
+          };
+        }
+        return {
+          speech: '反論後の盤面を改めて比較する。', addressedTo: null, requestsReply: false,
+          structure: { primaryAct: 'board_analysis', questionTopic: null, suspicion: null, voteIntent: null, boardAnalysis: true },
+        };
+      },
+      async speechIntent(): Promise<SpeechIntentDecision> {
+        return { urgency: 0, motivation: 'none', targetSeat: null };
+      },
+      async target(context): Promise<TargetDecision> {
+        return { targetSeat: context.legalTargets[0], statedReason: '合法対象を選ぶ。' };
+      },
+    };
+
+    const events: Array<{ day: number; type: string; payload: Record<string, unknown> }> = [];
+    await runGame('consensus-defense', 'consensus-defense', provider, {
+      emit: async (event) => { events.push({ day: event.day, type: event.type, payload: event.payload }); },
+      checkpoint: async () => {},
+    });
+
+    const dayOneTarget = targetByDay.get(1);
+    const targetSpeeches = speechContexts.filter((context) =>
+      context.day === 1 && context.kind === 'speech' && context.actor.seat === dayOneTarget);
+    expect(targetSpeeches).toHaveLength(3);
+    expect(targetSpeeches[2].discussion?.consensusDefense).toBe(true);
+    expect(targetSpeeches[2].discussion?.consensusTarget).toBe(dayOneTarget);
+    const closed = events.find((event) => event.day === 1 && event.type === 'discussion_closed');
+    expect(closed?.payload.consensusDefenseExtraSpeeches).toBe(1);
   });
 
   it('claims v1で公開主張を決定論的に保存し、偽結果と対抗を発言上限内に収める', async () => {
@@ -80,7 +152,8 @@ describe('ゲームエンジン', () => {
     expect(ledger.filter((entry) => roles.get(entry.seat) === 'werewolf').length).toBeLessThanOrEqual(1);
 
     for (const closed of first.events.filter((event) => event.type === 'discussion_closed')) {
-      expect(Number(closed.payload.freeSpeeches)).toBeLessThanOrEqual(Number(closed.payload.openingSpeeches));
+      expect(Number(closed.payload.freeSpeeches)).toBeLessThanOrEqual(
+        Number(closed.payload.openingSpeeches) + Number(closed.payload.consensusDefenseExtraSpeeches ?? 0));
       expect(Number(closed.payload.intentPolls)).toBeLessThanOrEqual(2);
     }
   });

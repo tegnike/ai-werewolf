@@ -28,6 +28,8 @@ interface ScheduledDiscussionSpeaker {
   promptedBySeat?: SeatId;
   motivation?: DiscussionContext['motivation'];
   intendedTarget?: SeatId | null;
+  consensusDefense?: boolean;
+  allowExtraSpeech?: boolean;
 }
 
 const MAX_INTENT_POLLS_PER_DAY = 2;
@@ -466,16 +468,18 @@ export async function runGame(
       const polledSeats = new Set<SeatId>();
       const lastIntentSpeechCount = new Map<SeatId, number>();
       const defenseScheduledSeats = new Set<SeatId>();
+      const consensusDefenseScheduledSeats = new Set<SeatId>();
       let speechCount = 0;
+      let consensusDefenseExtraSpeeches = 0;
       let intentPolls = 0;
       let nextSpeaker: ScheduledDiscussionSpeaker | null = {
         actor: stableShuffle(speakers, seed, `d${day}-first-speaker`)[0],
         motivation: 'new_information',
       };
 
-      while (speechCount < maximumSpeeches) {
+      while (speechCount < maximumSpeeches + 1) {
         if (!nextSpeaker) {
-          if (claimsEnabled) {
+          if (claimsEnabled && speechCount < maximumSpeeches + consensusDefenseExtraSpeeches) {
             const mandatory = speakers.filter((player) => {
               const count = speechCounts.get(player.seat) ?? 0;
               const stage = count === 0 ? 'opening' : 'free';
@@ -494,6 +498,22 @@ export async function runGame(
             }
           }
         }
+        if (!nextSpeaker && discussionVersion === 'v3') {
+          const consensus = consensusVoteTarget(discussionBoard);
+          const actor = consensus ? speakers.find((player) => player.seat === consensus) : undefined;
+          const actorSpeechCount = actor ? (speechCounts.get(actor.seat) ?? 0) : 0;
+          if (actor && !consensusDefenseScheduledSeats.has(actor.seat) &&
+            actorSpeechCount >= 1 && actorSpeechCount < MAX_SPEECHES_PER_PLAYER + 1) {
+            consensusDefenseScheduledSeats.add(actor.seat);
+            nextSpeaker = {
+              actor,
+              motivation: 'challenge',
+              consensusDefense: true,
+              allowExtraSpeech: actorSpeechCount >= MAX_SPEECHES_PER_PLAYER,
+            };
+          }
+        }
+        if (!nextSpeaker && speechCount >= maximumSpeeches + consensusDefenseExtraSpeeches) break;
         if (!nextSpeaker) {
           if (discussionVersion === 'v3') {
             const defenseCandidates = speakers.filter((player) =>
@@ -571,7 +591,10 @@ export async function runGame(
         const actor = currentSpeaker.actor;
         nextSpeaker = null;
         const actorSpeechCount = speechCounts.get(actor.seat) ?? 0;
-        if (actorSpeechCount >= MAX_SPEECHES_PER_PLAYER) continue;
+        const actorSpeechLimit = currentSpeaker.allowExtraSpeech
+          ? MAX_SPEECHES_PER_PLAYER + 1
+          : MAX_SPEECHES_PER_PLAYER;
+        if (actorSpeechCount >= actorSpeechLimit) continue;
         const stage = actorSpeechCount === 0 ? 'opening' : 'free';
         const canRequestReply = speechCount + 1 < maximumSpeeches;
         const legalTargets = speakers
@@ -588,6 +611,7 @@ export async function runGame(
           canRequestReply,
           ...(currentSpeaker.promptedBySeat ? { promptedBySeat: currentSpeaker.promptedBySeat } : {}),
           ...(currentSpeaker.motivation ? { motivation: currentSpeaker.motivation } : {}),
+          ...(currentSpeaker.consensusDefense ? { consensusDefense: true } : {}),
           ...('intendedTarget' in currentSpeaker ? { intendedTarget: currentSpeaker.intendedTarget } : {}),
         };
         const speechContext = context(
@@ -599,6 +623,9 @@ export async function runGame(
         if (discussionVersion === 'v3' && !decision.structure) throw new Error('DISCUSSION_V3_STRUCTURE_REQUIRED');
         const speech = normalizeSpeech(decision.speech);
         speechCount += 1;
+        if (currentSpeaker.allowExtraSpeech && actorSpeechCount >= MAX_SPEECHES_PER_PLAYER) {
+          consensusDefenseExtraSpeeches += 1;
+        }
         speechCounts.set(actor.seat, actorSpeechCount + 1);
         await emit(day, 'discussion', 'discussion_speech', {
           seat: actor.seat, name: actor.name, round: actorSpeechCount + 1, stage, turn: speechCount,
@@ -636,6 +663,7 @@ export async function runGame(
         totalSpeeches: speechCount,
         minimumSpeeches,
         maximumSpeeches,
+        consensusDefenseExtraSpeeches,
         intentPolls,
       });
     }

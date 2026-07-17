@@ -136,6 +136,8 @@ function evaluate(events: MatchEvent[]) {
   const postConsensusNovelty = consensusStructureIndex < 0 || postConsensusNovelContributions >= requiredNovelContributions;
   const postConsensusDuplicateDeclarations = postConsensus.filter(({ structure }) =>
     structure.voteIntent !== null && structure.voteIntent === consensusTarget).length;
+  const consensusTargetResponded = consensusStructureIndex < 0 ||
+    postConsensus.some(({ seat }) => seat === consensusTarget);
   const voteTally = new Map<SeatId, number>();
   for (const vote of votes) voteTally.set(vote.target, (voteTally.get(vote.target) ?? 0) + 1);
   const topVote = [...voteTally.entries()].sort((a, b) => b[1] - a[1])[0];
@@ -147,14 +149,16 @@ function evaluate(events: MatchEvent[]) {
   const repeatDeclarationDemotions = speeches
     .filter((speech) => speech.payload.contributionDemoted)
     .map((speech) => ({ turn: speech.payload.turn, seat: speech.payload.seat }));
+  const roleResolutionBoard = claimedSeats.size >= 4 && blackBackedTargets.size > 0;
   const checks = {
     structureComplete: structures.length === speeches.length,
     repeatedQuestionLimit: Math.max(0, ...Object.values(questionCounts)) <= 2,
-    grayReadSpeakers: suspicionSpeakers.size >= (roleHeavyBoard ? 1 : 3),
-    grayReadTargets: suspicionTargets.size >= (roleHeavyBoard ? 1 : 2),
+    grayReadSpeakers: roleResolutionBoard || suspicionSpeakers.size >= (roleHeavyBoard ? 1 : 3),
+    grayReadTargets: roleResolutionBoard || suspicionTargets.size >= (roleHeavyBoard ? 1 : 2),
     voteCommitments: voteIntentBySeat.size >= 2,
     candidateCompetition: voteIntentBySeat.size < 4 || distinctVoteTargets.size >= 2 || Boolean(modalIntent && blackBackedTargets.has(modalIntent[0])),
     postConsensusDeclarationCap: postConsensusDuplicateDeclarations === 0,
+    consensusTargetResponse: consensusTargetResponded,
     postConsensusNovelty,
     antiScatterGuard: !hasUnopposedBlack || (topVote?.[1] ?? 0) >= 4,
     boardProgression: !hasClaims || structures.some(({ structure }) => structure.boardAnalysis),
@@ -167,6 +171,7 @@ function evaluate(events: MatchEvent[]) {
     blackBackedTargets: [...blackBackedTargets], consensusTarget,
     postConsensusSpeechCount: postConsensus.length,
     postConsensusNovelContributions, requiredNovelContributions, postConsensusDuplicateDeclarations,
+    consensusTargetResponded,
     repeatDeclarationDemotions,
     voteConsistency: Number(voteConsistency.toFixed(3)), highSimilarityPairs,
     transcript: speeches.map((event) => ({

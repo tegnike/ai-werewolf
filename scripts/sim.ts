@@ -87,7 +87,9 @@ async function main() {
           }
         }
         for (const closed of events.filter((event) => event.type === 'discussion_closed')) {
-          if (Number(closed.payload.freeSpeeches) > Number(closed.payload.openingSpeeches) ||
+          const allowedFreeSpeeches = Number(closed.payload.openingSpeeches) +
+            Number(closed.payload.consensusDefenseExtraSpeeches ?? 0);
+          if (Number(closed.payload.freeSpeeches) > allowedFreeSpeeches ||
             Number(closed.payload.intentPolls) > 2) claimMetrics.budgetViolations += 1;
         }
         console.log(`${index + 1}/${matches} seed=${record.seed} winner=${current.winner} events=${events.length} apiCalls=${current.apiCalls} claims=${ledger.length}`);

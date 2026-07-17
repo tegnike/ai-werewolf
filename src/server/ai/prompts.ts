@@ -81,6 +81,9 @@ export function buildPrompts(context: DecisionContext): { systemPrompt: string; 
       ? [`次の質問分類はすでに2回尋ねられたため閉じています。新たな返答要求に使わず、questionTopicにも設定しないでください: ${context.discussion.closedQuestionTopics.join(', ')}`]
       : []),
     '投票予定の人数は他者の意見であって、人狼だと判断する証拠ではありません。候補別の公開材料にある能力結果、発言、反応、相互関係を自分で比較してください。',
+    ...(context.discussion?.consensusDefense ? [
+      'あなた自身への投票予定が3人に達したため、これは投票前に保証された最後の反論枠です。直近までに向けられた疑いのうち重要なものへ具体的に答え、誤解があれば訂正し、自分を処刑しない場合に比較すべき候補と公開根拠を示してください。役職や同じ主張を繰り返すだけで終えないでください。',
+    ] : []),
     ...(context.discussion?.consensusTarget ? [
       `${agentNameForSeat(context.discussion.consensusTarget)}への投票予定はすでに3人以上から公表されています。この発言では、あなた自身がまだ宣言していなくても同じ相手への投票予定を本文で追加宣言せず、voteIntentにも設定しないでください。最終の非公開投票先は拘束されません。増えた公開情報、被疑者への質問、反証、または未検討の人物を話してください。`,
     ] : [

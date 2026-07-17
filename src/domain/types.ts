@@ -101,6 +101,8 @@ export interface DiscussionContext {
   closedQuestionTopics?: QuestionTopic[];
   /** 3人以上の投票予定が集まった公開上の先頭候補。 */
   consensusTarget?: SeatId;
+  /** 投票予定が3人に達した候補本人へ保証された、合意形成後の反論枠。 */
+  consensusDefense?: boolean;
   /** この話者が同日すでに宣言した投票予定。 */
   priorVoteIntentTarget?: SeatId;
   /** markerのない旧試合で固定一巡プロンプトを再現する。 */

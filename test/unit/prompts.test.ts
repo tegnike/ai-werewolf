@@ -114,6 +114,18 @@ describe('実AI人格プロンプト', () => {
     expect(prompts.decisionPrompt).toContain('candidateEvidence');
   });
 
+  it('合意対象本人の追加反論枠では疑いへの回答と比較候補を要求する', () => {
+    const players = setupPlayers('consensus-defense-prompt');
+    const prompts = buildPrompts({
+      matchId: 'test', callKey: 'd1-speech-t13-seat-1', seed: 'consensus-defense-prompt', day: 1,
+      phase: 'discussion', kind: 'speech', actor: players[0], players, legalTargets: ['seat-2'],
+      publicHistory: [], privateFacts: [],
+      discussion: { version: 'v3', stage: 'free', turn: 13, consensusTarget: 'seat-1', consensusDefense: true },
+    });
+    expect(prompts.systemPrompt).toContain('投票前に保証された最後の反論枠');
+    expect(prompts.systemPrompt).toContain('比較すべき候補と公開根拠');
+  });
+
   it('最終投票でも多数派そのものを根拠にせず証拠台帳を渡す', () => {
     const players = setupPlayers('vote-evidence-prompt');
     const actor = players[0];
