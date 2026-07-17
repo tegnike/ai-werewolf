@@ -402,12 +402,14 @@ const TargetDecision = z.object({
 | 情報 | 公開視点 | GM視点 | 終了後 |
 |---|---:|---:|---:|
 | 発言、投票、死亡 | ○ | ○ | ○ |
+| 非公開イベントの実施（内容は伏せる） | ○ | ○ | ○ |
 | 本当の役職 | × | ○ | ○ |
 | 人狼会話 | × | ○ | ○ |
 | 襲撃・占い・霊媒・護衛 | × | ○ | ○ |
 | statedReason | × | ○ | ○ |
 
 - 公開データはサーバー側でホワイトリスト射影する。
+- 進行中の公開視点では、非公開イベントを固定ラベルだけの `private_action` に射影し、「人狼確認が行われました。」のように実施事実だけを表示する。元のpayload、対象、判定結果、発言本文、理由、audienceは含めない。
 - 進行中の公開視点では `statedReason` を含む非公開判断理由をpayloadから除去する。
 - 秘密情報をブラウザへ送ってCSSで隠す方式は禁止。
 - ライブ中に公開／GM視点を切り替えられる。
@@ -734,6 +736,7 @@ interface MatchEvent<T extends string, P> {
 - `werewolf_chat`、`attack_choice`。
 - `seer_result`、`medium_result`、`guard_choice`。
 - `night_resolved`、`decision_note`、audience、config_json。
+- 非公開イベントと同じseqの `private_action` は存在し、payloadはホワイトリスト化した固定ラベルだけである。
 
 ### 8.4 E2E
 

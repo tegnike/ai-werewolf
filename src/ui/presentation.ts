@@ -4,6 +4,11 @@ const isSpokenEvent = (event: UiEvent): boolean => ['discussion_speech', 'werewo
 
 export interface PresentedState { day: number; phase: string }
 
+export function privateActionDescription(event: UiEvent): string | null {
+  if (event.type !== 'private_action') return null;
+  return `${String(event.payload.label ?? '非公開処理')}が行われました。`;
+}
+
 export function derivePresentedState(events: UiEvent[], matchStatus?: string): PresentedState {
   const ordered = [...events].sort((a, b) => a.seq - b.seq);
   const last = ordered.at(-1);

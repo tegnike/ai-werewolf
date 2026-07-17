@@ -2,12 +2,22 @@ import { describe, expect, it } from 'vitest';
 import { projectEvents } from '@/server/view';
 import { runMock } from '../helpers/runMock';
 
-const forbiddenTypes = ['werewolf_chat', 'attack_choice', 'seer_result', 'medium_result', 'guard_choice', 'night_resolved', 'decision_note'];
+const forbiddenTypes = [
+  'match_created', 'werewolf_reveal', 'werewolf_chat', 'vote_cast', 'attack_choice',
+  'seer_result', 'medium_result', 'guard_choice', 'night_resolved', 'decision_note',
+];
 describe('公開viewの秘密情報分離', () => {
-  it('終了前の公開レスポンスに秘密イベント・役職・audienceを含めない', async () => {
+  it('終了前の公開レスポンスで秘密イベントを内容のない実施ログに置き換える', async () => {
     const { events } = await runMock('leak');
     const beforeFinish = events.filter((event) => event.type !== 'match_finished' && event.type !== 'anomaly_flag');
     const projected = projectEvents(beforeFinish, 'public');
+    const privateEvents = beforeFinish.filter((event) => event.visibility === 'private');
+    const redactedEvents = projected.filter((event) => event.type === 'private_action');
+
+    expect(redactedEvents).toHaveLength(privateEvents.length);
+    expect(redactedEvents.map((event) => event.seq)).toEqual(privateEvents.map((event) => event.seq));
+    const werewolfRevealSeq = privateEvents.find((event) => event.type === 'werewolf_reveal')?.seq;
+    expect(redactedEvents.find((event) => event.seq === werewolfRevealSeq)?.payload).toEqual({ label: '人狼確認' });
     expect(projected.some((event) => forbiddenTypes.includes(event.type))).toBe(false);
     const json = JSON.stringify(projected);
     expect(json).not.toContain('audienceSeats');

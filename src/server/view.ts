@@ -4,6 +4,31 @@ export interface PublicEvent {
   matchId: string; seq: number; day: number; phase: string; type: string; payload: Record<string, unknown>; createdAt: string;
 }
 
+const privateEventLabels: Record<string, string> = {
+  match_created: '配役決定',
+  werewolf_reveal: '人狼確認',
+  werewolf_chat: '人狼同士の会話',
+  vote_cast: '投票',
+  medium_result: '霊媒結果の確認',
+  attack_choice: '襲撃先の検討',
+  seer_result: '占い結果の確認',
+  guard_choice: '護衛先の選択',
+  night_resolved: '夜の処理',
+  decision_note: '襲撃先の決定',
+};
+
+function redactedPrivateEvent(event: MatchEvent): PublicEvent {
+  return {
+    matchId: event.matchId,
+    seq: event.seq,
+    day: event.day,
+    phase: event.phase,
+    type: 'private_action',
+    payload: { label: privateEventLabels[event.type] ?? '非公開処理' },
+    createdAt: event.createdAt,
+  };
+}
+
 function publicPayload(event: MatchEvent): Record<string, unknown> {
   const payload = event.payload;
   const fields: Record<string, string[]> = {
@@ -36,7 +61,7 @@ export function projectEvents(events: MatchEvent[], view: ViewMode, revealSecret
   // 新規生成の防止だけでなくAPI射影でも1日目の夜明けを除外する。
   const presentable = events.filter((event) => !(event.day === 1 && event.type === 'dawn'));
   if (view === 'gm' || revealSecrets) return presentable;
-  return presentable.filter((event) => event.visibility === 'public').map((event) => ({
+  return presentable.map((event) => event.visibility === 'private' ? redactedPrivateEvent(event) : ({
     matchId: event.matchId, seq: event.seq, day: event.day, phase: event.phase,
     type: event.type, payload: publicPayload(event), createdAt: event.createdAt,
   }));

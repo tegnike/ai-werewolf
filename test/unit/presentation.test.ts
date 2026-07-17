@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { UiEvent } from '@/ui/types';
-import { derivePresentedState, presentationCursorAfterLoad, presentationLimit } from '@/ui/presentation';
+import { derivePresentedState, presentationCursorAfterLoad, presentationLimit, privateActionDescription } from '@/ui/presentation';
 
 const event = (seq: number, type: string): UiEvent => ({ matchId: 'test', seq, type, day: 1, phase: 'discussion', visibility: 'public', payload: {}, createdAt: '2026-07-16T00:00:00.000Z' });
 
@@ -30,6 +30,13 @@ describe('音声とログの同期', () => {
   it('視点を切り替えて再読込しても表示位置を進めない', () => {
     expect(presentationCursorAfterLoad(11, 13, true)).toBe(11);
     expect(presentationCursorAfterLoad(0, 13, false)).toBe(13);
+  });
+});
+
+describe('公開視点の非公開イベント表示', () => {
+  it('固定ラベルを実施ログとして表示する', () => {
+    expect(privateActionDescription({ ...event(1, 'private_action'), payload: { label: '人狼確認' } }))
+      .toBe('人狼確認が行われました。');
   });
 });
 
