@@ -37,6 +37,20 @@ describe('公開viewの秘密情報分離', () => {
     expect(JSON.stringify(projected)).toContain('statedReason');
   });
 
+  it('単独人狼の独り言modeを進行中の公開viewへ漏らさない', () => {
+    const event = {
+      matchId: 'lone-wolf', seq: 10, day: 2, phase: 'wolf_chat' as const, type: 'werewolf_chat', visibility: 'private' as const,
+      audienceSeats: ['seat-1' as const], payload: { seat: 'seat-1', speech: '一人で決める。', round: 1, mode: 'monologue' },
+      createdAt: '2026-07-17T00:00:00.000Z',
+    };
+
+    const [projected] = projectEvents([event], 'public');
+    expect(projected.type).toBe('private_action');
+    expect(projected.payload).toEqual({ label: '人狼の夜会話' });
+    expect(JSON.stringify(projected)).not.toContain('monologue');
+    expect(JSON.stringify(projected)).not.toContain('独り言');
+  });
+
   it('旧試合に残る1日目の夜明けは公開・GM両視点から除外する', () => {
     const legacyDawn = {
       matchId: 'legacy', seq: 6, day: 1, phase: 'dawn' as const, type: 'dawn', visibility: 'public' as const,
@@ -48,5 +62,20 @@ describe('公開viewの秘密情報分離', () => {
 
     expect(projectEvents([legacyDawn, firstSpeech], 'public').map((event) => event.seq)).toEqual([7]);
     expect(projectEvents([legacyDawn, firstSpeech], 'gm').map((event) => event.seq)).toEqual([7]);
+  });
+
+  it('公開claimを厳密allowlistで射影し、方針や真役職を同乗させない', async () => {
+    const { events } = await runMock('1000', 'v1');
+    const projected = projectEvents(events.filter((event) => event.type !== 'match_finished'), 'public');
+    const speech = projected.find((event) => event.type === 'discussion_speech' && event.payload.claim);
+    expect(speech?.payload.claim).toBeTruthy();
+    const claim = speech?.payload.claim as Record<string, unknown>;
+    expect(Object.keys(claim).sort()).toEqual(['claimedRole', 'results']);
+    expect(Object.keys((claim.results as Array<Record<string, unknown>>)[0]).sort()).toEqual(['day', 'targetSeat', 'verdict']);
+    const json = JSON.stringify(projected);
+    expect(json).not.toMatch(/"role"\s*:/);
+    expect(json).not.toContain('claimDirective');
+    expect(json).not.toContain('counterTargetSeat');
+    expect(json).not.toContain('stance');
   });
 });

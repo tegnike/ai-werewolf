@@ -1,4 +1,4 @@
-import { addressBookForSeat } from '@/domain/agents';
+import { addressBookForSeat, addressTermFor } from '@/domain/agents';
 import type { DecisionContext, DecisionProvider, SeatId, SpeechDecision, SpeechIntentDecision, SpeechMotivation, TargetDecision } from '@/domain/types';
 import { stableIndex } from '@/engine/prng';
 
@@ -52,17 +52,43 @@ const observations: Record<string, string[]> = {
 
 export class MockAI implements DecisionProvider {
   async speech(context: DecisionContext): Promise<SpeechDecision> {
+    if (context.kind === 'speech' && context.claimDirective) {
+      const directive = context.claimDirective;
+      if (directive.mode !== 'forbidden' && directive.claimedRole) {
+        const roleLabel = directive.claimedRole === 'seer' ? '占い師' : '霊媒師';
+        const resultSpeech = directive.results.map((result) => {
+          const verdict = result.verdict === '人狼' ? '人狼でした' : '人狼ではありませんでした';
+          return `${result.day}日目の${addressTermFor(context.actor.seat, result.targetSeat)}は${verdict}`;
+        }).join('。');
+        const speech = `私は${roleLabel}です。${resultSpeech || '今は伝えられる結果はありません。'}`;
+        const addressedTo = directive.counterTargetSeat && context.legalTargets.includes(directive.counterTargetSeat)
+          ? directive.counterTargetSeat
+          : null;
+        return {
+          speech,
+          addressedTo,
+          requestsReply: false,
+          claim: { claimedRole: directive.claimedRole, results: directive.results.map((result) => ({ ...result })) },
+        };
+      }
+    }
     const candidates = observations[context.actor.seat] ?? ['公開情報をもう一度確認します。'];
     const index = stableIndex(context.seed, context.callKey, candidates.length);
-    const prefix = context.kind === 'wolf_speech' ? '襲撃方針として、' : '';
+    const prefix = context.wolfChat?.mode === 'monologue'
+      ? '……もう相談相手はいない。次の襲撃を自分で決めるなら、'
+      : context.kind === 'wolf_speech' ? '襲撃方針として、' : '';
     const speech = `${prefix}${candidates[index]}`;
     const addressedTo = Object.entries(addressBookForSeat(context.actor.seat))
       .find(([seat, term]) => context.legalTargets.includes(seat as SeatId) && speech.includes(term ?? ''))?.[0] as SeatId | undefined;
-    return {
+    const decision: SpeechDecision = {
       speech,
       addressedTo: addressedTo ?? null,
-      requestsReply: Boolean(addressedTo && /[?？]|教えて|答えて|聞かせ/.test(speech)),
+      requestsReply: context.wolfChat?.mode === 'monologue'
+        ? false
+        : Boolean(addressedTo && /[?？]|教えて|答えて|聞かせ/.test(speech)),
     };
+    if (context.claimDirective) decision.claim = null;
+    return decision;
   }
 
   async speechIntent(context: DecisionContext): Promise<SpeechIntentDecision> {

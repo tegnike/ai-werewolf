@@ -7,7 +7,7 @@ export interface PublicEvent {
 const privateEventLabels: Record<string, string> = {
   match_created: '配役決定',
   werewolf_reveal: '人狼確認',
-  werewolf_chat: '人狼同士の会話',
+  werewolf_chat: '人狼の夜会話',
   vote_cast: '投票',
   medium_result: '霊媒結果の確認',
   attack_choice: '襲撃先の検討',
@@ -33,12 +33,32 @@ function publicPayload(event: MatchEvent): Record<string, unknown> {
   const payload = event.payload;
   const fields: Record<string, string[]> = {
     dawn: ['victim', 'message'],
-    discussion_speech: ['seat', 'name', 'round', 'stage', 'turn', 'speech', 'addressedTo', 'requestsReply'],
     discussion_closed: ['openingSpeeches', 'freeSpeeches'],
     execution: ['seat', 'message'],
     anomaly_flag: ['winner', 'roles', 'anomaly'],
     match_finished: ['winner', 'roles', 'anomaly'],
   };
+
+  if (event.type === 'discussion_speech') {
+    const common = Object.fromEntries(
+      ['seat', 'name', 'round', 'stage', 'turn', 'speech', 'addressedTo', 'requestsReply']
+        .flatMap((key) => key in payload ? [[key, payload[key]]] : []),
+    );
+    if (!('claim' in payload) || payload.claim === null) return { ...common, ...('claim' in payload ? { claim: null } : {}) };
+    if (typeof payload.claim !== 'object') return common;
+    const claim = payload.claim as Record<string, unknown>;
+    const results = Array.isArray(claim.results) ? claim.results.flatMap((value) => {
+      if (!value || typeof value !== 'object') return [];
+      const result = value as Record<string, unknown>;
+      return typeof result.day === 'number' && typeof result.targetSeat === 'string' &&
+        (result.verdict === '人狼' || result.verdict === '人狼ではない')
+        ? [{ day: result.day, targetSeat: result.targetSeat, verdict: result.verdict }]
+        : [];
+    }) : [];
+    return claim.claimedRole === 'seer' || claim.claimedRole === 'medium'
+      ? { ...common, claim: { claimedRole: claim.claimedRole, results } }
+      : common;
+  }
 
   if (event.type === 'vote_reveal') {
     const votes = Array.isArray(payload.votes)

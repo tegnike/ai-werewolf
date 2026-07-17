@@ -12,11 +12,33 @@ export function buildPrompts(context: DecisionContext): { systemPrompt: string; 
   const promptedByName = context.discussion?.promptedBySeat
     ? agentNameForSeat(context.discussion.promptedBySeat)
     : null;
+  const waitingForFreeReplyNames = (context.discussion?.waitingForFreeReplySeats ?? [])
+    .map((seat) => agentNameForSeat(seat));
+  const wolfChatGuidance = context.kind === 'wolf_speech'
+    ? context.wolfChat?.mode === 'monologue'
+      ? [
+          '生存している人狼はあなた一人だけです。死亡した仲間はこの会話を聞けず、返答もできません。今の発言は仲間との相談ではなく、完全な独り言として話してください。',
+          '誰かへの呼びかけ、質問、同意や返事の要求、共同意思を表す「私たち」「俺たち」「僕たち」「我々」を使わず、自分の読みと次の襲撃方針を自分に言い聞かせる口調にしてください。',
+          `独り言は全2回のうち${context.round ?? 1}回目です。${context.round === 2 ? '前の独り言を踏まえ、自分一人で方針を決めてください。' : 'まず状況と候補を自分一人で考えてください。'}`,
+        ]
+      : [
+          '今は生存している人狼同士だけの秘密会話です。仲間の発言を踏まえ、襲撃方針を自然に相談してください。',
+        ]
+    : [];
   const discussionGuidance = context.discussion?.stage === 'opening'
     ? [
         '今は昼の「開始発言の一巡」です。生存者全員が決められた順番で一度ずつ話し終えるまで、自由な割り込みや即時の応答は起きません。',
         '自分より前の開始発言には反応できますが、まだ順番が来ていない人の発言を知っているように話してはいけません。',
         '誰かへ質問しても返答はその人の開始発言か、一巡後の自由討論まで待つと理解した自然な台詞にしてください。進行ルール自体を説明する台詞は不要です。',
+        '仮定、今後の方針、迷い、弱い違和感を、具体的な告発や返答拒否へ勝手に強めないでください。発言者が実際に言った強さのまま受け取ってください。',
+        ...(context.discussion.turn === 1 ? [
+          'あなたが今日の最初の発言者です。他の参加者は今日まだ発言機会を得ていません。今日の沈黙、反応、便乗、返答の遅さを観察したように話してはいけません。役職情報、前日までの公開情報、または今日これから確認したいことを話してください。',
+        ] : [
+          '先に開始発言を終えた人は、一巡が終わるまで再び話せません。質問後にまだ答えていないことを、無視、逃避、回答拒否、怪しさの上昇として扱ってはいけません。',
+        ]),
+        ...(waitingForFreeReplyNames.length > 0 ? [
+          `${waitingForFreeReplyNames.join('、')}はすでに返答を求められていますが、順番制のため自由討論まで答えられません。同じ質問や同じ疑いを重ねず、別の発言、新しい根拠、自分自身の立場のいずれかを話してください。`,
+        ] : []),
         ...(promptedByName ? [`${promptedByName}が先ほどあなたへ話を向けています。今はあなたの通常の開始発言の番なので、必要ならその内容へ自然に応じてください。`] : []),
       ]
     : context.discussion?.stage === 'free'
@@ -35,7 +57,10 @@ export function buildPrompts(context: DecisionContext): { systemPrompt: string; 
     'あなたは一般的な9人人狼へ参加している一人の人間として振る舞います。AIアシスタントのように話してはいけません。',
     `あなたは${context.actor.name}、役職は${ROLE_LABEL[context.actor.role]}です。`,
     `この人格が${ROLE_LABEL[context.actor.role]}になったときの行動方針: ${roleBehaviorFor(context.actor.seat, context.actor.role)}`,
-    '与えられた公開情報と自分だけの非公開情報だけを使って判断してください。',
+    ...(context.claimDirective ? [
+      '判断材料にしてよいのは、与えられた公開情報と自分だけの非公開情報だけです。',
+      '自分が実際に知らない情報を判断の根拠にしてはいけません。ただし、下の役職主張の指示に従って役職を名乗り、認可された結果を伝えることは、このゲームで認められた戦術です。',
+    ] : ['与えられた公開情報と自分だけの非公開情報だけを使って判断してください。']),
     `人物像: 「${persona.title}」。${persona.coreDrive}`,
     `内面の矛盾と欠点: ${persona.contradiction}`,
     `人との接し方や思い込み: ${persona.socialBias}`,
@@ -56,6 +81,7 @@ export function buildPrompts(context: DecisionContext): { systemPrompt: string; 
     'ただし口癖や欠点を毎回わざとらしく演じず、ゲームの状況を優先してください。',
     'この人物像は知識や能力を増やすものではありません。見えている情報と役職能力だけで判断してください。',
     '他者の本当の役職を知っているふりをしないでください。',
+    ...wolfChatGuidance,
     ...discussionGuidance,
     ...(isSpeechIntent ? [
       'これは実際の発言ではなく、今この時点で自由討論へ割り込みたいかを決める非公開判断です。台詞や長い理由は作らないでください。',
@@ -80,9 +106,15 @@ export function buildPrompts(context: DecisionContext): { systemPrompt: string; 
       .replace(/霊媒(?:師)?CO(?:です)?/gi, '霊媒師だと名乗りました')
       .replace(/CO(?:です)?/gi, '役職を名乗りました')),
     privateFacts: context.privateFacts,
+    ...(context.claimBoard ? { claimBoard: context.claimBoard } : {}),
+    ...(context.claimDirective ? { authorizedClaim: context.claimDirective } : {}),
     discussion: context.discussion,
     constraint: isSpeech
-      ? '発言は日本語200文字以内。addressedToは実際に話を向ける相手だけ、requestsReplyはその相手から後で返答が必要な場合だけtrue'
+      ? context.wolfChat?.mode === 'monologue'
+        ? '発言は日本語200文字以内の独り言。addressedTo=null、requestsReply=false。誰かの返答を前提にしない'
+        : context.claimDirective
+        ? '発言は日本語200文字以内。claimは役職主張の指示と本文を一致させる。addressedToは実際に話を向ける相手だけ、requestsReplyはその相手から後で返答が必要な場合だけtrue'
+        : '発言は日本語200文字以内。addressedToは実際に話を向ける相手だけ、requestsReplyはその相手から後で返答が必要な場合だけtrue'
       : isSpeechIntent
         ? '今話す必要がなければurgency=0、motivation=none、targetSeat=null'
         : '合法対象から1名を選ぶ',

@@ -8,6 +8,7 @@ test('ホームから試合を開始して公開／GM視点とリプレイを表
   await expect(page.getByLabel('BGM音量')).toBeVisible();
   await expect(page.getByLabel('BGM音量')).toHaveValue('70');
   await page.getByLabel('BGM音量').fill('85');
+  await page.getByLabel(/SEED/).fill('fixture-0');
   await page.getByText('最速').click();
   await page.getByRole('button', { name: /AI人狼を開始/ }).click();
   await expect(page).toHaveURL(/\/match\//);
@@ -34,6 +35,8 @@ test('ホームから試合を開始して公開／GM視点とリプレイを表
   await expect(page.getByText(/村人|人狼|占い師|霊媒師|狩人|狂人/).first()).toBeVisible();
   await expect(page.getByText('GAME SET')).toBeVisible({ timeout: 30_000 });
   await expect(page.getByRole('heading', { name: '全員の正体と結末' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: '役職主張' })).toBeVisible();
+  await expect(page.getByText('本人が公に述べた主張です。真偽を示すものではありません。')).toBeVisible();
   await expect(page.getByRole('region', { name: '村人陣営の配役' })).toBeVisible();
   await expect(page.getByRole('region', { name: '人狼陣営の配役' })).toBeVisible();
   await expect(page.locator('.epilogue-team li')).toHaveCount(9);

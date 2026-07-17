@@ -1,4 +1,8 @@
 import { MAX_DAYS } from '@/domain/constants';
+import {
+  assertClaimWithinDirective, claimBoardDigest, foldClaim,
+  type ClaimDirective, type ClaimLedger, type ClaimResult, type ClaimableRole,
+} from '@/domain/claims';
 import type {
   DecisionContext, DecisionProvider, DiscussionContext, GameState, MatchEvent, Player, RunHooks, SeatId, SpeechIntentDecision, Winner,
 } from '@/domain/types';
@@ -8,6 +12,10 @@ import { stableShuffle } from './prng';
 import { setupPlayers } from './setup';
 import { createInitialState } from './state';
 import { checkVictory, isWerewolfResult } from './victory';
+import {
+  claimDirectiveFor, decideClaimPolicies, planMadmanMediumFake, planMadmanSeerFake,
+  planWolfMediumFake, planWolfSeerFake, preserveFakeResultConsistency,
+} from './claim-policy';
 
 export interface SimulationResult { winner: Winner; day: number; state: GameState }
 
@@ -71,7 +79,13 @@ function privateFactsFor(
 ): string[] {
   const facts = [`自分の役職: ${actor.role}`];
   if (actor.role === 'werewolf') {
-    facts.push(`仲間: ${state.players.filter((player) => player.role === 'werewolf' && player.seat !== actor.seat).map((player) => player.name).join(', ')}`);
+    const allies = state.players.filter((player) => player.role === 'werewolf' && player.seat !== actor.seat);
+    const livingAllies = allies.filter((player) => player.alive).map((player) => player.name);
+    const deadAllies = allies.filter((player) => !player.alive).map((player) => player.name);
+    facts.push(livingAllies.length > 0
+      ? `生存中の人狼仲間: ${livingAllies.join(', ')}`
+      : '生存中の人狼仲間: なし（自分だけ）');
+    if (deadAllies.length > 0) facts.push(`死亡した人狼仲間: ${deadAllies.join(', ')}`);
     facts.push(...histories.wolf.slice(-20));
     facts.push(...histories.wolfAttack);
   }
@@ -86,15 +100,37 @@ export async function runGame(
   seed: string,
   ai: DecisionProvider,
   hooks: RunHooks,
-  options: { includeDayOneDawn?: boolean } = {},
+  options: { includeDayOneDawn?: boolean; claimsVersion?: 'v1' } = {},
 ): Promise<SimulationResult> {
   const players = setupPlayers(seed);
+  const claimsEnabled = options.claimsVersion === 'v1';
+  const claimPolicies = decideClaimPolicies(seed, players);
   let state = createInitialState(players);
   const publicHistory: string[] = [];
+  let claimLedger: ClaimLedger = [];
+  const claimResults = new Map<SeatId, Record<ClaimableRole, ClaimResult[]>>(
+    players.map((player) => [player.seat, { seer: [], medium: [] }]),
+  );
   const histories = {
     seer: [] as string[], medium: [] as string[], guard: [] as string[], wolf: [] as string[], wolfAttack: [] as string[],
   };
   let pendingVictim: SeatId | null = null;
+
+  const directiveFor = (actor: Player, day: number, stage: 'opening' | 'free'): ClaimDirective => {
+    const policy = claimPolicies.get(actor.seat);
+    if (!policy) return { mode: 'forbidden', claimedRole: null, results: [], counterTargetSeat: null };
+    const actorAlreadyClaimed = claimLedger.some((entry) => entry.seat === actor.seat);
+    const alliedWolfAlreadyClaimed = actor.role === 'werewolf' && claimLedger.some((entry) =>
+      entry.seat !== actor.seat && playerBySeat(state, entry.seat).role === 'werewolf');
+    if (!actorAlreadyClaimed && alliedWolfAlreadyClaimed) {
+      return { mode: 'forbidden', claimedRole: null, results: [], counterTargetSeat: null };
+    }
+    const results = claimResults.get(actor.seat) ?? { seer: [], medium: [] };
+    return claimDirectiveFor(seed, policy, claimLedger, {
+      seer: results.seer.map((result) => ({ ...result })),
+      medium: results.medium.map((result) => ({ ...result })),
+    }, { day, stage });
+  };
 
   const emit = async (
     day: number,
@@ -118,11 +154,25 @@ export async function runGame(
     legalTargets: SeatId[] = [],
     round?: number,
     discussion?: DiscussionContext,
-  ): DecisionContext => ({
-    matchId, seed, day, phase, kind, callKey, actor,
-    players: state.players.map((player) => ({ ...player })), legalTargets,
-    publicHistory: [...publicHistory], privateFacts: privateFactsFor(actor, state, histories), round, discussion,
-  });
+  ): DecisionContext => {
+    const base: DecisionContext = {
+      matchId, seed, day, phase, kind, callKey, actor,
+      players: state.players.map((player) => ({ ...player })), legalTargets,
+      publicHistory: [...publicHistory], privateFacts: privateFactsFor(actor, state, histories), round, discussion,
+    };
+    if (kind === 'wolf_speech') {
+      const participantSeats = state.players
+        .filter((player) => player.alive && player.role === 'werewolf')
+        .map((player) => player.seat);
+      base.wolfChat = {
+        mode: participantSeats.length === 1 ? 'monologue' : 'dialogue',
+        participantSeats,
+      };
+    }
+    if (claimsEnabled) base.claimBoard = claimBoardDigest(claimLedger);
+    if (claimsEnabled && kind === 'speech' && discussion) base.claimDirective = directiveFor(actor, day, discussion.stage);
+    return base;
+  };
 
   const finish = async (winner: Winner, day: number, anomaly = false): Promise<SimulationResult> => {
     await emit(day, 'finished', anomaly ? 'anomaly_flag' : 'match_finished', {
@@ -143,6 +193,7 @@ export async function runGame(
   await emit(0, 'setup', 'match_created', {
     seed,
     players: players.map((player) => ({ seat: player.seat, name: player.name, role: player.role })),
+    ...(claimsEnabled ? { rules: { claims: 'v1' } } : {}),
   }, 'private');
 
   const wolves = state.players.filter((player) => player.role === 'werewolf');
@@ -154,7 +205,9 @@ export async function runGame(
     const decision = await ai.speech(context(wolf, 0, 'night_zero', 'wolf_speech', `d0-wolf-chat-${wolf.seat}`, [], 1));
     const speech = normalizeSpeech(decision.speech);
     histories.wolf.push(`${wolf.name}: ${speech}`);
-    await emit(0, 'night_zero', 'werewolf_chat', { seat: wolf.seat, speech, round: 1 }, 'private', wolves.map((player) => player.seat));
+    await emit(0, 'night_zero', 'werewolf_chat', {
+      seat: wolf.seat, speech, round: 1, mode: 'dialogue',
+    }, 'private', wolves.map((player) => player.seat));
   }
 
   const initialSeer = actorByRole(state, 'seer');
@@ -162,7 +215,20 @@ export async function runGame(
     const target = await ai.target(context(initialSeer, 0, 'night_zero', 'seer', 'd0-seer', legalSeerTargets(state, initialSeer.seat)));
     const result = isWerewolfResult(playerBySeat(state, target.targetSeat).role);
     histories.seer.push(`${seatName(target.targetSeat)}: ${result}`);
+    claimResults.get(initialSeer.seat)?.seer.push({ day: 0, targetSeat: target.targetSeat, verdict: result });
     await emit(0, 'night_zero', 'seer_result', { seat: initialSeer.seat, targetSeat: target.targetSeat, result }, 'private', [initialSeer.seat]);
+  }
+
+  if (claimsEnabled) {
+    const aliveSeats = state.players.filter((player) => player.alive).map((player) => player.seat);
+    const wolfSeats = wolves.map((player) => player.seat);
+    for (const actor of state.players.filter((player) => ['madman', 'werewolf'].includes(player.role))) {
+      const result = actor.role === 'madman'
+        ? planMadmanSeerFake(seed, actor.seat, 0, aliveSeats)
+        : planWolfSeerFake(seed, actor.seat, 0, aliveSeats, wolfSeats.filter((seat) => seat !== actor.seat));
+      const history = claimResults.get(actor.seat)?.seer;
+      if (history) history.push(preserveFakeResultConsistency(history, result));
+    }
   }
 
   for (let day = 1; day <= MAX_DAYS; day += 1) {
@@ -183,16 +249,34 @@ export async function runGame(
 
     for (const [index, actor] of openingOrder.entries()) {
       const promptedBySeat = openingPromptedBy.get(actor.seat);
-      const legalTargets = openingOrder.filter((player) => player.seat !== actor.seat).map((player) => player.seat);
-      const discussion: DiscussionContext = { stage: 'opening', turn: index + 1, ...(promptedBySeat ? { promptedBySeat } : {}) };
-      const decision = await ai.speech(context(
+      const waitingForFreeReplySeats = [...pendingReplies.keys()];
+      const counterTargetSeat = claimsEnabled ? directiveFor(actor, day, 'opening').counterTargetSeat : null;
+      const legalTargets = openingOrder
+        .filter((player) => player.seat !== actor.seat &&
+          (!pendingReplies.has(player.seat) || player.seat === counterTargetSeat))
+        .map((player) => player.seat);
+      const discussion: DiscussionContext = {
+        stage: 'opening', turn: index + 1,
+        openingSpokenSeats: openingOrder.slice(0, index).map((player) => player.seat),
+        ...(waitingForFreeReplySeats.length > 0 ? { waitingForFreeReplySeats } : {}),
+        ...(promptedBySeat ? { promptedBySeat } : {}),
+      };
+      const speechContext = context(
         actor, day, 'discussion', 'speech', `d${day}-speech-opening-${actor.seat}`, legalTargets, 1, discussion,
-      ));
+      );
+      const decision = await ai.speech(speechContext);
+      if (speechContext.claimDirective) assertClaimWithinDirective(decision.claim, speechContext.claimDirective);
       const speech = normalizeSpeech(decision.speech);
       await emit(day, 'discussion', 'discussion_speech', {
         seat: actor.seat, name: actor.name, round: 1, stage: 'opening', turn: index + 1,
         speech, addressedTo: decision.addressedTo, requestsReply: decision.requestsReply,
+        ...(claimsEnabled ? { claim: decision.claim ?? null } : {}),
       });
+      if (claimsEnabled) {
+        claimLedger = foldClaim(claimLedger, {
+          seat: actor.seat, name: actor.name, day, stage: 'opening', claim: decision.claim ?? null,
+        });
+      }
       publicHistory.push(`${actor.name}: ${speech}`);
       openingPromptedBy.delete(actor.seat);
 
@@ -201,7 +285,7 @@ export async function runGame(
         if (targetIndex !== undefined && targetIndex > index) {
           openingPromptedBy.set(decision.addressedTo, actor.seat);
         } else if (targetIndex !== undefined) {
-          pendingReplies.set(decision.addressedTo, actor.seat);
+          if (!pendingReplies.has(decision.addressedTo)) pendingReplies.set(decision.addressedTo, actor.seat);
         }
       }
     }
@@ -214,6 +298,25 @@ export async function runGame(
     let nextSpeaker: { actor: Player; discussion: DiscussionContext } | null = null;
 
     while (freeSpeechCount < openingOrder.length) {
+      if (!nextSpeaker) {
+        if (claimsEnabled) {
+          const mandatory = openingOrder.filter((player) =>
+            (freeSpeechCounts.get(player.seat) ?? 0) < MAX_FREE_SPEECHES_PER_PLAYER &&
+            directiveFor(player, day, 'free').mode === 'must');
+          if (mandatory.length > 0) {
+            const actor = stableShuffle(mandatory, seed, `claims/v1/counter-order-d${day}-t${freeSpeechCount + 1}`)[0];
+            const directive = directiveFor(actor, day, 'free');
+            nextSpeaker = {
+              actor,
+              discussion: {
+                stage: 'free', turn: freeSpeechCount + 1, motivation: 'challenge',
+                intendedTarget: directive.counterTargetSeat,
+                ...(directive.counterTargetSeat ? { promptedBySeat: directive.counterTargetSeat } : {}),
+              },
+            };
+          }
+        }
+      }
       if (!nextSpeaker) {
         if (intentPolls >= MAX_INTENT_POLLS_PER_DAY) break;
         const pollNumber = intentPolls + 1;
@@ -274,17 +377,25 @@ export async function runGame(
       const legalTargets = openingOrder
         .filter((player) => player.seat !== actor.seat && (freeSpeechCounts.get(player.seat) ?? 0) < MAX_FREE_SPEECHES_PER_PLAYER)
         .map((player) => player.seat);
-      const decision = await ai.speech(context(
+      const speechContext = context(
         actor, day, 'discussion', 'speech', `d${day}-speech-free-t${freeSpeechCount + 1}-${actor.seat}`,
         legalTargets, 2, discussion,
-      ));
+      );
+      const decision = await ai.speech(speechContext);
+      if (speechContext.claimDirective) assertClaimWithinDirective(decision.claim, speechContext.claimDirective);
       const speech = normalizeSpeech(decision.speech);
       freeSpeechCount += 1;
       freeSpeechCounts.set(actor.seat, (freeSpeechCounts.get(actor.seat) ?? 0) + 1);
       await emit(day, 'discussion', 'discussion_speech', {
         seat: actor.seat, name: actor.name, round: 2, stage: 'free', turn: freeSpeechCount,
         speech, addressedTo: decision.addressedTo, requestsReply: decision.requestsReply,
+        ...(claimsEnabled ? { claim: decision.claim ?? null } : {}),
       });
+      if (claimsEnabled) {
+        claimLedger = foldClaim(claimLedger, {
+          seat: actor.seat, name: actor.name, day, stage: 'free', claim: decision.claim ?? null,
+        });
+      }
       publicHistory.push(`${actor.name}: ${speech}`);
 
       if (decision.requestsReply && decision.addressedTo &&
@@ -345,7 +456,20 @@ export async function runGame(
     if (medium) {
       const result = executed ? isWerewolfResult(playerBySeat(state, executed).role) : '判定対象なし';
       histories.medium.push(executed ? `${seatName(executed)}: ${result}` : result);
+      if (executed) claimResults.get(medium.seat)?.medium.push({
+        day, targetSeat: executed, verdict: isWerewolfResult(playerBySeat(state, executed).role),
+      });
       await emit(day, 'medium', 'medium_result', { seat: medium.seat, targetSeat: executed, result }, 'private', [medium.seat]);
+    }
+
+    if (claimsEnabled && executed) {
+      const wolfSeats = state.players.filter((player) => player.role === 'werewolf').map((player) => player.seat);
+      for (const actor of state.players.filter((player) => player.alive && ['madman', 'werewolf'].includes(player.role))) {
+        const result = actor.role === 'madman'
+          ? planMadmanMediumFake(seed, actor.seat, day, executed)
+          : planWolfMediumFake(seed, actor.seat, day, executed, wolfSeats.filter((seat) => seat !== actor.seat));
+        claimResults.get(actor.seat)?.medium.push(result);
+      }
     }
 
     const livingWolves = state.players.filter((player) => player.alive && player.role === 'werewolf');
@@ -354,7 +478,12 @@ export async function runGame(
         const decision = await ai.speech(context(wolf, day, 'wolf_chat', 'wolf_speech', `d${day}-wolf-chat-r${round}-${wolf.seat}`, [], round));
         const speech = normalizeSpeech(decision.speech);
         histories.wolf.push(`${wolf.name}: ${speech}`);
-        await emit(day, 'wolf_chat', 'werewolf_chat', { seat: wolf.seat, speech, round }, 'private', livingWolves.map((player) => player.seat));
+        await emit(day, 'wolf_chat', 'werewolf_chat', {
+          seat: wolf.seat,
+          speech,
+          round,
+          mode: livingWolves.length === 1 ? 'monologue' : 'dialogue',
+        }, 'private', livingWolves.map((player) => player.seat));
       }
     }
 
@@ -380,7 +509,21 @@ export async function runGame(
       seerTarget = decision.targetSeat;
       const result = isWerewolfResult(playerBySeat(state, seerTarget).role);
       histories.seer.push(`${seatName(seerTarget)}: ${result}`);
+      claimResults.get(seer.seat)?.seer.push({ day, targetSeat: seerTarget, verdict: result });
       await emit(day, 'night_actions', 'seer_result', { seat: seer.seat, targetSeat: seerTarget, result }, 'private', [seer.seat]);
+    }
+
+
+    if (claimsEnabled) {
+      const aliveSeats = state.players.filter((player) => player.alive).map((player) => player.seat);
+      const wolfSeats = state.players.filter((player) => player.role === 'werewolf').map((player) => player.seat);
+      for (const actor of state.players.filter((player) => player.alive && ['madman', 'werewolf'].includes(player.role))) {
+        const result = actor.role === 'madman'
+          ? planMadmanSeerFake(seed, actor.seat, day, aliveSeats)
+          : planWolfSeerFake(seed, actor.seat, day, aliveSeats, wolfSeats.filter((seat) => seat !== actor.seat));
+        const history = claimResults.get(actor.seat)?.seer;
+        if (history) history.push(preserveFakeResultConsistency(history, result));
+      }
     }
 
     let guardTarget: SeatId | null = null;

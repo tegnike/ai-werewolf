@@ -13,6 +13,8 @@ import { agentNameForSeat, personaForSeat } from '@/domain/agents';
 import { derivePresentedState, featuredSpeechEvent, focusPanelKind, presentationCursorAfterLoad, presentationLimit, privateActionDescription } from './presentation';
 import { buildEpilogue, epilogueRoleLabel, fateLabel, type SpectatorDeathRecord } from './epilogue';
 import { SpectatorGuide } from './SpectatorGuide';
+import { foldClaim, type ClaimLedger, type SpeechClaim } from '@/domain/claims';
+import type { SeatId } from '@/domain/types';
 
 const roleLabel: Record<string, string> = { villager: '村人', werewolf: '人狼', seer: '占い師', medium: '霊媒師', bodyguard: '狩人', madman: '狂人' };
 const phaseLabel: Record<string, string> = { setup: '準備', night_zero: '第0夜', dawn: '夜明け', discussion: '議論', vote: '投票', runoff: '決選投票', execution: '処刑', medium: '霊媒', wolf_chat: '人狼会話', night_actions: '夜の行動', finished: '終了' };
@@ -63,6 +65,11 @@ function eventText(event: UiEvent): string {
   if (event.type === 'night_resolved') return p.guarded ? `護衛成功。${seatName(p.guardTarget)}への襲撃を防ぎました。` : `襲撃 ${seatName(p.attackTarget)} / 護衛 ${seatName(p.guardTarget)}`;
   if (event.type === 'match_created') return '9人の配役と座席が決まりました。';
   return eventLabel[event.type] ?? event.type;
+}
+
+function eventTitle(event: UiEvent): string {
+  if (event.type === 'werewolf_chat' && event.payload.mode === 'monologue') return '人狼の独り言';
+  return eventLabel[event.type] ?? phaseLabel[event.phase] ?? event.type;
 }
 
 export function MatchViewer({ matchId, mode }: { matchId: string; mode: 'live' | 'replay' }) {
@@ -161,6 +168,19 @@ export function MatchViewer({ matchId, mode }: { matchId: string; mode: 'live' |
   }
   const latestSpeech = new Map<string, string>();
   for (const event of visibleEvents.filter((item) => item.type === 'discussion_speech')) latestSpeech.set(String(event.payload.seat), String(event.payload.speech));
+  let claimLedger: ClaimLedger = [];
+  for (const event of visibleEvents.filter((item) => item.type === 'discussion_speech')) {
+    const payload = event.payload;
+    if (typeof payload.seat !== 'string' || typeof payload.name !== 'string' ||
+      (payload.stage !== 'opening' && payload.stage !== 'free')) continue;
+    claimLedger = foldClaim(claimLedger, {
+      seat: payload.seat as SeatId,
+      name: payload.name,
+      day: event.day,
+      stage: payload.stage,
+      claim: (payload.claim ?? null) as SpeechClaim | null,
+    });
+  }
   const latestVote = [...visibleEvents].reverse().find((event) => event.type === 'vote_reveal');
   const latestVotes = voteEntries(latestVote);
   const latestVoteByVoter = new Map(latestVotes.map((vote) => [vote.voter, vote.target]));
@@ -210,6 +230,24 @@ export function MatchViewer({ matchId, mode }: { matchId: string; mode: 'live' |
               </section>)}
             </div>
           </section>}
+          {claimLedger.length > 0 && <section className="claim-board" aria-labelledby="claim-board-title">
+            <div className="claim-board-head"><div><span className="section-kicker">ROLE CLAIMS</span><h2 id="claim-board-title">役職主張</h2></div><p>本人が公に述べた主張です。真偽を示すものではありません。</p></div>
+            <div className="claim-board-grid">{claimLedger.map((entry) => <article key={entry.seat}>
+              <div><strong>{entry.name}</strong><span>{entry.claimedRole === 'seer' ? '占い師' : '霊媒師'}を名乗り中</span></div>
+              {entry.results.length > 0
+                ? <ul>{entry.results.map((result) => <li key={`${entry.seat}-${result.day}`}><small>{result.day}日目</small><span>{seatName(result.targetSeat)}</span><em className={result.verdict === '人狼' ? 'black' : 'white'}>{result.verdict}</em></li>)}</ul>
+                : <p>結果報告はまだありません</p>}
+            </article>)}</div>
+          </section>}
+          {focusPanel === 'speech' && featuredSpeech && featuredPersona && featuredSeat && <section className={`speaker-stage ${featuredIsSpeaking ? 'speaking' : ''} ${featuredIsPaused ? 'paused' : ''}`} aria-label="注目中の発言" aria-live="polite">
+            <div className="speaker-stage-portrait"><Image src={`/assets/agents/agent_${featuredSeatNumber}.png`} width={768} height={768} alt={`${featuredPersona.name}の立ち絵`} /></div>
+            <div className="speaker-stage-copy">
+              <div className="speaker-stage-status"><span>{featuredIsSpeaking ? 'NOW SPEAKING' : featuredIsPaused ? 'PAUSED' : 'LATEST SPEECH'}</span><em>SEAT {String(featuredSeatNumber).padStart(2, '0')}</em></div>
+              <h2>{featuredPersona.name}<small>{featuredPersona.title}</small></h2>
+              <blockquote>「{String(featuredSpeech.payload.speech)}」</blockquote>
+              <footer><span>VOICE: {featuredVoice?.speakerName}</span><span>{featuredSpeech.type === 'werewolf_chat' ? featuredSpeech.payload.mode === 'monologue' ? '人狼の独り言' : '人狼会話' : `${featuredSpeech.day}日目の発言`}</span></footer>
+            </div>
+          </section>}
           <div className="agent-board" aria-live="polite">
             {Array.from({ length: 9 }, (_, index) => {
               const number = index + 1; const seat = `seat-${number}`; const deathRecord = deathRecords.get(seat); const dead = Boolean(deathRecord); const role = roleMap.get(seat);
@@ -225,15 +263,6 @@ export function MatchViewer({ matchId, mode }: { matchId: string; mode: 'live' |
               </article>;
             })}
           </div>
-          {focusPanel === 'speech' && featuredSpeech && featuredPersona && featuredSeat && <section className={`speaker-stage ${featuredIsSpeaking ? 'speaking' : ''} ${featuredIsPaused ? 'paused' : ''}`} aria-label="注目中の発言" aria-live="polite">
-            <div className="speaker-stage-portrait"><Image src={`/assets/agents/agent_${featuredSeatNumber}.png`} width={768} height={768} alt={`${featuredPersona.name}の立ち絵`} /></div>
-            <div className="speaker-stage-copy">
-              <div className="speaker-stage-status"><span>{featuredIsSpeaking ? 'NOW SPEAKING' : featuredIsPaused ? 'PAUSED' : 'LATEST SPEECH'}</span><em>SEAT {String(featuredSeatNumber).padStart(2, '0')}</em></div>
-              <h2>{featuredPersona.name}<small>{featuredPersona.title}</small></h2>
-              <blockquote>「{String(featuredSpeech.payload.speech)}」</blockquote>
-              <footer><span>VOICE: {featuredVoice?.speakerName}</span><span>{featuredSpeech.type === 'werewolf_chat' ? '人狼会話' : `${featuredSpeech.day}日目の発言`}</span></footer>
-            </div>
-          </section>}
           {focusPanel === 'vote' && latestVote && <section className={`vote-panel ${latestVote.day < day ? 'stale' : ''}`}>
             <div><span className="section-kicker">VOTE RESULT</span><h2>{latestVote.day}日目の{latestVote.payload.round === 2 ? '決選投票' : '投票結果'}</h2>{latestVote.day < day && <small>前日の結果</small>}</div>
             <div className="vote-bars">{Object.entries(latestTally).sort((a, b) => b[1] - a[1]).map(([seat, count]) => {
@@ -247,7 +276,7 @@ export function MatchViewer({ matchId, mode }: { matchId: string; mode: 'live' |
             })}</div>
           </section>}
         </section>
-        <aside className="timeline-panel"><div className="timeline-head"><div><span className="section-kicker">EVENT LOG</span><h2>時系列ログ</h2></div><span>{visibleEvents.length} events</span></div><div className="timeline" aria-live="polite">{timelineEvents.map((event, index) => <div className="timeline-entry" key={event.seq}>{(index === 0 || timelineEvents[index - 1]?.day !== event.day) && <div className="timeline-day"><span>{event.day === 0 ? '第0夜' : `${event.day}日目`}</span></div>}<article className={`timeline-event ${event.type}`}><span className="seq">#{String(event.seq).padStart(3, '0')}</span><div><small>{eventLabel[event.type] ?? phaseLabel[event.phase] ?? event.type}</small><p>{eventText(event)}</p>{event.type === 'private_action' ? <em>内容非公開</em> : event.visibility === 'private' && <em>{view === 'gm' ? 'GM SECRET' : 'REVEALED SECRET'}</em>}</div></article></div>)}</div></aside>
+        <aside className="timeline-panel"><div className="timeline-head"><div><span className="section-kicker">EVENT LOG</span><h2>時系列ログ</h2></div><span>{visibleEvents.length} events</span></div><div className="timeline" aria-live="polite">{timelineEvents.map((event, index) => <div className="timeline-entry" key={event.seq}>{(index === 0 || timelineEvents[index - 1]?.day !== event.day) && <div className="timeline-day"><span>{event.day === 0 ? '第0夜' : `${event.day}日目`}</span></div>}<article className={`timeline-event ${event.type}`}><span className="seq">#{String(event.seq).padStart(3, '0')}</span><div><small>{eventTitle(event)}</small><p>{eventText(event)}</p>{event.type === 'private_action' ? <em>内容非公開</em> : event.visibility === 'private' && <em>{view === 'gm' ? 'GM SECRET' : 'REVEALED SECRET'}</em>}</div></article></div>)}</div></aside>
       </div>
       <footer className="control-dock">
         <div className="seed-display"><span>SEED</span><strong>{match.seed}</strong></div>

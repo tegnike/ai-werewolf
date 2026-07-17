@@ -1,3 +1,5 @@
+import type { ClaimDirective, SpeechClaim } from './claims';
+
 export type Role = 'villager' | 'werewolf' | 'seer' | 'medium' | 'bodyguard' | 'madman';
 export type Team = 'village' | 'werewolf';
 export type SeatId = `seat-${1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9}`;
@@ -35,7 +37,7 @@ export interface MatchRecord {
   winner: Winner | null;
   speed: number;
   apiCalls: number;
-  error: { code: string; message: string; phase?: string; model?: string } | null;
+  error: { code: string; message: string; phase?: string; model?: string; reason?: string } | null;
   config: { ai: 'mock' | 'real' };
   createdAt: string;
   updatedAt: string;
@@ -60,6 +62,13 @@ export interface DiscussionContext {
   promptedBySeat?: SeatId;
   motivation?: SpeechMotivation;
   intendedTarget?: SeatId | null;
+  openingSpokenSeats?: SeatId[];
+  waitingForFreeReplySeats?: SeatId[];
+}
+
+export interface WolfChatContext {
+  mode: 'dialogue' | 'monologue';
+  participantSeats: SeatId[];
 }
 
 export interface DecisionContext {
@@ -76,12 +85,16 @@ export interface DecisionContext {
   privateFacts: string[];
   round?: number;
   discussion?: DiscussionContext;
+  wolfChat?: WolfChatContext;
+  claimDirective?: ClaimDirective;
+  claimBoard?: string[];
 }
 
 export interface SpeechDecision {
   speech: string;
   addressedTo: SeatId | null;
   requestsReply: boolean;
+  claim?: SpeechClaim | null;
 }
 export interface SpeechIntentDecision {
   urgency: 0 | 1 | 2 | 3;

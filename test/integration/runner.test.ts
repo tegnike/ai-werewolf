@@ -86,6 +86,28 @@ describe('MatchRunner', () => {
     expect(events.map((event) => event.seq)).toEqual(Array.from({ length: events.length }, (_, index) => index + 1));
   });
 
+  it('claims v1の公開主張後も同じイベント列を再導出して復旧する', async () => {
+    const repo = new MatchRepo();
+    const now = new Date().toISOString();
+    const record: MatchRecord = { id: 'claims-recovery', seed: '1000', status: 'running', winner: null, speed: 0, apiCalls: 0, error: null, config: { ai: 'mock' }, createdAt: now, updatedAt: now, finishedAt: null };
+    repo.createMatch(record);
+    let seq = 0;
+    await expect(runGame(record.id, record.seed, new MockAI(), {
+      emit: async (draft) => {
+        repo.appendEvent({ ...draft, matchId: record.id, seq: ++seq, createdAt: now });
+      },
+      checkpoint: async () => { if (seq === 32) throw new Error('simulated claims crash'); },
+    }, { claimsVersion: 'v1' })).rejects.toThrow('simulated claims crash');
+    expect(repo.events(record.id).find((event) => event.type === 'match_created')?.payload.rules).toEqual({ claims: 'v1' });
+    expect(repo.events(record.id).some((event) => event.type === 'discussion_speech' && event.payload.claim)).toBe(true);
+
+    const manager = new MatchRunnerManager(repo);
+    manager.recover();
+    await waitFor(repo, record.id, 'finished');
+    const events = repo.events(record.id);
+    expect(events.map((event) => event.seq)).toEqual(Array.from({ length: events.length }, (_, index) => index + 1));
+  });
+
   it('一時停止中の試合を再起動時に勝手に再開しない', async () => {
     const repo = new MatchRepo();
     const now = new Date().toISOString();

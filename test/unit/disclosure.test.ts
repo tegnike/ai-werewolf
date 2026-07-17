@@ -47,4 +47,89 @@ describe('能力結果の公開', () => {
     expect(() => validateSpeechDisclosure(context, decision('陽太さんの占いCOが遅いです。'))).toThrow('abbreviated role claim is forbidden');
     expect(() => validateSpeechDisclosure(context, decision('征司さんは霊媒ＣＯでした。'))).toThrow('abbreviated role claim is forbidden');
   });
+
+  it('真役職を参照せず、directiveで認可された狂人の偽主張を許可する', () => {
+    const base = seerContext();
+    const context: DecisionContext = {
+      ...base,
+      actor: { ...base.actor, role: 'madman' },
+      claimDirective: {
+        mode: 'must', claimedRole: 'seer', counterTargetSeat: null,
+        results: [{ day: 0, targetSeat: 'seat-2', verdict: '人狼ではない' }],
+      },
+    };
+    expect(() => validateSpeechDisclosure(context, {
+      speech: '私は占い師です。0日目の八木 こはるさんは人狼ではありませんでした。',
+      addressedTo: null,
+      requestsReply: false,
+      claim: { claimedRole: 'seer', results: [{ day: 0, targetSeat: 'seat-2', verdict: '人狼ではない' }] },
+    })).not.toThrow();
+  });
+
+  it('人格の呼称と自然な過去形で認可結果を伝えられる', () => {
+    const base = seerContext();
+    const result = { day: 1, targetSeat: 'seat-8' as const, verdict: '人狼ではない' as const };
+    expect(() => validateSpeechDisclosure({
+      ...base,
+      claimDirective: { mode: 'may', claimedRole: 'seer', results: [result], counterTargetSeat: null },
+    }, {
+      speech: '私は占い師です。1日目に見た征司さんは人狼ではなかった。',
+      addressedTo: null,
+      requestsReply: false,
+      claim: { claimedRole: 'seer', results: [result] },
+    })).not.toThrow();
+  });
+
+  it('mustの構造欠落と、forbidden中の一人称役職名乗りを拒否する', () => {
+    const base = seerContext();
+    expect(() => validateSpeechDisclosure({
+      ...base,
+      claimDirective: { mode: 'must', claimedRole: 'seer', results: [], counterTargetSeat: null },
+    }, { ...decision('今日は話を聞きます。'), claim: null })).toThrow('required_claim_missing');
+    expect(() => validateSpeechDisclosure({
+      ...base,
+      claimDirective: { mode: 'forbidden', claimedRole: null, results: [], counterTargetSeat: null },
+    }, { ...decision('私は占い師です。'), claim: null })).toThrow('claim_missing_from_structure');
+  });
+
+  it.each(['forbidden', 'may'] as const)('%s中は構造化claimなしの確認済み正体と伏せ結果の匂わせを拒否する', (mode) => {
+    const base = seerContext();
+    expect(() => validateSpeechDisclosure({
+      ...base,
+      claimDirective: {
+        mode, claimedRole: mode === 'forbidden' ? null : 'seer',
+        results: mode === 'forbidden' ? [] : [{ day: 0, targetSeat: 'seat-6', verdict: '人狼ではない' }],
+        counterTargetSeat: null,
+      },
+    }, {
+      speech: '剛さんは村人だと確認できていますが、今はまだ私からは言えません。',
+      addressedTo: null,
+      requestsReply: false,
+      claim: null,
+    })).toThrow('unstructured_private_result');
+  });
+
+  it('構造化claimなしでも公開情報に基づく村人らしいという推理は許可する', () => {
+    const base = seerContext();
+    expect(() => validateSpeechDisclosure({
+      ...base,
+      claimDirective: { mode: 'forbidden', claimedRole: null, results: [], counterTargetSeat: null },
+    }, {
+      speech: '剛さんは発言が一貫していて、今のところ村人らしく見えます。',
+      addressedTo: null,
+      requestsReply: false,
+      claim: null,
+    })).not.toThrow();
+  });
+
+  it.each([
+    '占い結果はありますが、今はまだ言えません。',
+    '正体は分かっていますが、まだ明かせません。',
+  ])('具体的な白黒を言わなくても非公開結果の存在を匂わせる発言を拒否する: %s', (speech) => {
+    const base = seerContext();
+    expect(() => validateSpeechDisclosure({
+      ...base,
+      claimDirective: { mode: 'forbidden', claimedRole: null, results: [], counterTargetSeat: null },
+    }, { ...decision(speech), claim: null })).toThrow('unstructured_private_result');
+  });
 });

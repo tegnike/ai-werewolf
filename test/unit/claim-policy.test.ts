@@ -1,0 +1,70 @@
+import { describe, expect, it } from 'vitest';
+import type { ClaimLedger } from '@/domain/claims';
+import {
+  claimDirectiveFor, decideClaimPolicies, planMadmanSeerFake, planWolfSeerFake, preserveFakeResultConsistency,
+} from '@/engine/claim-policy';
+import { setupPlayers } from '@/engine/setup';
+
+describe('役職主張ポリシー', () => {
+  it('同じseedで同じ方針になり、人狼の計画的な騙り担当は最大1名になる', () => {
+    for (let index = 0; index < 100; index += 1) {
+      const seed = `policy-${index}`;
+      const players = setupPlayers(seed);
+      const first = decideClaimPolicies(seed, players);
+      const second = decideClaimPolicies(seed, players);
+      expect([...first.entries()]).toEqual([...second.entries()]);
+      const fakeWolves = [...first.values()].filter((policy) => policy.actualRole === 'werewolf' && policy.stance === 'fake');
+      expect(fakeWolves.length).toBeLessThanOrEqual(1);
+    }
+  });
+
+  it('狂人は人狼位置を入力せず偽結果を作り、seed群では狼への黒誤爆も起きる', () => {
+    let accidentalBlack = false;
+    for (let index = 0; index < 300; index += 1) {
+      const seed = `madman-result-${index}`;
+      const players = setupPlayers(seed);
+      const madman = players.find((player) => player.role === 'madman')!;
+      const result = planMadmanSeerFake(seed, madman.seat, 0, players.map((player) => player.seat));
+      const target = players.find((player) => player.seat === result.targetSeat)!;
+      if (target.role === 'werewolf' && result.verdict === '人狼') accidentalBlack = true;
+    }
+    expect(accidentalBlack).toBe(true);
+  });
+
+  it('人狼の偽占いは自分を対象にせず、仲間へ黒を出さない', () => {
+    for (let index = 0; index < 300; index += 1) {
+      const seed = `wolf-result-${index}`;
+      const players = setupPlayers(seed);
+      const wolves = players.filter((player) => player.role === 'werewolf');
+      const actor = wolves[0];
+      const partner = wolves[1];
+      const result = planWolfSeerFake(seed, actor.seat, 0, players.map((player) => player.seat), [partner.seat]);
+      expect(result.targetSeat).not.toBe(actor.seat);
+      if (result.targetSeat === partner.seat) expect(result.verdict).toBe('人狼ではない');
+    }
+  });
+
+  it('同じ対象を再び偽占いした場合は最初の白黒を維持する', () => {
+    const history = [{ day: 0, targetSeat: 'seat-2' as const, verdict: '人狼ではない' as const }];
+    expect(preserveFakeResultConsistency(history, {
+      day: 2, targetSeat: 'seat-2', verdict: '人狼',
+    })).toEqual({ day: 2, targetSeat: 'seat-2', verdict: '人狼ではない' });
+  });
+
+  it('真占い師の黒結果と対抗観測を必須主張へ変える', () => {
+    const seed = 'truth-black';
+    const players = setupPlayers(seed);
+    const seer = players.find((player) => player.role === 'seer')!;
+    const policy = decideClaimPolicies(seed, players).get(seer.seat)!;
+    const ledger: ClaimLedger = [{
+      seat: players.find((player) => player.seat !== seer.seat)!.seat,
+      name: '対抗', claimedRole: 'seer', coDay: 1, coStage: 'opening', results: [],
+    }];
+    const target = players.find((player) => player.seat !== seer.seat)!.seat;
+    const directive = claimDirectiveFor(seed, policy, ledger, {
+      seer: [{ day: 0, targetSeat: target, verdict: '人狼' }], medium: [],
+    }, { day: 1, stage: 'opening' });
+    expect(directive.mode).toBe('must');
+    expect(directive.claimedRole).toBe('seer');
+  });
+});
