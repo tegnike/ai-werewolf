@@ -40,7 +40,7 @@
 
 | 格納ファイル | 元パック | 元ファイル | 用途 |
 |---|---|---|---|
-| `sfx_scene_change.ogg` | RPG Audio 1.0 | `doorClose_4.ogg` | 日替わり、投票開始、処刑なしの低い切替音 |
+| `sfx_scene_change.ogg` | RPG Audio 1.0 | `doorClose_4.ogg` | 日替わり、処刑なしの低い切替音 |
 | `sfx_vote.ogg` | UI Audio 1.0 | `switch23.ogg` | 開票、決選開票 |
 | `sfx_attack.ogg` | RPG Audio 1.0 | `knifeSlice2.ogg` | 襲撃犠牲者の公開 |
 | `sfx_execution.ogg` | RPG Audio 1.0 | `chop.ogg` | 処刑者の公開 |

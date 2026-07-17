@@ -3,7 +3,7 @@ import { ClaimContractError, assertClaimWithinDirective } from '@/domain/claims'
 import type { DecisionContext, SpeechDecision } from '@/domain/types';
 import { addressTermFor, agentNameForSeat } from '@/domain/agents';
 
-const resultLikeClaim = /(?:人狼では(?:ない|ありません)|人狼|黒|白)(?:でした|だった|です|だよ|と出|判定|結果)/;
+const resultLikeClaim = /(?:人狼では(?:ない|ありません)|人狼)(?:でした|だった|です|だよ|と出|判定|結果)/;
 const abbreviatedRoleClaim = /(?:^|[^A-Za-z])(?:CO|ＣＯ)(?=$|[^A-Za-z])/i;
 const firstPersonRoleClaim = /(?:私|わたし|僕|俺|自分)(?:は|が|、)?[^。！？\n]{0,12}(?:占い師|霊媒師)(?:です|だ|である|を名乗|として)/;
 const confirmedPrivateResult = [
@@ -22,6 +22,16 @@ function hintsAtUnstructuredPrivateResult(speech: string): boolean {
 
 function publicRoleClaimExists(context: DecisionContext, roleLabel: string): boolean {
   return context.publicHistory.some((line) => line.startsWith(`${context.actor.name}:`) && line.includes(roleLabel));
+}
+
+function validateNaturalAlignmentTerms(speech: string): void {
+  const speechWithoutSurname = speech.replaceAll('黒田', '');
+  if (/[白黒]/.test(speechWithoutSurname)) {
+    throw new ClaimContractError(
+      'abbreviated_alignment_term',
+      '台詞では「白」「黒」などの略語を使わず、「人狼だという結果」「人狼ではないという結果」のような自然な日本語へ言い換えてください。',
+    );
+  }
 }
 
 function mentionsSeat(context: DecisionContext, speech: string, seat: NonNullable<SpeechDecision['structure']>['voteIntent']): boolean {
@@ -92,6 +102,7 @@ export function resultDisclosureGuidance(context: DecisionContext): string | nul
 }
 
 export function validateSpeechDisclosure(context: DecisionContext, decision: SpeechDecision): void {
+  validateNaturalAlignmentTerms(decision.speech);
   validateDiscussionStructure(context, decision);
   if (abbreviatedRoleClaim.test(decision.speech)) throw new Error('Speech parse validation failed: abbreviated role claim is forbidden');
   if (context.claimDirective) {
@@ -119,10 +130,10 @@ export function validateSpeechDisclosure(context: DecisionContext, decision: Spe
       const name = agentNameForSeat(result.targetSeat);
       const address = addressTermFor(context.actor.seat, result.targetSeat);
       const verdictPattern = result.verdict === '人狼'
-        ? /(?:人狼(?!ではない|ではありません|じゃない)|黒)/
-        : /(?:人狼では(?:ない|ありません|なかった|ありませんでした)|人狼じゃ(?:ない|なかった)|白)/;
+        ? /人狼(?!ではない|ではありません|じゃない)/
+        : /(?:人狼では(?:ない|ありません|なかった|ありませんでした)|人狼じゃ(?:ない|なかった))/;
       if ((!decision.speech.includes(address) && !decision.speech.includes(name)) || !verdictPattern.test(decision.speech)) {
-        throw new ClaimContractError('result_missing_from_speech', '本文でも対象者の名前と白黒の結果を明言してください。');
+        throw new ClaimContractError('result_missing_from_speech', '本文でも対象者の名前と、人狼だったか人狼ではなかったかを明言してください。');
       }
     }
     if (decision.claim.results.length > 1 && decision.claim.results.some((result) =>

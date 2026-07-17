@@ -88,7 +88,7 @@ export function MatchViewer({ matchId, mode }: { matchId: string; mode: 'live' |
   const terminal = match ? ['finished', 'aborted', 'aborted_budget'].includes(match.status) : false;
   const voiceEvents = useMemo(() => view === 'gm' ? events : events.filter((event) => event.visibility !== 'private'), [events, view]);
   const visibleEvents = useMemo(() => events.filter((event) => mode === 'live' ? event.seq <= presentedSeq : event.seq <= cursor), [cursor, events, mode, presentedSeq]);
-  const { cinematicCue, cinematicBusy, sfxEnabled, setSfxEnabled } = useCinematicEffects(visibleEvents, `${matchId}:${mode}:${view}`, announceInitialCues);
+  const { cinematicCue, cinematicBusy, sfxEnabled, setSfxEnabled, sfxVolume, setSfxVolume } = useCinematicEffects(visibleEvents, `${matchId}:${mode}:${view}`, announceInitialCues);
   const presentedStatus = mode === 'replay' && match?.status === 'finished' && !visibleEvents.some((event) => event.type === 'match_finished') ? 'running' : match?.status;
   const presentedState = useMemo(() => derivePresentedState(visibleEvents, presentedStatus), [presentedStatus, visibleEvents]);
   const audioMood = ['night_zero', 'wolf_chat', 'night_actions', 'medium'].includes(presentedState.phase) ? 'night' : 'day';
@@ -223,7 +223,7 @@ export function MatchViewer({ matchId, mode }: { matchId: string; mode: 'live' |
           {canSeeSecrets && roleMap.size > 0 && <span className="wolf-count">人狼残り {livingWerewolves}</span>}
           <em className={match.status}>{match.status === 'running' ? 'LIVE' : match.status.toUpperCase()}</em>
         </div>
-        <div className="header-actions"><AudioControls compact bgmEnabled={bgmEnabled} bgmVolume={bgmVolume} voiceEnabled={voiceEnabled} voiceVolume={voiceVolume} voiceAvailable={voiceAvailable} speakingSeat={presentationPaused ? null : speakingSeat} sfxEnabled={sfxEnabled} onBgmChange={setBgmEnabled} onBgmVolumeChange={setBgmVolume} onVoiceChange={setVoiceEnabled} onVoiceVolumeChange={setVoiceVolume} onSfxChange={setSfxEnabled} /><div className="view-switch" aria-label="観戦視点"><button className={view === 'public' ? 'active' : ''} onClick={() => setView('public')}>公開視点</button><button className={view === 'gm' ? 'active' : ''} onClick={() => setView('gm')}>GM視点</button></div></div>
+        <div className="header-actions"><AudioControls compact bgmEnabled={bgmEnabled} bgmVolume={bgmVolume} voiceEnabled={voiceEnabled} voiceVolume={voiceVolume} voiceAvailable={voiceAvailable} speakingSeat={presentationPaused ? null : speakingSeat} sfxEnabled={sfxEnabled} sfxVolume={sfxVolume} onBgmChange={setBgmEnabled} onBgmVolumeChange={setBgmVolume} onVoiceChange={setVoiceEnabled} onVoiceVolumeChange={setVoiceVolume} onSfxChange={setSfxEnabled} onSfxVolumeChange={setSfxVolume} /><div className="view-switch" aria-label="観戦視点"><button className={view === 'public' ? 'active' : ''} onClick={() => setView('public')}>公開視点</button><button className={view === 'gm' ? 'active' : ''} onClick={() => setView('gm')}>GM視点</button></div></div>
       </header>
       <div className="viewer-grid">
         <section className={`board-panel ${finalEvent ? 'scrollable' : ''}`}>

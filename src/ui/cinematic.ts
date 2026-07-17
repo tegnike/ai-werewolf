@@ -8,6 +8,7 @@ export type CinematicSound = 'scene' | 'vote' | 'attack' | 'execution';
 export const CINEMATIC_SHORT_DURATION_MS = 2400;
 export const CINEMATIC_LONG_DURATION_MS = 3600;
 export const CINEMATIC_INTER_CUE_GAP_MS = 600;
+export const CINEMATIC_VOTE_RESULT_GAP_MS = 5000;
 
 export interface CinematicCue {
   seq: number;
@@ -17,6 +18,7 @@ export interface CinematicCue {
   tone: CinematicTone;
   sound: CinematicSound;
   durationMs: number;
+  gapAfterMs?: number;
 }
 
 function playerName(value: unknown): string {
@@ -51,18 +53,6 @@ export function cinematicCueForEvent(event: UiEvent): CinematicCue | null {
     };
   }
 
-  if (event.type === 'discussion_closed') {
-    return {
-      seq: event.seq,
-      eyebrow: `DAY ${event.day} / VOTING PHASE`,
-      title: '投票開始',
-      subtitle: '生存者が処刑候補を選びます',
-      tone: 'vote',
-      sound: 'scene',
-      durationMs: CINEMATIC_SHORT_DURATION_MS,
-    };
-  }
-
   if (event.type === 'vote_reveal') {
     const runoff = event.payload.round === 2;
     return {
@@ -73,6 +63,7 @@ export function cinematicCueForEvent(event: UiEvent): CinematicCue | null {
       tone: 'vote',
       sound: 'vote',
       durationMs: CINEMATIC_SHORT_DURATION_MS,
+      gapAfterMs: CINEMATIC_VOTE_RESULT_GAP_MS,
     };
   }
 

@@ -79,7 +79,8 @@ describe('実AI人格プロンプト', () => {
 
     const prompts = buildPrompts(context);
     expect(prompts.systemPrompt).toContain('議論台帳にすでにある質問');
-    expect(prompts.systemPrompt).toContain('別々の相手に白結果');
+    expect(prompts.systemPrompt).toContain('別々の相手へ「人狼ではない」という結果');
+    expect(prompts.systemPrompt).toContain('「白」「黒」「白結果」「黒結果」のように省略しない');
     expect(prompts.systemPrompt).toContain('inspection_reason=2回');
     expect(prompts.systemPrompt).toContain('質問だけで終えず');
     expect(prompts.systemPrompt).toContain('structureは実際に口にする内容の自己分類');

@@ -11,15 +11,26 @@ const SOUND_SOURCE: Record<CinematicSound, string> = {
   execution: '/assets/sfx_execution.ogg',
 };
 
+const DEFAULT_SFX_VOLUME = 0.8;
+
 function storedSfxEnabled(): boolean {
   if (typeof window === 'undefined') return true;
   return window.localStorage.getItem('werewolf-sfx') !== '0';
+}
+
+function storedSfxVolume(): number {
+  if (typeof window === 'undefined') return DEFAULT_SFX_VOLUME;
+  const stored = window.localStorage.getItem('werewolf-sfx-volume');
+  if (stored === null) return DEFAULT_SFX_VOLUME;
+  const value = Number(stored);
+  return Number.isFinite(value) && value >= 0 && value <= 1 ? value : DEFAULT_SFX_VOLUME;
 }
 
 export function useCinematicEffects(events: UiEvent[], resetKey: string, announceInitial = false) {
   const [cue, setCue] = useState<CinematicCue | null>(null);
   const [cinematicBusy, setCinematicBusy] = useState(false);
   const [sfxEnabled, setSfxEnabledState] = useState(true);
+  const [sfxVolume, setSfxVolumeState] = useState(DEFAULT_SFX_VOLUME);
   const sfxEnabledRef = useRef(true);
   const seenSeq = useRef<number | null>(announceInitial ? 0 : null);
   const observedResetKey = useRef(resetKey);
@@ -31,12 +42,14 @@ export function useCinematicEffects(events: UiEvent[], resetKey: string, announc
 
   useEffect(() => {
     const enabled = storedSfxEnabled();
+    const volume = storedSfxVolume();
     sfxEnabledRef.current = enabled;
     setSfxEnabledState(enabled);
+    setSfxVolumeState(volume);
     for (const [kind, source] of Object.entries(SOUND_SOURCE) as Array<[CinematicSound, string]>) {
       const element = new Audio(source);
       element.preload = 'auto';
-      element.volume = 0.8;
+      element.volume = volume;
       element.dataset.sfxPlayer = kind;
       audio.current[kind] = element;
     }
@@ -118,7 +131,7 @@ export function useCinematicEffects(events: UiEvent[], resetKey: string, announc
         nextCueTimer.current = null;
         betweenCues.current = false;
         startNext();
-      }, CINEMATIC_INTER_CUE_GAP_MS);
+      }, cue.gapAfterMs ?? CINEMATIC_INTER_CUE_GAP_MS);
     }, cue.durationMs);
     return () => window.clearTimeout(timer);
   }, [cue, startNext]);
@@ -134,5 +147,12 @@ export function useCinematicEffects(events: UiEvent[], resetKey: string, announc
     if (!value) for (const element of Object.values(audio.current)) element?.pause();
   }, []);
 
-  return { cinematicCue: cue, cinematicBusy, sfxEnabled, setSfxEnabled };
+  const setSfxVolume = useCallback((value: number) => {
+    const volume = Math.max(0, Math.min(1, value));
+    window.localStorage.setItem('werewolf-sfx-volume', String(volume));
+    setSfxVolumeState(volume);
+    for (const element of Object.values(audio.current)) if (element) element.volume = volume;
+  }, []);
+
+  return { cinematicCue: cue, cinematicBusy, sfxEnabled, setSfxEnabled, sfxVolume, setSfxVolume };
 }

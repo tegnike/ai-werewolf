@@ -48,6 +48,19 @@ describe('能力結果の公開', () => {
     expect(() => validateSpeechDisclosure(context, decision('征司さんは霊媒ＣＯでした。'))).toThrow('abbreviated role claim is forbidden');
   });
 
+  it('白黒の略語を拒否し、自然な結果表現と黒田の姓は許可する', () => {
+    const context = { ...seerContext(), actor: { ...seerContext().actor, role: 'villager' as const } };
+    for (const speech of [
+      '征司さんへの黒を信じます。',
+      '初手黒を出した人が気になります。',
+      '結果が白ばかりなのが気になります。',
+    ]) {
+      expect(() => validateSpeechDisclosure(context, decision(speech))).toThrow('abbreviated_alignment_term');
+    }
+    expect(() => validateSpeechDisclosure(context, decision('人狼ではないという結果ばかりなのが気になります。'))).not.toThrow();
+    expect(() => validateSpeechDisclosure(context, decision('黒田さんの発言が気になります。'))).not.toThrow();
+  });
+
   it('真役職を参照せず、directiveで認可された狂人の偽主張を許可する', () => {
     const base = seerContext();
     const context: DecisionContext = {

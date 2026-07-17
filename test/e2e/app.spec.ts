@@ -29,6 +29,9 @@ test('ホームから試合を開始して公開／GM視点とリプレイを表
   await expect(page.locator('audio[data-bgm-player="true"]')).toHaveAttribute('src', '/assets/bgm_village.ogg');
   await expect(page.getByRole('button', { name: /VOICE ON/ })).toBeVisible();
   await expect(page.getByRole('button', { name: '◆ SE ON' })).toBeVisible();
+  await expect(page.getByLabel('SE音量')).toHaveValue('80');
+  await page.getByLabel('SE音量').fill('35');
+  await expect.poll(() => page.evaluate(() => window.localStorage.getItem('werewolf-sfx-volume'))).toBe('0.35');
   await page.getByRole('button', { name: '◆ SE ON' }).click();
   await expect(page.getByRole('button', { name: '◆ SE OFF' })).toBeVisible();
   await page.getByRole('button', { name: '◆ SE OFF' }).click();
@@ -61,6 +64,7 @@ test('ホームから試合を開始して公開／GM視点とリプレイを表
   await expect(page.getByRole('link', { name: 'リプレイを見る →' })).toBeVisible();
   await page.reload();
   await expect(page.getByText('GAME SET')).toBeVisible();
+  await expect(page.getByLabel('SE音量')).toHaveValue('35');
   await expect(page.locator('.cinematic-overlay')).toHaveCount(0);
   const replayUrl = page.url().replace('/match/', '/replay/');
   await page.goto(replayUrl);
@@ -68,14 +72,14 @@ test('ホームから試合を開始して公開／GM視点とリプレイを表
   await page.getByLabel('リプレイ位置').fill('0');
   await expect(page.getByRole('heading', { name: '全員の正体と結末' })).toHaveCount(0);
   await expect(page.locator('.timeline-event.dawn').filter({ hasText: '1日目' })).toHaveCount(0);
-  const voteStartSeq = await page.evaluate(async () => {
+  const voteRevealSeq = await page.evaluate(async () => {
     const matchId = window.location.pathname.split('/').at(-1);
     const response = await fetch(`/api/match/${matchId}?view=public`);
     const data = await response.json() as { events: Array<{ seq: number; type: string }> };
-    return data.events.find((event) => event.type === 'discussion_closed')?.seq ?? 0;
+    return data.events.find((event) => event.type === 'vote_reveal')?.seq ?? 0;
   });
-  await page.getByLabel('リプレイ位置').fill(String(voteStartSeq));
-  await expect(page.locator('.cinematic-overlay')).toContainText('投票開始', { timeout: 15_000 });
+  await page.getByLabel('リプレイ位置').fill(String(voteRevealSeq));
+  await expect(page.locator('.cinematic-overlay')).toContainText('開票', { timeout: 15_000 });
 });
 
 test('Spaceキーでゲームと発言音声を一時停止・再開し、中断できる', async ({ page }) => {

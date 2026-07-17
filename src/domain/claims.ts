@@ -69,7 +69,7 @@ export function foldClaim(
   for (const result of speech.claim.results) {
     const sameTarget = entry.results.find((item) => item.targetSeat === result.targetSeat);
     if (sameTarget && sameTarget.verdict !== result.verdict) {
-      throw new ClaimContractError('contradictory_target_result', '以前に主張した対象の白黒を変更できません。');
+      throw new ClaimContractError('contradictory_target_result', '以前に主張した対象が人狼だったか人狼ではなかったかを変更できません。');
     }
     const sameDay = entry.results.find((item) => item.day === result.day);
     if (sameDay && !sameClaimResult(sameDay, result)) {
