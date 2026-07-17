@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { readFile } from 'node:fs/promises';
 
 test('ホームから試合を開始して公開／GM視点とリプレイを表示できる', async ({ page }) => {
   await page.goto('/');
@@ -53,16 +54,30 @@ test('ホームから試合を開始して公開／GM視点とリプレイを表
   await expect(page.locator('.timeline-event.dawn').filter({ hasText: '1日目' })).toHaveCount(0);
 });
 
-test('Spaceキーで一時停止・再開し、中断できる', async ({ page }) => {
+test('Spaceキーでゲームと発言音声を一時停止・再開し、中断できる', async ({ page }) => {
+  const voiceAudio = await readFile('public/assets/bgm_village.ogg');
+  await page.route('**/api/voicevox', async (route) => {
+    if (route.request().method() === 'GET') {
+      await route.fulfill({ json: { available: true } });
+      return;
+    }
+    await route.fulfill({ status: 200, contentType: 'audio/ogg', body: voiceAudio });
+  });
   await page.goto('/');
   await page.getByRole('button', { name: /AI人狼を開始/ }).click();
   await expect(page).toHaveURL(/\/match\//);
   await expect(page.getByRole('heading', { name: '名取 澪' })).toBeVisible();
   await expect(page.locator('.viewer-shell')).toHaveClass(/night/);
+  await expect(page.locator('.agent-card.speaking')).toHaveCount(1, { timeout: 30_000 });
   await page.keyboard.press('Space');
   await expect(page.getByText('PAUSED')).toBeVisible();
+  await expect(page.locator('.agent-card.speaking')).toHaveCount(0);
+  const pausedEventCount = await page.locator('.timeline-event').count();
+  await page.waitForTimeout(1_200);
+  await expect(page.locator('.timeline-event')).toHaveCount(pausedEventCount);
   await page.keyboard.press('Space');
   await expect(page.getByText('LIVE')).toBeVisible();
+  await expect(page.locator('.agent-card.speaking')).toHaveCount(1);
   await page.getByRole('button', { name: '中断' }).click();
   await expect(page.getByText('ABORTED')).toBeVisible();
 });

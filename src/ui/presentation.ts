@@ -37,7 +37,8 @@ export function presentationCursorAfterLoad(currentSeq: number, maxLoadedSeq: nu
   return initialized ? currentSeq : maxLoadedSeq;
 }
 
-export function presentationLimit(events: UiEvent[], currentSeq: number, voiceReady: boolean, voiceBusy: boolean, speakingSeq: number | null): number {
+export function presentationLimit(events: UiEvent[], currentSeq: number, voiceReady: boolean, voiceBusy: boolean, speakingSeq: number | null, paused = false): number {
+  if (paused) return currentSeq;
   const maxSeq = Math.max(0, ...events.map((event) => event.seq));
   if (!voiceReady) return maxSeq;
   if (speakingSeq !== null) return Math.max(currentSeq, speakingSeq);

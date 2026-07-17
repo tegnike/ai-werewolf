@@ -31,6 +31,10 @@ describe('音声とログの同期', () => {
     expect(presentationCursorAfterLoad(11, 13, true)).toBe(11);
     expect(presentationCursorAfterLoad(0, 13, false)).toBe(13);
   });
+
+  it('一時停止中は到着済みイベントがあっても表示位置を進めない', () => {
+    expect(presentationLimit(events, 11, true, false, null, true)).toBe(11);
+  });
 });
 
 describe('公開視点の非公開イベント表示', () => {

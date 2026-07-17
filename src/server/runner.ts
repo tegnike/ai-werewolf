@@ -58,12 +58,19 @@ export class MatchRunner {
     if (action === 'retry') { this.retryRequested = true; this.paused = false; }
   }
 
+  private async waitWhilePaused(): Promise<void> {
+    while (this.paused && !this.aborted) await wait(100);
+    if (this.aborted) throw new AbortMatchError('Match aborted');
+  }
+
   private async controlledDecision<T>(perform: () => Promise<T>, context: DecisionContext): Promise<T> {
     while (true) {
       try {
-        return await perform();
+        const result = await perform();
+        await this.waitWhilePaused();
+        return result;
       } catch (error) {
-        if (error instanceof ApiBudgetError) throw error;
+        if (error instanceof AbortMatchError || error instanceof ApiBudgetError) throw error;
         const message = error instanceof Error ? error.message : 'AI判断に失敗しました。';
         this.repo.updateStatus(this.matchId, 'paused_error', null, {
           code: error instanceof AIRequestError ? error.code : ('code' in (error as object) ? String((error as { code: unknown }).code) : 'ai_error'),
@@ -104,12 +111,11 @@ export class MatchRunner {
           publishEvent(event);
         },
         checkpoint: async () => {
-          if (this.aborted) throw new AbortMatchError('Match aborted');
-          while (this.paused && !this.aborted) await wait(100);
-          if (this.aborted) throw new AbortMatchError('Match aborted');
+          await this.waitWhilePaused();
           if (this.cursor < this.existing.length) return;
           const current = this.repo.getMatch(this.matchId);
           if (current?.speed) await wait(current.speed);
+          await this.waitWhilePaused();
         },
       };
 

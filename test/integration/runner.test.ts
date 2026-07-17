@@ -28,6 +28,14 @@ async function waitFor(repo: MatchRepo, id: string, status: string) {
   throw new Error(`Timed out waiting for ${status}`);
 }
 
+async function waitForEventCount(repo: MatchRepo, id: string, minimum: number) {
+  for (let index = 0; index < 300; index += 1) {
+    if (repo.events(id).length >= minimum) return;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error(`Timed out waiting for ${minimum} events`);
+}
+
 describe('MatchRunner', () => {
   it('MockAIでDBへ一度だけイベントを保存して完走する', async () => {
     const manager = new MatchRunnerManager();
@@ -41,8 +49,12 @@ describe('MatchRunner', () => {
   it('pause/resumeとabortを受け付ける', async () => {
     const manager = new MatchRunnerManager();
     const match = manager.create({ seed: 'controls', speed: 30, ai: 'mock' });
+    await waitForEventCount(manager.repo, match.id, 1);
     manager.control(match.id, 'pause');
     await waitFor(manager.repo, match.id, 'paused');
+    const pausedEventCount = manager.repo.events(match.id).length;
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    expect(manager.repo.events(match.id)).toHaveLength(pausedEventCount);
     manager.control(match.id, 'resume', 0);
     await waitFor(manager.repo, match.id, 'finished');
     const second = manager.create({ seed: 'abort', speed: 30, ai: 'mock' });

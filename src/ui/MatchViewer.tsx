@@ -82,7 +82,8 @@ export function MatchViewer({ matchId, mode }: { matchId: string; mode: 'live' |
   const audioMood = ['night_zero', 'wolf_chat', 'night_actions', 'medium'].includes(presentedState.phase) ? 'night' : 'day';
   const { bgmEnabled, setBgmEnabled, bgmVolume, setBgmVolume } = useAmbientBgm(audioMood);
   const revealSpeech = useCallback((seq: number) => setPresentedSeq((current) => Math.max(current, seq)), []);
-  const { voiceEnabled, setVoiceEnabled, voiceAvailable, speakingSeat, speakingSeq, voiceVolume, setVoiceVolume, voiceBusy } = useMatchVoice(voiceEvents, revealSpeech);
+  const paused = match?.status === 'paused';
+  const { voiceEnabled, setVoiceEnabled, voiceAvailable, speakingSeat, speakingSeq, voiceVolume, setVoiceVolume, voiceBusy } = useMatchVoice(voiceEvents, revealSpeech, paused);
 
   const load = useCallback(async () => {
     const response = await fetch(`/api/match/${matchId}?view=${view}`, { cache: 'no-store' });
@@ -97,9 +98,9 @@ export function MatchViewer({ matchId, mode }: { matchId: string; mode: 'live' |
 
   useEffect(() => {
     if (mode !== 'live') return;
-    const limit = presentationLimit(voiceEvents, presentedSeq, voiceEnabled && voiceAvailable !== false, voiceBusy, speakingSeq);
+    const limit = presentationLimit(voiceEvents, presentedSeq, voiceEnabled && voiceAvailable !== false, voiceBusy, speakingSeq, paused);
     if (limit !== presentedSeq) setPresentedSeq(limit);
-  }, [mode, presentedSeq, speakingSeq, voiceAvailable, voiceBusy, voiceEnabled, voiceEvents]);
+  }, [mode, paused, presentedSeq, speakingSeq, voiceAvailable, voiceBusy, voiceEnabled, voiceEvents]);
 
   useEffect(() => { void load(); }, [load]);
   useEffect(() => {

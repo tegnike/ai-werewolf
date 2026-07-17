@@ -5,7 +5,7 @@ import type { UiEvent } from './types';
 
 interface SpeechItem { seq: number; seat: string; speech: string }
 
-export function useMatchVoice(events: UiEvent[], onSpeechStart: (seq: number) => void) {
+export function useMatchVoice(events: UiEvent[], onSpeechStart: (seq: number) => void, paused = false) {
   const [enabled, setEnabledState] = useState(true);
   const enabledRef = useRef(true);
   const [speakingSeat, setSpeakingSeat] = useState<string | null>(null);
@@ -18,6 +18,9 @@ export function useMatchVoice(events: UiEvent[], onSpeechStart: (seq: number) =>
   const queue = useRef<SpeechItem[]>([]);
   const pumping = useRef(false);
   const currentAudio = useRef<HTMLAudioElement | null>(null);
+  const currentItem = useRef<SpeechItem | null>(null);
+  const finishCurrentAudio = useRef<(() => void) | null>(null);
+  const pausedRef = useRef(paused);
 
   useEffect(() => {
     const stored = window.localStorage.getItem('werewolf-voice');
@@ -34,18 +37,24 @@ export function useMatchVoice(events: UiEvent[], onSpeechStart: (seq: number) =>
 
   const stopVoice = useCallback(() => {
     queue.current = [];
-    if (currentAudio.current) { currentAudio.current.pause(); currentAudio.current = null; }
-    pumping.current = false;
+    currentAudio.current?.pause();
+    finishCurrentAudio.current?.();
     setBusy(false);
     setSpeakingSeat(null);
     setSpeakingSeq(null);
   }, []);
 
+  const markSpeechStarted = useCallback((item: SpeechItem) => {
+    setSpeakingSeat(item.seat);
+    setSpeakingSeq(item.seq);
+    onSpeechStart(item.seq);
+  }, [onSpeechStart]);
+
   const pump = useCallback(async () => {
-    if (pumping.current || !enabledRef.current || available === false) return;
+    if (pumping.current || pausedRef.current || !enabledRef.current || available === false) return;
     pumping.current = true;
     setBusy(true);
-    while (queue.current.length > 0 && enabledRef.current) {
+    while (queue.current.length > 0 && enabledRef.current && !pausedRef.current) {
       const item = queue.current.shift();
       if (!item) break;
       try {
@@ -56,29 +65,55 @@ export function useMatchVoice(events: UiEvent[], onSpeechStart: (seq: number) =>
         const audio = new Audio(url);
         audio.volume = volumeRef.current;
         currentAudio.current = audio;
+        currentItem.current = item;
         await new Promise<void>((resolve) => {
-          audio.onended = () => resolve();
-          audio.onerror = () => resolve();
-          void audio.play().then(() => {
-            setSpeakingSeat(item.seat);
-            setSpeakingSeq(item.seq);
-            onSpeechStart(item.seq);
-          }).catch(() => {
-            onSpeechStart(item.seq);
+          let finished = false;
+          const finish = () => {
+            if (finished) return;
+            finished = true;
             resolve();
-          });
+          };
+          finishCurrentAudio.current = finish;
+          audio.onended = finish;
+          audio.onerror = finish;
+          if (!pausedRef.current) {
+            void audio.play().then(() => markSpeechStarted(item)).catch(() => {
+              markSpeechStarted(item);
+              finish();
+            });
+          }
         });
         setSpeakingSeat(null);
         setSpeakingSeq(null);
         URL.revokeObjectURL(url);
         currentAudio.current = null;
+        currentItem.current = null;
+        finishCurrentAudio.current = null;
       } catch { setAvailable(false); break; }
     }
     pumping.current = false;
     setBusy(false);
     setSpeakingSeat(null);
     setSpeakingSeq(null);
-  }, [available, onSpeechStart]);
+    if (queue.current.length > 0 && enabledRef.current && !pausedRef.current) void pump();
+  }, [available, markSpeechStarted]);
+
+  useEffect(() => {
+    pausedRef.current = paused;
+    const audio = currentAudio.current;
+    const item = currentItem.current;
+    if (paused) {
+      audio?.pause();
+      setSpeakingSeat(null);
+      setSpeakingSeq(null);
+      return;
+    }
+    if (audio && item) {
+      void audio.play().then(() => markSpeechStarted(item)).catch(() => finishCurrentAudio.current?.());
+      return;
+    }
+    void pump();
+  }, [markSpeechStarted, paused, pump]);
 
   useEffect(() => {
     const maxSeq = Math.max(0, ...events.map((event) => event.seq));
