@@ -60,6 +60,32 @@ describe('実AI人格プロンプト', () => {
     expect(prompt).toContain('仮定、今後の方針、迷い、弱い違和感');
   });
 
+  it('discussion v3では既出質問を重ねず疑い・盤面・投票予定を増やすよう促す', () => {
+    const players = setupPlayers('discussion-v3-prompt');
+    const context: DecisionContext = {
+      matchId: 'test', callKey: 'd1-speech-t8-seat-3', seed: 'discussion-v3-prompt', day: 1,
+      phase: 'discussion', kind: 'speech', actor: players[2], players,
+      legalTargets: players.filter((player) => player.seat !== players[2].seat).map((player) => player.seat),
+      publicHistory: ['神崎 レナ: 私は占い師です。征司さんは人狼ではありませんでした。'],
+      privateFacts: [], round: 1,
+      discussion: {
+        version: 'v3', stage: 'opening', turn: 8, spokenSeats: ['seat-5'],
+        remainingUnspokenSeats: players.filter((player) => player.seat !== 'seat-5').map((player) => player.seat),
+        canRequestReply: true,
+        boardDigest: ['質問済み: inspection_reason=2回（回答1回）', '今日の貢献数: suspicion=1、defense=0、vote_intent=0、board_analysis=0'],
+        agenda: ['質問だけで終えず、自分が今もっとも疑う相手と根拠を一つ示す'],
+      },
+    };
+
+    const prompts = buildPrompts(context);
+    expect(prompts.systemPrompt).toContain('議論台帳にすでにある質問');
+    expect(prompts.systemPrompt).toContain('別々の相手に白結果');
+    expect(prompts.systemPrompt).toContain('inspection_reason=2回');
+    expect(prompts.systemPrompt).toContain('質問だけで終えず');
+    expect(prompts.systemPrompt).toContain('structureは実際に口にする内容の自己分類');
+    expect(prompts.decisionPrompt).toContain('structureは本文に現れる');
+  });
+
   it('発言希望確認では台詞を作らず、黙る選択と4段階の緊急度を示す', () => {
     const players = setupPlayers('intent-prompt');
     const context: DecisionContext = {
@@ -163,6 +189,32 @@ describe('実AI人格プロンプト', () => {
     expect(schema.safeParse({ speech: 'どう思う？', addressedTo: null, requestsReply: true }).success).toBe(false);
     expect(speechDecisionSchema(['seat-2'], false, true)
       .safeParse({ speech: '誰か答えてください。', addressedTo: null, requestsReply: true }).success).toBe(false);
+  });
+
+  it('discussion v3 schemaで発言本文に対応する構造化貢献を必須にする', () => {
+    const schema = speechDecisionSchema(['seat-2'], false, true, ['seat-2']);
+    expect(schema.safeParse({
+      speech: 'こはるさんの便乗が気になります。', addressedTo: null, requestsReply: false,
+      structure: {
+        primaryAct: 'suspicion', questionTopic: null,
+        suspicion: { targetSeat: 'seat-2', basis: 'interaction' }, voteIntent: null, boardAnalysis: false,
+      },
+    }).success).toBe(true);
+    expect(schema.safeParse({
+      speech: 'どう思いますか？', addressedTo: 'seat-2', requestsReply: true,
+      structure: { primaryAct: 'question', questionTopic: null, suspicion: null, voteIntent: null, boardAnalysis: false },
+    }).success).toBe(false);
+    expect(schema.safeParse({ speech: '発言します。', addressedTo: null, requestsReply: false }).success).toBe(false);
+
+    const closedTopicSchema = speechDecisionSchema(['seat-2'], false, true, ['seat-2'], ['inspection_reason']);
+    expect(closedTopicSchema.safeParse({
+      speech: '占い理由を答えてください。', addressedTo: 'seat-2', requestsReply: true,
+      structure: { primaryAct: 'question', questionTopic: 'inspection_reason', suspicion: null, voteIntent: null, boardAnalysis: false },
+    }).success).toBe(false);
+    expect(closedTopicSchema.safeParse({
+      speech: '占い理由には答えました。', addressedTo: null, requestsReply: false,
+      structure: { primaryAct: 'answer', questionTopic: 'inspection_reason', suspicion: null, voteIntent: null, boardAnalysis: false },
+    }).success).toBe(true);
   });
 
   it('実際の席と役職に対応する行動方針だけを機械的に差し込む', () => {

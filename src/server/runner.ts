@@ -125,7 +125,13 @@ export class MatchRunner {
       const created = this.existing.find((event) => event.type === 'match_created');
       const rules = created?.payload.rules as { claims?: unknown; discussion?: unknown } | undefined;
       const claimsVersion = this.existing.length === 0 || rules?.claims === 'v1' ? 'v1' : undefined;
-      const discussionVersion = this.existing.length === 0 || rules?.discussion === 'v2' ? 'v2' : 'legacy';
+      const discussionVersion = this.existing.length === 0
+        ? 'v3'
+        : rules?.discussion === 'v3'
+          ? 'v3'
+          : rules?.discussion === 'v2'
+            ? 'v2'
+            : 'legacy';
       const result = await runGame(this.matchId, match.seed, ai, hooks, { includeDayOneDawn, claimsVersion, discussionVersion });
       this.repo.updateStatus(this.matchId, 'finished', result.winner);
     } catch (error) {

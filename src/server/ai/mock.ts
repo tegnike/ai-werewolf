@@ -69,6 +69,9 @@ export class MockAI implements DecisionProvider {
           addressedTo,
           requestsReply: false,
           claim: { claimedRole: directive.claimedRole, results: directive.results.map((result) => ({ ...result })) },
+          ...(context.discussion?.version === 'v3' ? {
+            structure: { primaryAct: 'role_claim' as const, questionTopic: null, suspicion: null, voteIntent: null, boardAnalysis: false },
+          } : {}),
         };
       }
     }
@@ -80,13 +83,38 @@ export class MockAI implements DecisionProvider {
     const speech = `${prefix}${candidates[index]}`;
     const addressedTo = Object.entries(addressBookForSeat(context.actor.seat))
       .find(([seat, term]) => context.legalTargets.includes(seat as SeatId) && speech.includes(term ?? ''))?.[0] as SeatId | undefined;
+    const structureTarget = context.players.filter((player) => player.alive && player.seat !== context.actor.seat)[
+      stableIndex(context.seed, `${context.callKey}-structure-target`, context.players.filter((player) => player.alive && player.seat !== context.actor.seat).length)
+    ]?.seat ?? null;
+    const v3 = context.discussion?.version === 'v3';
+    const shouldDeclareVote = v3 && (context.discussion?.turn ?? 0) >= 10 && Boolean(structureTarget);
+    const shouldAnalyzeBoard = v3 && !shouldDeclareVote && (context.discussion?.turn ?? 0) % 4 === 0;
+    const finalSpeech = shouldDeclareVote
+      ? `今は${addressTermFor(context.actor.seat, structureTarget!)}に投票する。${speech}`
+      : shouldAnalyzeBoard
+        ? `役職の名乗りだけでなく、その他の発言と投票方針も見たい。${speech}`
+        : v3 && structureTarget
+          ? `今は${addressTermFor(context.actor.seat, structureTarget)}が少し気になる。${speech}`
+          : speech;
     const decision: SpeechDecision = {
-      speech,
+      speech: finalSpeech.slice(0, 200),
       addressedTo: addressedTo ?? null,
       requestsReply: context.wolfChat?.mode === 'monologue' || context.discussion?.canRequestReply === false
         ? false
         : Boolean(addressedTo && /[?？]|教えて|答えて|聞かせ|聞きたい|聞いてみたい/.test(speech)),
     };
+    if (v3) {
+      const answering = Boolean(context.discussion?.promptedBySeat);
+      decision.structure = {
+        primaryAct: answering ? 'answer' : shouldDeclareVote ? 'vote_intent' : shouldAnalyzeBoard ? 'board_analysis' : 'suspicion',
+        questionTopic: answering || decision.requestsReply ? 'other' : null,
+        suspicion: !answering && !shouldDeclareVote && !shouldAnalyzeBoard && structureTarget
+          ? { targetSeat: structureTarget, basis: 'speech_content' }
+          : null,
+        voteIntent: shouldDeclareVote ? structureTarget : null,
+        boardAnalysis: shouldAnalyzeBoard,
+      };
+    }
     if (context.claimDirective) decision.claim = null;
     return decision;
   }

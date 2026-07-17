@@ -24,6 +24,51 @@ function publicRoleClaimExists(context: DecisionContext, roleLabel: string): boo
   return context.publicHistory.some((line) => line.startsWith(`${context.actor.name}:`) && line.includes(roleLabel));
 }
 
+function mentionsSeat(context: DecisionContext, speech: string, seat: NonNullable<SpeechDecision['structure']>['voteIntent']): boolean {
+  if (!seat) return true;
+  return speech.includes(agentNameForSeat(seat)) || speech.includes(addressTermFor(context.actor.seat, seat));
+}
+
+function validateDiscussionStructure(context: DecisionContext, decision: SpeechDecision): void {
+  if (context.discussion?.version !== 'v3') return;
+  const structure = decision.structure;
+  if (!structure) throw new ClaimContractError('discussion_structure_missing', 'structureを省略せず、実際の発言内容を自己分類してください。');
+  if (structure.suspicion && !mentionsSeat(context, decision.speech, structure.suspicion.targetSeat)) {
+    // 本文に裏付けのない公開メタデータは台帳へ載せない。本文を推測で解析して
+    // 別の席へ付け替えるより、構造だけを安全側へ落とす方が確実である。
+    structure.suspicion = null;
+    if (structure.primaryAct === 'suspicion') structure.primaryAct = 'other';
+  }
+  if (context.day === 1 && context.discussion?.turn === 1 && structure.suspicion) {
+    if (!['intuition', 'result', 'role_claim'].includes(structure.suspicion.basis)) {
+      throw new ClaimContractError('opening_unseen_behavior', '今日の最初の発言では他者の今日の態度や反応をまだ観察できません。疑いを出すなら勘・仮置きだと明示するか、自分の能力結果・同じ発言で公開する役職情報だけを根拠にしてください。');
+    }
+    if (structure.suspicion.basis === 'intuition' && !/(?:勘|直感|仮|材料.{0,8}(?:ない|ありません)|まだ.{0,8}(?:分から|わから|不明))/.test(decision.speech)) {
+      throw new ClaimContractError('opening_intuition_unmarked', '今日の最初の発言で公開情報のない相手を疑うなら、本文でも勘・直感・仮置きであることを明示してください。未発言者の態度を観察したように話してはいけません。');
+    }
+  }
+  if (structure.suspicion && context.discussion?.remainingUnspokenSeats?.includes(structure.suspicion.targetSeat)) {
+    if (!['intuition', 'result', 'role_claim'].includes(structure.suspicion.basis)) {
+      throw new ClaimContractError('unspoken_target_behavior', 'その相手は今日まだ発言していないため、今日の発言内容・反応・便乗・投票予定を疑いの根拠にできません。勘として仮置きするか、能力結果・公開済みの役職主張だけを根拠にしてください。');
+    }
+    if (structure.suspicion.basis === 'intuition' && !/(?:勘|直感|仮|材料.{0,8}(?:ない|ありません)|まだ.{0,8}(?:分から|わから|不明)|発言.{0,8}(?:前|ない|ありません))/.test(decision.speech)) {
+      throw new ClaimContractError('unspoken_intuition_unmarked', '未発言者を公開情報なしで疑うなら、本文でも勘・直感・仮置きであることを明示してください。未発言者の態度を観察したように話してはいけません。');
+    }
+  }
+  if (structure.voteIntent && (!mentionsSeat(context, decision.speech, structure.voteIntent) || !/(?:投票|入れ|処刑候補|吊)/.test(decision.speech))) {
+    throw new ClaimContractError('vote_intent_missing', 'voteIntentへ記録する相手は、本文でもその人へ投票する予定だと明言してください。宣言しない場合はvoteIntent=nullにしてください。');
+  }
+  if (structure.primaryAct === 'question' && !decision.requestsReply) {
+    throw new ClaimContractError('question_without_reply', '質問を主目的にするなら本文で明確に返答を求め、addressedToとrequestsReply=trueを一致させてください。');
+  }
+  if (structure.questionTopic && structure.primaryAct !== 'answer' && !decision.requestsReply) {
+    throw new ClaimContractError('question_topic_without_question', '話題へ触れただけならquestionTopic=nullにしてください。明確に質問する場合だけ宛先とrequestsReply=trueを設定してください。');
+  }
+  if (structure.boardAnalysis && (!/(?:占い師|霊媒師|役職)/.test(decision.speech) || !/(?:今日|処刑|投票|吊)/.test(decision.speech))) {
+    throw new ClaimContractError('board_analysis_missing', 'boardAnalysis=trueにするなら、本文で役職主張の人数や内訳と、今日の処刑対象範囲を具体的に整理してください。');
+  }
+}
+
 export function resultDisclosureGuidance(context: DecisionContext): string | null {
   if (context.claimDirective) {
     const directive = context.claimDirective;
@@ -47,6 +92,7 @@ export function resultDisclosureGuidance(context: DecisionContext): string | nul
 }
 
 export function validateSpeechDisclosure(context: DecisionContext, decision: SpeechDecision): void {
+  validateDiscussionStructure(context, decision);
   if (abbreviatedRoleClaim.test(decision.speech)) throw new Error('Speech parse validation failed: abbreviated role claim is forbidden');
   if (context.claimDirective) {
     assertClaimWithinDirective(decision.claim, context.claimDirective);

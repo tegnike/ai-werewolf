@@ -3,6 +3,7 @@ node_modules/
 playwright-report/
 test-results/
 coverage/
+tmp/
 data/
 *.db
 *.db-shm

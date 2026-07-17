@@ -55,6 +55,19 @@ export interface GameState {
 
 export type DecisionKind = 'speech' | 'speech_intent' | 'wolf_speech' | 'vote' | 'runoff_vote' | 'attack' | 'attack_final' | 'seer' | 'guard';
 export type SpeechMotivation = 'reply' | 'question' | 'challenge' | 'new_information' | 'clarify' | 'none';
+export type SpeechAct = 'role_claim' | 'question' | 'answer' | 'suspicion' | 'defense' | 'vote_intent' | 'board_analysis' | 'agreement' | 'other';
+export type QuestionTopic = 'inspection_reason' | 'claim_timing' | 'counterclaim_reason' | 'execution_policy' | 'vote_plan' | 'gray_read' | 'defense' | 'other';
+export type SuspicionBasis = 'speech_content' | 'timing' | 'interaction' | 'vote_plan' | 'role_claim' | 'result' | 'intuition';
+
+export interface SpeechStructure {
+  primaryAct: SpeechAct;
+  /** 質問をした、または質問へ答えた場合の話題。 */
+  questionTopic: QuestionTopic | null;
+  suspicion: { targetSeat: SeatId; basis: SuspicionBasis } | null;
+  voteIntent: SeatId | null;
+  /** 役職主張数や今日の処刑範囲を本文で明示的に整理したか。 */
+  boardAnalysis: boolean;
+}
 
 export interface DiscussionContext {
   stage: 'opening' | 'free';
@@ -65,6 +78,14 @@ export interface DiscussionContext {
   spokenSeats?: SeatId[];
   remainingUnspokenSeats?: SeatId[];
   canRequestReply?: boolean;
+  /** 新規試合の議論台帳とagendaを有効にする。 */
+  version?: 'v3';
+  /** 公開発言の構造化情報だけから導出した、秘密を含まない議論状況。 */
+  boardDigest?: string[];
+  /** 台本ではなく、まだ不足している貢献の候補。 */
+  agenda?: string[];
+  /** すでに十分に尋ねられ、追加の返答要求を受け付けない質問分類。 */
+  closedQuestionTopics?: QuestionTopic[];
   /** markerのない旧試合で固定一巡プロンプトを再現する。 */
   legacyRules?: boolean;
   /** discussion v2より前の保存済み試合を復旧するための互換情報。 */
@@ -102,6 +123,8 @@ export interface SpeechDecision {
   addressedTo: SeatId | null;
   requestsReply: boolean;
   claim?: SpeechClaim | null;
+  /** discussion v3で必須。v2以前の保存済みAI応答との互換のため型上は任意。 */
+  structure?: SpeechStructure;
 }
 export interface SpeechIntentDecision {
   urgency: 0 | 1 | 2 | 3;

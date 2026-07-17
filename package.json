@@ -15,6 +15,7 @@
     "test:leak": "vitest run test/leak",
     "test:e2e": "playwright test",
     "sim": "tsx scripts/sim.ts",
+    "accept:day1": "tsx scripts/accept-day1.ts",
     "db:migrate": "tsx scripts/migrate.ts"
   },
   "dependencies": {

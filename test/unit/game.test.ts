@@ -62,7 +62,7 @@ describe('ゲームエンジン', () => {
     const first = await runMock('1000', 'v1');
     const second = await runMock('1000', 'v1');
     expect(first.events.map((event) => event.payload)).toEqual(second.events.map((event) => event.payload));
-    expect(first.events.find((event) => event.type === 'match_created')?.payload.rules).toEqual({ discussion: 'v2', claims: 'v1' });
+    expect(first.events.find((event) => event.type === 'match_created')?.payload.rules).toEqual({ discussion: 'v3', claims: 'v1' });
 
     const ledger = claimLedgerFromEvents(first.events);
     expect(ledger.length).toBeGreaterThanOrEqual(2);
@@ -178,7 +178,7 @@ describe('ゲームエンジン', () => {
       },
     };
 
-    await runGame('immediate-reply', 'immediate-reply', provider, { emit: async () => {}, checkpoint: async () => {} });
+    await runGame('immediate-reply', 'immediate-reply', provider, { emit: async () => {}, checkpoint: async () => {} }, { discussionVersion: 'v2' });
     const dayOne = speechContexts.filter((context) => context.day === 1 && context.kind === 'speech');
     expect(dayOne.slice(0, 3).map((context) => context.actor.seat)).toEqual([firstSeat, secondSeat, firstSeat]);
     expect(dayOne.slice(0, 3).map((context) => context.discussion?.stage)).toEqual(['opening', 'opening', 'free']);
@@ -211,7 +211,7 @@ describe('ゲームエンジン', () => {
     await runGame('private-history', 'private-history', provider, {
       emit: async () => {},
       checkpoint: async () => {},
-    });
+    }, { discussionVersion: 'v2' });
 
     const dayTwoWolf = contexts.find((context) => context.day === 2 && context.kind === 'wolf_speech');
     const dayTwoGuard = contexts.find((context) => context.day === 2 && context.kind === 'speech' && context.actor.role === 'bodyguard');
@@ -249,7 +249,7 @@ describe('ゲームエンジン', () => {
     await runGame('lone-wolf-chat', 'lone-wolf-chat', provider, {
       emit: async (event) => { events.push({ type: event.type, payload: event.payload }); },
       checkpoint: async () => {},
-    });
+    }, { discussionVersion: 'v2' });
 
     const soloContexts = contexts.filter((context) =>
       context.kind === 'wolf_speech' && context.wolfChat?.mode === 'monologue');

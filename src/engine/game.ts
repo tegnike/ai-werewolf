@@ -16,6 +16,9 @@ import {
   claimDirectiveFor, decideClaimPolicies, planMadmanMediumFake, planMadmanSeerFake,
   planWolfMediumFake, planWolfSeerFake, preserveFakeResultConsistency,
 } from './claim-policy';
+import {
+  closedQuestionTopics, discussionAgenda, discussionBoardDigest, emptyDiscussionBoard, foldDiscussionBoard, suspicionCountFor,
+} from './discussion-board';
 
 export interface SimulationResult { winner: Winner; day: number; state: GameState }
 
@@ -117,11 +120,11 @@ export async function runGame(
   seed: string,
   ai: DecisionProvider,
   hooks: RunHooks,
-  options: { includeDayOneDawn?: boolean; claimsVersion?: 'v1'; discussionVersion?: 'legacy' | 'v2' } = {},
+  options: { includeDayOneDawn?: boolean; claimsVersion?: 'v1'; discussionVersion?: 'legacy' | 'v2' | 'v3' } = {},
 ): Promise<SimulationResult> {
   const players = setupPlayers(seed);
   const claimsEnabled = options.claimsVersion === 'v1';
-  const discussionVersion = options.discussionVersion ?? 'v2';
+  const discussionVersion = options.discussionVersion ?? 'v3';
   const claimPolicies = decideClaimPolicies(seed, players);
   let state = createInitialState(players);
   const publicHistory: string[] = [];
@@ -132,6 +135,7 @@ export async function runGame(
   const histories = {
     seer: [] as string[], medium: [] as string[], guard: [] as string[], wolf: [] as string[], wolfAttack: [] as string[],
   };
+  let discussionBoard = emptyDiscussionBoard();
   let pendingVictim: SeatId | null = null;
 
   const directiveFor = (actor: Player, day: number, stage: 'opening' | 'free'): ClaimDirective => {
@@ -177,7 +181,16 @@ export async function runGame(
       matchId, seed, day, phase, kind, callKey, actor,
       players: state.players.map((player) => ({ ...player })), legalTargets,
       publicHistory: [...publicHistory], privateFacts: privateFactsFor(actor, state, histories), round,
-      discussion: discussion ? { ...discussion, ...(discussionVersion === 'legacy' ? { legacyRules: true } : {}) } : undefined,
+      discussion: discussion ? {
+        ...discussion,
+        ...(discussionVersion === 'legacy' ? { legacyRules: true } : {}),
+        ...(discussionVersion === 'v3' ? {
+          version: 'v3' as const,
+          boardDigest: discussionBoardDigest(discussionBoard, state.players),
+          agenda: discussionAgenda(discussionBoard, state.players, actor.seat, discussion.turn, discussion.promptedBySeat),
+          closedQuestionTopics: closedQuestionTopics(discussionBoard),
+        } : {}),
+      } : undefined,
     };
     if (kind === 'wolf_speech') {
       const participantSeats = state.players
@@ -387,8 +400,8 @@ export async function runGame(
   await emit(0, 'setup', 'match_created', {
     seed,
     players: players.map((player) => ({ seat: player.seat, name: player.name, role: player.role })),
-    ...(discussionVersion === 'v2'
-      ? { rules: { discussion: 'v2', ...(claimsEnabled ? { claims: 'v1' } : {}) } }
+    ...(discussionVersion === 'v2' || discussionVersion === 'v3'
+      ? { rules: { discussion: discussionVersion, ...(claimsEnabled ? { claims: 'v1' } : {}) } }
       : claimsEnabled ? { rules: { claims: 'v1' } } : {}),
   }, 'private');
 
@@ -411,6 +424,7 @@ export async function runGame(
     const target = await ai.target(context(initialSeer, 0, 'night_zero', 'seer', 'd0-seer', legalSeerTargets(state, initialSeer.seat)));
     const result = isWerewolfResult(playerBySeat(state, target.targetSeat).role);
     histories.seer.push(`${seatName(target.targetSeat)}: ${result}`);
+    if (discussionVersion === 'v3') histories.seer.push(`0日目に${seatName(target.targetSeat)}を占った理由: ${target.statedReason}`);
     claimResults.get(initialSeer.seat)?.seer.push({ day: 0, targetSeat: target.targetSeat, verdict: result });
     await emit(0, 'night_zero', 'seer_result', { seat: initialSeer.seat, targetSeat: target.targetSeat, result }, 'private', [initialSeer.seat]);
   }
@@ -428,6 +442,7 @@ export async function runGame(
   }
 
   for (let day = 1; day <= MAX_DAYS; day += 1) {
+    discussionBoard = emptyDiscussionBoard();
     if (pendingVictim) {
       state = { ...state, players: state.players.map((player) => player.seat === pendingVictim ? { ...player, alive: false } : player) };
     }
@@ -446,6 +461,7 @@ export async function runGame(
       const speechCounts = new Map<SeatId, number>();
       const polledSeats = new Set<SeatId>();
       const lastIntentSpeechCount = new Map<SeatId, number>();
+      const defenseScheduledSeats = new Set<SeatId>();
       let speechCount = 0;
       let intentPolls = 0;
       let nextSpeaker: ScheduledDiscussionSpeaker | null = {
@@ -471,6 +487,19 @@ export async function runGame(
                 intendedTarget: directive.counterTargetSeat,
                 ...(directive.counterTargetSeat ? { promptedBySeat: directive.counterTargetSeat } : {}),
               };
+            }
+          }
+        }
+        if (!nextSpeaker) {
+          if (discussionVersion === 'v3') {
+            const defenseCandidates = speakers.filter((player) =>
+              !defenseScheduledSeats.has(player.seat) &&
+              (speechCounts.get(player.seat) ?? 0) === 1 &&
+              suspicionCountFor(discussionBoard, player.seat) >= 2);
+            if (defenseCandidates.length > 0) {
+              const actor = stableShuffle(defenseCandidates, seed, `discussion/v3/defense-d${day}-t${speechCount + 1}`)[0];
+              defenseScheduledSeats.add(actor.seat);
+              nextSpeaker = { actor, motivation: 'challenge' };
             }
           }
         }
@@ -558,6 +587,7 @@ export async function runGame(
         );
         const decision = await ai.speech(speechContext);
         if (speechContext.claimDirective) assertClaimWithinDirective(decision.claim, speechContext.claimDirective);
+        if (discussionVersion === 'v3' && !decision.structure) throw new Error('DISCUSSION_V3_STRUCTURE_REQUIRED');
         const speech = normalizeSpeech(decision.speech);
         speechCount += 1;
         speechCounts.set(actor.seat, actorSpeechCount + 1);
@@ -565,6 +595,7 @@ export async function runGame(
           seat: actor.seat, name: actor.name, round: actorSpeechCount + 1, stage, turn: speechCount,
           speech, addressedTo: decision.addressedTo, requestsReply: decision.requestsReply,
           ...(claimsEnabled ? { claim: decision.claim ?? null } : {}),
+          ...(discussionVersion === 'v3' ? { structure: decision.structure } : {}),
         });
         if (claimsEnabled) {
           claimLedger = foldClaim(claimLedger, {
@@ -572,6 +603,9 @@ export async function runGame(
           });
         }
         publicHistory.push(`${actor.name}: ${speech}`);
+        if (discussionVersion === 'v3' && decision.structure) {
+          discussionBoard = foldDiscussionBoard(discussionBoard, actor.seat, decision.structure, decision.requestsReply);
+        }
 
         if (decision.requestsReply && decision.addressedTo &&
           (speechCounts.get(decision.addressedTo) ?? 0) < MAX_SPEECHES_PER_PLAYER) {
@@ -693,6 +727,7 @@ export async function runGame(
       seerTarget = decision.targetSeat;
       const result = isWerewolfResult(playerBySeat(state, seerTarget).role);
       histories.seer.push(`${seatName(seerTarget)}: ${result}`);
+      if (discussionVersion === 'v3') histories.seer.push(`${day}日目に${seatName(seerTarget)}を占った理由: ${decision.statedReason}`);
       claimResults.get(seer.seat)?.seer.push({ day, targetSeat: seerTarget, verdict: result });
       await emit(day, 'night_actions', 'seer_result', { seat: seer.seat, targetSeat: seerTarget, result }, 'private', [seer.seat]);
     }

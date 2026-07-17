@@ -8,6 +8,7 @@ export function buildPrompts(context: DecisionContext): { systemPrompt: string; 
   const persona = personaForSeat(context.actor.seat);
   const isSpeech = context.kind === 'speech' || context.kind === 'wolf_speech';
   const isSpeechIntent = context.kind === 'speech_intent';
+  const discussionV3 = context.discussion?.version === 'v3';
   const disclosureGuidance = resultDisclosureGuidance(context);
   const promptedByName = context.discussion?.promptedBySeat
     ? agentNameForSeat(context.discussion.promptedBySeat)
@@ -73,6 +74,23 @@ export function buildPrompts(context: DecisionContext): { systemPrompt: string; 
   if (!context.discussion?.legacyRules && context.discussion?.canRequestReply === false) {
     discussionGuidance.push('これが今日の最後の発言枠です。新しい返答要求を出さず、addressedTo=null、requestsReply=falseにしてください。');
   }
+  const v3DiscussionGuidance = discussionV3 ? [
+    '同じ疑問を全員でなぞるのではなく、今日の発言・疑い先・投票予定を後から検証できる形で増やしてください。質問だけで終わらず、自分自身の暫定評価か処刑方針を少なくとも一つ出してください。',
+    '議論台帳にすでにある質問は、未回答でも別の人が繰り返さず、回答対象本人へ任せてください。回答済みの質問を再び聞くのは、具体的な矛盾を示せる場合だけです。',
+    ...(context.discussion?.closedQuestionTopics?.length
+      ? [`次の質問分類はすでに2回尋ねられたため閉じています。新たな返答要求に使わず、questionTopicにも設定しないでください: ${context.discussion.closedQuestionTopics.join(', ')}`]
+      : []),
+    '同じ相手への投票予定が3人以上へ集中した後は、同じ理由を言い換えて追従しないでください。その相手へ投票を続ける場合でも、対立候補、反証、またはまだ見られていない役職外の人物を一人比較してください。',
+    '一般的な9人人狼では、占い師候補が二人で白結果だけなら直ちに占い師候補だけを処刑範囲にせず、役職を名乗っていない人から候補を探す進行も比較してください。黒結果があるなら黒を出された本人の反応と占い師候補を比較し、霊媒師候補が二人なら両方を順に処刑する進行を検討してください。盤面を見ず「役職候補からしかない」と決めつけないでください。',
+    '別々の相手に白結果を出した占い師候補同士は、結果が矛盾・対立・食い違っているわけではありません。結果の対立と言えるのは、同じ相手へ反対の白黒を出した場合です。対抗して同じ役職を名乗ったことと、結果そのものの矛盾を区別してください。',
+    ...(context.discussion?.boardDigest?.length ? [`現在の議論台帳: ${context.discussion.boardDigest.join(' / ')}`] : []),
+    ...(context.discussion?.agenda?.length ? [`まだ不足している貢献の候補: ${context.discussion.agenda.join(' / ')}。これは台詞の指定ではありません。最新状況と人物像に合うものを選び、自分の言葉で話してください。`] : []),
+    ...(!isSpeechIntent ? [
+      'structureは実際に口にする内容の自己分類です。primaryActは発言の主目的、questionTopicは本文で明確に返答を求めた質問、またはその質問への回答の話題だけを記録し、話題へ触れただけならnullにしてください。質問へ答えるだけならprimaryAct=answer、requestsReply=falseです。suspicionは本文で実際に疑う一人と根拠分類、voteIntentは本文で実際に投票予定を宣言する一人だけを記録してください。boardAnalysisは、役職を名乗った人数と今日の処刑対象範囲を本文で明示的に整理した場合だけtrueです。該当しない項目はnullまたはfalseにしてください。',
+    ] : [
+      '自分が話したい内容が議論台帳ですでに質問・回答済みなら、具体的な新情報や訂正がない限りurgency=0を選んでください。',
+    ]),
+  ] : [];
   const systemPrompt = [
     'あなたは一般的な9人人狼へ参加している一人の人間として振る舞います。AIアシスタントのように話してはいけません。',
     `あなたは${context.actor.name}、役職は${ROLE_LABEL[context.actor.role]}です。`,
@@ -103,6 +121,7 @@ export function buildPrompts(context: DecisionContext): { systemPrompt: string; 
     '他者の本当の役職を知っているふりをしないでください。',
     ...wolfChatGuidance,
     ...discussionGuidance,
+    ...v3DiscussionGuidance,
     ...(isSpeechIntent ? [
       'これは実際の発言ではなく、今この時点で自由討論へ割り込みたいかを決める非公開判断です。台詞や長い理由は作らないでください。',
       'urgencyは、0=今は黙る、1=機会があれば話す、2=今話したい、3=質問への返答または重要な訂正を急いで話したい、です。人格に合わない無理な発言希望は出さないでください。',
@@ -130,11 +149,13 @@ export function buildPrompts(context: DecisionContext): { systemPrompt: string; 
     ...(context.claimDirective ? { authorizedClaim: context.claimDirective } : {}),
     discussion: context.discussion,
     constraint: isSpeech
-      ? context.wolfChat?.mode === 'monologue'
-        ? '発言は日本語200文字以内の独り言。addressedTo=null、requestsReply=false。誰かの返答を前提にしない'
+      ? context.wolfChat
+        ? context.wolfChat.mode === 'monologue'
+          ? '発言は日本語200文字以内の独り言。addressedTo=null、requestsReply=false。誰かの返答を前提にしない'
+          : '発言は日本語200文字以内の人狼同士の秘密会話。台詞では自然に相談へ応じるが、昼の次話者制御には使わないためaddressedTo=null、requestsReply=false'
         : context.claimDirective
-        ? '発言は日本語200文字以内。claimは役職主張の指示と本文を一致させる。addressedToは実際に話を向ける相手だけ、requestsReplyはその相手から後で返答が必要な場合だけtrue'
-        : '発言は日本語200文字以内。addressedToは実際に話を向ける相手だけ、requestsReplyはその相手から後で返答が必要な場合だけtrue'
+        ? `発言は日本語200文字以内。claimは役職主張の指示と本文を一致させる。addressedToは実際に話を向ける相手だけ、requestsReplyはその相手から後で返答が必要な場合だけtrue${discussionV3 ? '。structureは本文に現れる主目的・質問話題・疑い・投票予定と一致させる' : ''}`
+        : `発言は日本語200文字以内。addressedToは実際に話を向ける相手だけ、requestsReplyはその相手から後で返答が必要な場合だけtrue${discussionV3 ? '。structureは本文に現れる主目的・質問話題・疑い・投票予定と一致させる' : ''}`
       : isSpeechIntent
         ? '今話す必要がなければurgency=0、motivation=none、targetSeat=null'
         : '合法対象から1名を選ぶ',

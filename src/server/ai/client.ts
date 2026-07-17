@@ -66,7 +66,11 @@ export class RealAI implements DecisionProvider {
       speechDecisionSchema(
         context.legalTargets,
         Boolean(context.claimDirective),
-        context.wolfChat?.mode !== 'monologue' && context.discussion?.canRequestReply !== false,
+        context.kind !== 'wolf_speech' && context.discussion?.canRequestReply !== false,
+        context.discussion?.version === 'v3'
+          ? context.players.filter((player) => player.alive && player.seat !== context.actor.seat).map((player) => player.seat)
+          : undefined,
+        context.discussion?.closedQuestionTopics,
       ),
       'speech_decision',
       (decision) => validateSpeechDisclosure(context, decision),
@@ -122,7 +126,10 @@ export class RealAI implements DecisionProvider {
           requestId = error.request_id;
         }
         this.repo.failAiCall(context.matchId, context.callKey, requestId);
-        const retryable = status === 0 || retryableStatus.has(status) || /refusal|parse|timeout|connection/i.test(String(error));
+        // Responses APIがHTTP成功後のstructured-output復元で失敗した場合、SDK errorに
+        // 2xx statusだけが残ることがある。内容をランダム行動へ置換せず、同じmodelで有界再試行する。
+        const retryable = status === 0 || (status >= 200 && status < 300) || retryableStatus.has(status) ||
+          /refusal|parse|validation|zod|timeout|connection/i.test(String(error));
         if (!retryable || attempt === 4) {
           throw new AIRequestError('AI判断を取得できませんでした。', context.phase, safeAIRequestReason(error));
         }

@@ -132,4 +132,76 @@ describe('能力結果の公開', () => {
       claimDirective: { mode: 'forbidden', claimedRole: null, results: [], counterTargetSeat: null },
     }, { ...decision(speech), claim: null })).toThrow('unstructured_private_result');
   });
+
+  it('1日目の最初の話者が未発言者の態度を観察したように疑うことを拒否する', () => {
+    const base = seerContext();
+    const context: DecisionContext = {
+      ...base,
+      actor: { ...base.actor, role: 'villager' },
+      privateFacts: ['自分の役職: villager'],
+      discussion: { version: 'v3', stage: 'opening', turn: 1 },
+    };
+    expect(() => validateSpeechDisclosure(context, {
+      speech: '澪さんの強い出方が気になります。', addressedTo: null, requestsReply: false,
+      structure: {
+        primaryAct: 'suspicion', questionTopic: null,
+        suspicion: { targetSeat: 'seat-1', basis: 'intuition' }, voteIntent: null, boardAnalysis: false,
+      },
+    })).toThrow('opening_intuition_unmarked');
+    expect(() => validateSpeechDisclosure(context, {
+      speech: 'まだ材料がないので、澪さんを勘で仮置きします。', addressedTo: null, requestsReply: false,
+      structure: {
+        primaryAct: 'suspicion', questionTopic: null,
+        suspicion: { targetSeat: 'seat-1', basis: 'intuition' }, voteIntent: null, boardAnalysis: false,
+      },
+    })).not.toThrow();
+  });
+
+  it('途中ターンでも未発言者の今日の態度を疑いの根拠にすることを拒否する', () => {
+    const base = seerContext();
+    const context: DecisionContext = {
+      ...base,
+      actor: { ...base.actor, role: 'villager' },
+      privateFacts: ['自分の役職: villager'],
+      discussion: {
+        version: 'v3', stage: 'opening', turn: 4,
+        remainingUnspokenSeats: ['seat-1', 'seat-3'],
+      },
+    };
+    expect(() => validateSpeechDisclosure(context, {
+      speech: '澪さんの便乗が気になります。', addressedTo: null, requestsReply: false,
+      structure: {
+        primaryAct: 'suspicion', questionTopic: null,
+        suspicion: { targetSeat: 'seat-1', basis: 'interaction' }, voteIntent: null, boardAnalysis: false,
+      },
+    })).toThrow('unspoken_target_behavior');
+    expect(() => validateSpeechDisclosure(context, {
+      speech: '澪さんはまだ発言前なので、勘の仮置きです。', addressedTo: null, requestsReply: false,
+      structure: {
+        primaryAct: 'suspicion', questionTopic: null,
+        suspicion: { targetSeat: 'seat-1', basis: 'intuition' }, voteIntent: null, boardAnalysis: false,
+      },
+    })).not.toThrow();
+  });
+
+  it('本文に名前のない疑い先メタデータは再試行せず安全に破棄する', () => {
+    const base = seerContext();
+    const context: DecisionContext = {
+      ...base,
+      actor: { ...base.actor, role: 'villager' },
+      privateFacts: ['自分の役職: villager'],
+      discussion: { version: 'v3', stage: 'opening', turn: 5, remainingUnspokenSeats: [] },
+    };
+    const speechDecision = {
+      speech: '今日は発言を見比べます。', addressedTo: null, requestsReply: false,
+      structure: {
+        primaryAct: 'suspicion' as const, questionTopic: null,
+        suspicion: { targetSeat: 'seat-1' as const, basis: 'speech_content' as const },
+        voteIntent: null, boardAnalysis: false,
+      },
+    };
+    expect(() => validateSpeechDisclosure(context, speechDecision)).not.toThrow();
+    expect(speechDecision.structure.suspicion).toBeNull();
+    expect(speechDecision.structure.primaryAct).toBe('other');
+  });
 });
