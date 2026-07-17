@@ -10,7 +10,7 @@ import { useAmbientBgm } from './useAmbientBgm';
 import { useMatchVoice } from './useMatchVoice';
 import { voiceForSeat } from '@/domain/voices';
 import { agentNameForSeat, personaForSeat } from '@/domain/agents';
-import { derivePresentedState, featuredSpeechEvent, presentationCursorAfterLoad, presentationLimit, privateActionDescription } from './presentation';
+import { derivePresentedState, featuredSpeechEvent, focusPanelKind, presentationCursorAfterLoad, presentationLimit, privateActionDescription } from './presentation';
 import { buildEpilogue, epilogueRoleLabel, fateLabel, type SpectatorDeathRecord } from './epilogue';
 import { SpectatorGuide } from './SpectatorGuide';
 
@@ -174,6 +174,7 @@ export function MatchViewer({ matchId, mode }: { matchId: string; mode: 'live' |
   const featuredVoice = featuredSeat ? voiceForSeat(featuredSeat) : null;
   const featuredIsSpeaking = Boolean(featuredSpeech && speakingSeq === featuredSpeech.seq && !paused);
   const featuredIsPaused = Boolean(featuredSpeech && speakingSeq === featuredSpeech.seq && paused);
+  const focusPanel = focusPanelKind(featuredSpeech, Boolean(latestVote), day, phase);
   const epilogue = finalEvent ? buildEpilogue(finalEvent.payload.roles, finalEvent.payload.winner, deathRecords) : [];
   const canSeeSecrets = view === 'gm' || terminal;
   const survivorCount = 9 - deathRecords.size;
@@ -224,7 +225,7 @@ export function MatchViewer({ matchId, mode }: { matchId: string; mode: 'live' |
               </article>;
             })}
           </div>
-          {featuredSpeech && featuredPersona && featuredSeat && <section className={`speaker-stage ${featuredIsSpeaking ? 'speaking' : ''} ${featuredIsPaused ? 'paused' : ''}`} aria-label="注目中の発言" aria-live="polite">
+          {focusPanel === 'speech' && featuredSpeech && featuredPersona && featuredSeat && <section className={`speaker-stage ${featuredIsSpeaking ? 'speaking' : ''} ${featuredIsPaused ? 'paused' : ''}`} aria-label="注目中の発言" aria-live="polite">
             <div className="speaker-stage-portrait"><Image src={`/assets/agents/agent_${featuredSeatNumber}.png`} width={768} height={768} alt={`${featuredPersona.name}の立ち絵`} /></div>
             <div className="speaker-stage-copy">
               <div className="speaker-stage-status"><span>{featuredIsSpeaking ? 'NOW SPEAKING' : featuredIsPaused ? 'PAUSED' : 'LATEST SPEECH'}</span><em>SEAT {String(featuredSeatNumber).padStart(2, '0')}</em></div>
@@ -233,7 +234,7 @@ export function MatchViewer({ matchId, mode }: { matchId: string; mode: 'live' |
               <footer><span>VOICE: {featuredVoice?.speakerName}</span><span>{featuredSpeech.type === 'werewolf_chat' ? '人狼会話' : `${featuredSpeech.day}日目の発言`}</span></footer>
             </div>
           </section>}
-          {latestVote && <section className={`vote-panel ${latestVote.day < day ? 'stale' : ''}`}>
+          {focusPanel === 'vote' && latestVote && <section className={`vote-panel ${latestVote.day < day ? 'stale' : ''}`}>
             <div><span className="section-kicker">VOTE RESULT</span><h2>{latestVote.day}日目の{latestVote.payload.round === 2 ? '決選投票' : '投票結果'}</h2>{latestVote.day < day && <small>前日の結果</small>}</div>
             <div className="vote-bars">{Object.entries(latestTally).sort((a, b) => b[1] - a[1]).map(([seat, count]) => {
               const voters = latestVotes.filter((vote) => vote.target === seat);

@@ -74,6 +74,11 @@ test('Spaceキーでゲームと発言音声を一時停止・再開し、中断
   await expect(page.getByRole('region', { name: '注目中の発言' })).toBeVisible();
   await expect(page.locator('.speaker-stage h2')).toContainText(speakingName ?? '');
   await expect(page.locator('.speaker-stage blockquote')).toContainText(speakingText ?? '');
+  const speakerStageBox = await page.locator('.speaker-stage').boundingBox();
+  const controlDockBox = await page.locator('.control-dock').boundingBox();
+  expect(speakerStageBox?.height).toBeLessThanOrEqual(134);
+  expect((speakerStageBox?.y ?? 0) + (speakerStageBox?.height ?? 0)).toBeLessThanOrEqual(controlDockBox?.y ?? 0);
+  await expect(page.locator('.vote-panel')).toHaveCount(0);
   await page.keyboard.press('Space');
   await expect(page.locator('.round-status em')).toHaveText('PAUSED');
   await expect(page.locator('.agent-card.speaking')).toHaveCount(0);

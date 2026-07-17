@@ -15,6 +15,13 @@ export function featuredSpeechEvent(events: UiEvent[], speakingSeq: number | nul
   return speeches.at(-1) ?? null;
 }
 
+export function focusPanelKind(featuredSpeech: UiEvent | null, hasVote: boolean, day: number, phase: string): 'speech' | 'vote' | null {
+  const speechPhase = ['discussion', 'night_zero', 'wolf_chat'].includes(phase);
+  if (featuredSpeech && featuredSpeech.day === day && speechPhase) return 'speech';
+  if (hasVote) return 'vote';
+  return null;
+}
+
 export function derivePresentedState(events: UiEvent[], matchStatus?: string): PresentedState {
   const ordered = [...events].sort((a, b) => a.seq - b.seq);
   const last = ordered.at(-1);

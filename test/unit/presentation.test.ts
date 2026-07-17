@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { UiEvent } from '@/ui/types';
-import { derivePresentedState, featuredSpeechEvent, presentationCursorAfterLoad, presentationLimit, privateActionDescription } from '@/ui/presentation';
+import { derivePresentedState, featuredSpeechEvent, focusPanelKind, presentationCursorAfterLoad, presentationLimit, privateActionDescription } from '@/ui/presentation';
 
 const event = (seq: number, type: string): UiEvent => ({ matchId: 'test', seq, type, day: 1, phase: 'discussion', visibility: 'public', payload: {}, createdAt: '2026-07-16T00:00:00.000Z' });
 
@@ -55,6 +55,14 @@ describe('注目発言の選択', () => {
 
   it('発声中でない間は最新の発言を保持する', () => {
     expect(featuredSpeechEvent(events, null)).toBe(secondSpeech);
+  });
+
+  it('発言と投票があっても議論中は発言だけを表示する', () => {
+    expect(focusPanelKind(secondSpeech, true, 1, 'discussion')).toBe('speech');
+  });
+
+  it('投票フェーズでは発言を隠して投票だけを表示する', () => {
+    expect(focusPanelKind(secondSpeech, true, 1, 'vote')).toBe('vote');
   });
 });
 
