@@ -13,6 +13,8 @@ import { agentNameForSeat, personaForSeat } from '@/domain/agents';
 import { derivePresentedState, featuredSpeechEvent, focusPanelKind, presentationCursorAfterLoad, presentationLimit, privateActionDescription } from './presentation';
 import { buildEpilogue, epilogueRoleLabel, fateLabel, type SpectatorDeathRecord } from './epilogue';
 import { SpectatorGuide } from './SpectatorGuide';
+import { CinematicOverlay } from './CinematicOverlay';
+import { useCinematicEffects } from './useCinematicEffects';
 import { foldClaim, type ClaimLedger, type SpeechClaim } from '@/domain/claims';
 import type { SeatId } from '@/domain/types';
 
@@ -80,18 +82,21 @@ export function MatchViewer({ matchId, mode }: { matchId: string; mode: 'live' |
   const [playing, setPlaying] = useState(false);
   const [error, setError] = useState('');
   const [presentedSeq, setPresentedSeq] = useState(0);
+  const [announceInitialCues] = useState(() => mode === 'live' && typeof window !== 'undefined' && window.sessionStorage.getItem('werewolf-new-match') === matchId);
   const presentationInitialized = useRef(false);
   const sourceRef = useRef<EventSource | null>(null);
   const terminal = match ? ['finished', 'aborted', 'aborted_budget'].includes(match.status) : false;
   const voiceEvents = useMemo(() => view === 'gm' ? events : events.filter((event) => event.visibility !== 'private'), [events, view]);
   const visibleEvents = useMemo(() => events.filter((event) => mode === 'live' ? event.seq <= presentedSeq : event.seq <= cursor), [cursor, events, mode, presentedSeq]);
+  const { cinematicCue, sfxEnabled, setSfxEnabled } = useCinematicEffects(visibleEvents, `${matchId}:${mode}:${view}`, announceInitialCues);
   const presentedStatus = mode === 'replay' && match?.status === 'finished' && !visibleEvents.some((event) => event.type === 'match_finished') ? 'running' : match?.status;
   const presentedState = useMemo(() => derivePresentedState(visibleEvents, presentedStatus), [presentedStatus, visibleEvents]);
   const audioMood = ['night_zero', 'wolf_chat', 'night_actions', 'medium'].includes(presentedState.phase) ? 'night' : 'day';
   const { bgmEnabled, setBgmEnabled, bgmVolume, setBgmVolume } = useAmbientBgm(audioMood);
   const revealSpeech = useCallback((seq: number) => setPresentedSeq((current) => Math.max(current, seq)), []);
   const paused = match?.status === 'paused';
-  const { voiceEnabled, setVoiceEnabled, voiceAvailable, speakingSeat, speakingSeq, voiceVolume, setVoiceVolume, voiceBusy } = useMatchVoice(voiceEvents, revealSpeech, paused);
+  const presentationPaused = paused || Boolean(cinematicCue);
+  const { voiceEnabled, setVoiceEnabled, voiceAvailable, speakingSeat, speakingSeq, voiceVolume, setVoiceVolume, voiceBusy } = useMatchVoice(voiceEvents, revealSpeech, presentationPaused);
 
   const load = useCallback(async () => {
     const response = await fetch(`/api/match/${matchId}?view=${view}`, { cache: 'no-store' });
@@ -106,11 +111,14 @@ export function MatchViewer({ matchId, mode }: { matchId: string; mode: 'live' |
 
   useEffect(() => {
     if (mode !== 'live') return;
-    const limit = presentationLimit(voiceEvents, presentedSeq, voiceEnabled && voiceAvailable !== false, voiceBusy, speakingSeq, paused);
+    const limit = presentationLimit(voiceEvents, presentedSeq, voiceEnabled && voiceAvailable !== false, voiceBusy, speakingSeq, presentationPaused);
     if (limit !== presentedSeq) setPresentedSeq(limit);
-  }, [mode, paused, presentedSeq, speakingSeq, voiceAvailable, voiceBusy, voiceEnabled, voiceEvents]);
+  }, [mode, presentationPaused, presentedSeq, speakingSeq, voiceAvailable, voiceBusy, voiceEnabled, voiceEvents]);
 
   useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    if (announceInitialCues) window.sessionStorage.removeItem('werewolf-new-match');
+  }, [announceInitialCues]);
   useEffect(() => {
     if (mode !== 'live' || terminal) return;
     sourceRef.current?.close();
@@ -192,8 +200,8 @@ export function MatchViewer({ matchId, mode }: { matchId: string; mode: 'live' |
   const featuredSeat = featuredSeatNumber ? `seat-${featuredSeatNumber}` as `seat-${1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9}` : null;
   const featuredPersona = featuredSeat ? personaForSeat(featuredSeat) : null;
   const featuredVoice = featuredSeat ? voiceForSeat(featuredSeat) : null;
-  const featuredIsSpeaking = Boolean(featuredSpeech && speakingSeq === featuredSpeech.seq && !paused);
-  const featuredIsPaused = Boolean(featuredSpeech && speakingSeq === featuredSpeech.seq && paused);
+  const featuredIsSpeaking = Boolean(featuredSpeech && speakingSeq === featuredSpeech.seq && !presentationPaused);
+  const featuredIsPaused = Boolean(featuredSpeech && speakingSeq === featuredSpeech.seq && presentationPaused);
   const focusPanel = focusPanelKind(featuredSpeech, Boolean(latestVote), day, phase);
   const epilogue = finalEvent ? buildEpilogue(finalEvent.payload.roles, finalEvent.payload.winner, deathRecords) : [];
   const canSeeSecrets = view === 'gm' || terminal;
@@ -215,10 +223,10 @@ export function MatchViewer({ matchId, mode }: { matchId: string; mode: 'live' |
           {canSeeSecrets && roleMap.size > 0 && <span className="wolf-count">人狼残り {livingWerewolves}</span>}
           <em className={match.status}>{match.status === 'running' ? 'LIVE' : match.status.toUpperCase()}</em>
         </div>
-        <div className="header-actions"><AudioControls compact bgmEnabled={bgmEnabled} bgmVolume={bgmVolume} voiceEnabled={voiceEnabled} voiceVolume={voiceVolume} voiceAvailable={voiceAvailable} speakingSeat={paused ? null : speakingSeat} onBgmChange={setBgmEnabled} onBgmVolumeChange={setBgmVolume} onVoiceChange={setVoiceEnabled} onVoiceVolumeChange={setVoiceVolume} /><div className="view-switch" aria-label="観戦視点"><button className={view === 'public' ? 'active' : ''} onClick={() => setView('public')}>公開視点</button><button className={view === 'gm' ? 'active' : ''} onClick={() => setView('gm')}>GM視点</button></div></div>
+        <div className="header-actions"><AudioControls compact bgmEnabled={bgmEnabled} bgmVolume={bgmVolume} voiceEnabled={voiceEnabled} voiceVolume={voiceVolume} voiceAvailable={voiceAvailable} speakingSeat={presentationPaused ? null : speakingSeat} sfxEnabled={sfxEnabled} onBgmChange={setBgmEnabled} onBgmVolumeChange={setBgmVolume} onVoiceChange={setVoiceEnabled} onVoiceVolumeChange={setVoiceVolume} onSfxChange={setSfxEnabled} /><div className="view-switch" aria-label="観戦視点"><button className={view === 'public' ? 'active' : ''} onClick={() => setView('public')}>公開視点</button><button className={view === 'gm' ? 'active' : ''} onClick={() => setView('gm')}>GM視点</button></div></div>
       </header>
       <div className="viewer-grid">
-        <section className="board-panel">
+        <section className={`board-panel ${finalEvent ? 'scrollable' : ''}`}>
           <div className="scene-heading"><div><span className="section-kicker">{finalEvent ? 'MATCH COMPLETE' : isNight ? 'NIGHT PHASE' : phase === 'vote' || phase === 'runoff' ? 'VOTING PHASE' : 'DAY PHASE'}</span><h1>{sceneTitle}</h1></div><div className="scene-actions"><p>{sceneDescription}</p><SpectatorGuide /></div></div>
           {finalEvent && <div className="winner-banner"><span>GAME SET</span><strong>{finalEvent.payload.winner === 'village' ? '村人陣営の勝利' : finalEvent.payload.winner === 'werewolf' ? '人狼陣営の勝利' : '引き分け'}</strong></div>}
           {finalEvent && epilogue.length > 0 && <section className="epilogue" aria-labelledby="epilogue-title">
@@ -229,15 +237,6 @@ export function MatchViewer({ matchId, mode }: { matchId: string; mode: 'live' |
                 <ul>{epilogue.filter((player) => player.team === team).map((player) => <li key={player.seat}><span><strong>{player.name}</strong><small>{epilogueRoleLabel(player.role)}{player.role === 'madman' ? '（判定は人間）' : ''}</small></span><span className="epilogue-fate">{player.fate}</span><em className={player.result === '勝利' ? 'win' : player.result === '敗北' ? 'lose' : 'draw'}>{player.result}</em></li>)}</ul>
               </section>)}
             </div>
-          </section>}
-          {claimLedger.length > 0 && <section className="claim-board" aria-labelledby="claim-board-title">
-            <div className="claim-board-head"><div><span className="section-kicker">ROLE CLAIMS</span><h2 id="claim-board-title">役職主張</h2></div><p>本人が公に述べた主張です。真偽を示すものではありません。</p></div>
-            <div className="claim-board-grid">{claimLedger.map((entry) => <article key={entry.seat}>
-              <div><strong>{entry.name}</strong><span>{entry.claimedRole === 'seer' ? '占い師' : '霊媒師'}を名乗り中</span></div>
-              {entry.results.length > 0
-                ? <ul>{entry.results.map((result) => <li key={`${entry.seat}-${result.day}`}><small>{result.day}日目</small><span>{seatName(result.targetSeat)}</span><em className={result.verdict === '人狼' ? 'black' : 'white'}>{result.verdict}</em></li>)}</ul>
-                : <p>結果報告はまだありません</p>}
-            </article>)}</div>
           </section>}
           {focusPanel === 'speech' && featuredSpeech && featuredPersona && featuredSeat && <section className={`speaker-stage ${featuredIsSpeaking ? 'speaking' : ''} ${featuredIsPaused ? 'paused' : ''}`} aria-label="注目中の発言" aria-live="polite">
             <div className="speaker-stage-portrait"><Image src={`/assets/agents/agent_${featuredSeatNumber}.png`} width={768} height={768} alt={`${featuredPersona.name}の立ち絵`} /></div>
@@ -254,9 +253,9 @@ export function MatchViewer({ matchId, mode }: { matchId: string; mode: 'live' |
               const voice = voiceForSeat(seat as `seat-${1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9}`);
               const persona = personaForSeat(seat as `seat-${1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9}`);
               const votedFor = latestVoteByVoter.get(seat);
-              const isSpeaking = speakingSeat === seat && !paused;
+              const isSpeaking = speakingSeat === seat && !presentationPaused;
               return <article className={`agent-card ${dead ? 'dead' : ''} ${isSpeaking ? 'speaking' : ''}`} key={seat}>
-                <div className="agent-top"><AgentAvatar index={number} name={persona.name} dead={dead} /><div><span className="seat-label">SEAT {String(number).padStart(2, '0')}</span><h2>{persona.name}</h2><small className="persona-name">{persona.title}</small><small className="voice-name">VOICE: {voice?.speakerName}</small>{deathRecord && <small className="death-record">{fateLabel(deathRecord)}</small>}</div><span className={`life-badge ${dead ? 'dead' : ''}`}>{speakingSeat === seat ? paused ? '一時停止' : '発声中' : dead ? '死亡' : '生存'}</span></div>
+                <div className="agent-top"><AgentAvatar index={number} name={persona.name} dead={dead} /><div><span className="seat-label">SEAT {String(number).padStart(2, '0')}</span><h2>{persona.name}</h2><small className="persona-name">{persona.title}</small><small className="voice-name">VOICE: {voice?.speakerName}</small>{deathRecord && <small className="death-record">{fateLabel(deathRecord)}</small>}</div><span className={`life-badge ${dead ? 'dead' : ''}`}>{speakingSeat === seat ? presentationPaused ? '一時停止' : '発声中' : dead ? '死亡' : '生存'}</span></div>
                 {role && <div className={`role-badge ${role}`}>{roleLabel[role]}</div>}
                 <blockquote>{latestSpeech.get(seat) ?? (dead ? '発言を終了しました' : '次の発言を待っています…')}</blockquote>
                 {votedFor && <div className="card-vote"><span>{latestVote?.day}日目{latestVote?.payload.round === 2 ? '決選' : ''}投票</span><strong>→ {seatName(votedFor)}</strong></div>}
@@ -276,7 +275,19 @@ export function MatchViewer({ matchId, mode }: { matchId: string; mode: 'live' |
             })}</div>
           </section>}
         </section>
-        <aside className="timeline-panel"><div className="timeline-head"><div><span className="section-kicker">EVENT LOG</span><h2>時系列ログ</h2></div><span>{visibleEvents.length} events</span></div><div className="timeline" aria-live="polite">{timelineEvents.map((event, index) => <div className="timeline-entry" key={event.seq}>{(index === 0 || timelineEvents[index - 1]?.day !== event.day) && <div className="timeline-day"><span>{event.day === 0 ? '第0夜' : `${event.day}日目`}</span></div>}<article className={`timeline-event ${event.type}`}><span className="seq">#{String(event.seq).padStart(3, '0')}</span><div><small>{eventTitle(event)}</small><p>{eventText(event)}</p>{event.type === 'private_action' ? <em>内容非公開</em> : event.visibility === 'private' && <em>{view === 'gm' ? 'GM SECRET' : 'REVEALED SECRET'}</em>}</div></article></div>)}</div></aside>
+        <aside className="timeline-panel">
+          {claimLedger.length > 0 && <section className="claim-board" aria-labelledby="claim-board-title">
+            <div className="claim-board-head"><div><span className="section-kicker">ROLE CLAIMS</span><h2 id="claim-board-title">役職主張</h2></div><p>本人の公開主張です。真偽を示しません。</p></div>
+            <div className="claim-board-grid">{claimLedger.map((entry) => <article key={entry.seat}>
+              <div><strong>{entry.name}</strong><span>{entry.claimedRole === 'seer' ? '占い師' : '霊媒師'}を名乗り中</span></div>
+              {entry.results.length > 0
+                ? <ul>{entry.results.map((result) => <li key={`${entry.seat}-${result.day}`}><small>{result.day}日目</small><span>{seatName(result.targetSeat)}</span><em className={result.verdict === '人狼' ? 'black' : 'white'}>{result.verdict}</em></li>)}</ul>
+                : <p>結果報告はまだありません</p>}
+            </article>)}</div>
+          </section>}
+          <div className="timeline-head"><div><span className="section-kicker">EVENT LOG</span><h2>時系列ログ</h2></div><span>{visibleEvents.length} events</span></div>
+          <div className="timeline" aria-live="polite">{timelineEvents.map((event, index) => <div className="timeline-entry" key={event.seq}>{(index === 0 || timelineEvents[index - 1]?.day !== event.day) && <div className="timeline-day"><span>{event.day === 0 ? '第0夜' : `${event.day}日目`}</span></div>}<article className={`timeline-event ${event.type}`}><span className="seq">#{String(event.seq).padStart(3, '0')}</span><div><small>{eventTitle(event)}</small><p>{eventText(event)}</p>{event.type === 'private_action' ? <em>内容非公開</em> : event.visibility === 'private' && <em>{view === 'gm' ? 'GM SECRET' : 'REVEALED SECRET'}</em>}</div></article></div>)}</div>
+        </aside>
       </div>
       <footer className="control-dock">
         <div className="seed-display"><span>SEED</span><strong>{match.seed}</strong></div>
@@ -284,6 +295,7 @@ export function MatchViewer({ matchId, mode }: { matchId: string; mode: 'live' |
         <div className="api-count">API CALLS <strong>{match.apiCalls}</strong> / 240</div>
       </footer>
       {error && <div className="connection-toast">{error}</div>}
+      <CinematicOverlay cue={cinematicCue} />
     </main>
   );
 }

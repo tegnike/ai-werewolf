@@ -30,6 +30,23 @@
 | `agents/agent_9.png` | 久遠 ひよりの立ち絵 | シアンを差し色にした紫がかった黒髪の若い女性、臆病な言葉の収集家 |
 | `bgm_village.ogg` | 環境BGM | ffmpegの合成音源から生成した24秒のオリジナル・ステレオループ。外部素材不使用 |
 
+## CC0効果音
+
+取得日: 2026-07-17
+
+配布者: Kenney Vleugels（Kenney.nl）
+
+ライセンス: Creative Commons Zero（CC0 1.0 Universal）
+
+| 格納ファイル | 元パック | 元ファイル | 用途 |
+|---|---|---|---|
+| `sfx_scene_change.ogg` | RPG Audio 1.0 | `doorClose_4.ogg` | 日替わり、投票開始、処刑なしの低い切替音 |
+| `sfx_vote.ogg` | UI Audio 1.0 | `switch23.ogg` | 開票、決選開票 |
+| `sfx_attack.ogg` | RPG Audio 1.0 | `knifeSlice2.ogg` | 襲撃犠牲者の公開 |
+| `sfx_execution.ogg` | RPG Audio 1.0 | `chop.ogg` | 処刑者の公開 |
+
+配布ページは `https://kenney.nl/assets/ui-audio` と `https://kenney.nl/assets/rpg-audio`。音源は無加工でファイル名だけ変更した。
+
 ### BGM生成条件
 
 - 55Hz〜440Hzの正弦波を左右で位相差を付けて合成し、低域パルスと4秒周期の高音レイヤーを加えた。

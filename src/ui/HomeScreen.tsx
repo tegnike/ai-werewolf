@@ -34,6 +34,7 @@ export function HomeScreen() {
       const response = await fetch('/api/matches', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ seed, speed }) });
       const data = await response.json() as { id?: string; error?: { message: string } };
       if (!response.ok || !data.id) throw new Error(data.error?.message ?? '開始できませんでした。');
+      window.sessionStorage.setItem('werewolf-new-match', data.id);
       window.location.href = `/match/${data.id}`;
     } catch (cause) { setError(cause instanceof Error ? cause.message : '開始できませんでした。'); setLoading(false); }
   };

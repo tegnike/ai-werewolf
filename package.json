@@ -4,7 +4,7 @@
   "private": true,
   "description": "9体のAIが標準的な人狼を自律プレイする観戦Webアプリ",
   "scripts": {
-    "dev": "next dev",
+    "dev": "node scripts/dev.mjs",
     "build": "next build",
     "start": "node .next/standalone/server.js",
     "lint": "eslint .",

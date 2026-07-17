@@ -12,6 +12,8 @@ test('ホームから試合を開始して公開／GM視点とリプレイを表
   await page.getByText('最速').click();
   await page.getByRole('button', { name: /AI人狼を開始/ }).click();
   await expect(page).toHaveURL(/\/match\//);
+  await expect(page.locator('.cinematic-overlay')).toContainText('第0夜');
+  await expect(page.locator('.cinematic-overlay')).toContainText('1日目', { timeout: 10_000 });
   await expect(page.getByRole('heading', { name: '名取 澪' })).toBeVisible();
   await page.getByRole('button', { name: '？ ルール' }).click();
   await expect(page.getByRole('dialog', { name: '観戦ガイド' })).toBeVisible();
@@ -26,6 +28,10 @@ test('ホームから試合を開始して公開／GM視点とリプレイを表
   await expect(page.getByText('世話焼きの心配性')).toBeVisible();
   await expect(page.locator('audio[data-bgm-player="true"]')).toHaveAttribute('src', '/assets/bgm_village.ogg');
   await expect(page.getByRole('button', { name: /VOICE ON/ })).toBeVisible();
+  await expect(page.getByRole('button', { name: '◆ SE ON' })).toBeVisible();
+  await page.getByRole('button', { name: '◆ SE ON' }).click();
+  await expect(page.getByRole('button', { name: '◆ SE OFF' })).toBeVisible();
+  await page.getByRole('button', { name: '◆ SE OFF' }).click();
   await expect(page.getByLabel('VOICE音量')).toBeVisible();
   await expect(page.getByLabel('VOICE音量')).toHaveValue('90');
   await page.getByLabel('VOICE音量').fill('75');
@@ -36,7 +42,11 @@ test('ホームから試合を開始して公開／GM視点とリプレイを表
   await expect(page.getByText('GAME SET')).toBeVisible({ timeout: 30_000 });
   await expect(page.getByRole('heading', { name: '全員の正体と結末' })).toBeVisible();
   await expect(page.getByRole('heading', { name: '役職主張' })).toBeVisible();
-  await expect(page.getByText('本人が公に述べた主張です。真偽を示すものではありません。')).toBeVisible();
+  await expect(page.getByText('本人の公開主張です。真偽を示しません。')).toBeVisible();
+  const claimBoardBox = await page.locator('.claim-board').boundingBox();
+  const timelinePanelBox = await page.locator('.timeline-panel').boundingBox();
+  expect(claimBoardBox?.x).toBeGreaterThanOrEqual(timelinePanelBox?.x ?? 0);
+  expect((claimBoardBox?.x ?? 0) + (claimBoardBox?.width ?? 0)).toBeLessThanOrEqual((timelinePanelBox?.x ?? 0) + (timelinePanelBox?.width ?? 0));
   await expect(page.getByRole('region', { name: '村人陣営の配役' })).toBeVisible();
   await expect(page.getByRole('region', { name: '人狼陣営の配役' })).toBeVisible();
   await expect(page.locator('.epilogue-team li')).toHaveCount(9);
@@ -49,12 +59,23 @@ test('ホームから試合を開始して公開／GM視点とリプレイを表
   await expect(page.getByText('REVEALED SECRET').first()).toBeVisible();
   await expect(page.locator('.card-vote').first()).toBeVisible();
   await expect(page.getByRole('link', { name: 'リプレイを見る →' })).toBeVisible();
+  await page.reload();
+  await expect(page.getByText('GAME SET')).toBeVisible();
+  await expect(page.locator('.cinematic-overlay')).toHaveCount(0);
   const replayUrl = page.url().replace('/match/', '/replay/');
   await page.goto(replayUrl);
   await expect(page.getByLabel('リプレイ位置')).toBeVisible();
   await page.getByLabel('リプレイ位置').fill('0');
   await expect(page.getByRole('heading', { name: '全員の正体と結末' })).toHaveCount(0);
   await expect(page.locator('.timeline-event.dawn').filter({ hasText: '1日目' })).toHaveCount(0);
+  const voteStartSeq = await page.evaluate(async () => {
+    const matchId = window.location.pathname.split('/').at(-1);
+    const response = await fetch(`/api/match/${matchId}?view=public`);
+    const data = await response.json() as { events: Array<{ seq: number; type: string }> };
+    return data.events.find((event) => event.type === 'discussion_closed')?.seq ?? 0;
+  });
+  await page.getByLabel('リプレイ位置').fill(String(voteStartSeq));
+  await expect(page.locator('.cinematic-overlay')).toContainText('投票開始');
 });
 
 test('Spaceキーでゲームと発言音声を一時停止・再開し、中断できる', async ({ page }) => {
@@ -70,7 +91,12 @@ test('Spaceキーでゲームと発言音声を一時停止・再開し、中断
   await page.getByRole('button', { name: /AI人狼を開始/ }).click();
   await expect(page).toHaveURL(/\/match\//);
   await expect(page.getByRole('heading', { name: '名取 澪' })).toBeVisible();
-  await expect(page.locator('.viewer-shell')).toHaveClass(/night/);
+  await expect(page.locator('.cinematic-overlay')).toContainText('第0夜');
+  await expect(page.locator('.agent-card.speaking')).toHaveCount(0);
+  await expect(page.locator('.cinematic-overlay')).toContainText('1日目', { timeout: 15_000 });
+  await expect(page.locator('.agent-card.speaking')).toHaveCount(0);
+  await expect(page.locator('.cinematic-overlay')).toHaveCount(0, { timeout: 10_000 });
+  await expect(page.locator('.viewer-shell')).toHaveClass(/day/);
   await expect(page.locator('.agent-card.speaking')).toHaveCount(1, { timeout: 30_000 });
   const speakingName = await page.locator('.agent-card.speaking h2').textContent();
   const speakingText = await page.locator('.agent-card.speaking blockquote').textContent();
@@ -79,8 +105,11 @@ test('Spaceキーでゲームと発言音声を一時停止・再開し、中断
   await expect(page.locator('.speaker-stage blockquote')).toContainText(speakingText ?? '');
   const speakerStageBox = await page.locator('.speaker-stage').boundingBox();
   const controlDockBox = await page.locator('.control-dock').boundingBox();
+  const lastAgentBox = await page.locator('.agent-card').last().boundingBox();
+  await expect(page.locator('.agent-card')).toHaveCount(9);
   expect(speakerStageBox?.height).toBeLessThanOrEqual(134);
   expect((speakerStageBox?.y ?? 0) + (speakerStageBox?.height ?? 0)).toBeLessThanOrEqual(controlDockBox?.y ?? 0);
+  expect((lastAgentBox?.y ?? 0) + (lastAgentBox?.height ?? 0)).toBeLessThanOrEqual(controlDockBox?.y ?? 0);
   await expect(page.locator('.vote-panel')).toHaveCount(0);
   await page.keyboard.press('Space');
   await expect(page.locator('.round-status em')).toHaveText('PAUSED');
