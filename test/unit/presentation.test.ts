@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { UiEvent } from '@/ui/types';
-import { derivePresentedState, presentationCursorAfterLoad, presentationLimit, privateActionDescription } from '@/ui/presentation';
+import { derivePresentedState, featuredSpeechEvent, presentationCursorAfterLoad, presentationLimit, privateActionDescription } from '@/ui/presentation';
 
 const event = (seq: number, type: string): UiEvent => ({ matchId: 'test', seq, type, day: 1, phase: 'discussion', visibility: 'public', payload: {}, createdAt: '2026-07-16T00:00:00.000Z' });
 
@@ -41,6 +41,20 @@ describe('公開視点の非公開イベント表示', () => {
   it('固定ラベルを実施ログとして表示する', () => {
     expect(privateActionDescription({ ...event(1, 'private_action'), payload: { label: '人狼確認' } }))
       .toBe('人狼確認が行われました。');
+  });
+});
+
+describe('注目発言の選択', () => {
+  const firstSpeech = { ...event(11, 'discussion_speech'), payload: { seat: 'seat-1', speech: '最初の発言' } };
+  const secondSpeech = { ...event(13, 'discussion_speech'), payload: { seat: 'seat-2', speech: '次の発言' } };
+  const events = [firstSpeech, event(12, 'private_action'), secondSpeech];
+
+  it('発声中はそのseqの発言を選ぶ', () => {
+    expect(featuredSpeechEvent(events, 11)).toBe(firstSpeech);
+  });
+
+  it('発声中でない間は最新の発言を保持する', () => {
+    expect(featuredSpeechEvent(events, null)).toBe(secondSpeech);
   });
 });
 

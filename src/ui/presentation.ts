@@ -9,6 +9,12 @@ export function privateActionDescription(event: UiEvent): string | null {
   return `${String(event.payload.label ?? '非公開処理')}が行われました。`;
 }
 
+export function featuredSpeechEvent(events: UiEvent[], speakingSeq: number | null): UiEvent | null {
+  const speeches = events.filter((event) => ['discussion_speech', 'werewolf_chat'].includes(event.type));
+  if (speakingSeq !== null) return speeches.find((event) => event.seq === speakingSeq) ?? speeches.at(-1) ?? null;
+  return speeches.at(-1) ?? null;
+}
+
 export function derivePresentedState(events: UiEvent[], matchStatus?: string): PresentedState {
   const ordered = [...events].sort((a, b) => a.seq - b.seq);
   const last = ordered.at(-1);

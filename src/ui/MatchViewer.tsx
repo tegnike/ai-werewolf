@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import Image from 'next/image';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AgentAvatar } from './AgentAvatar';
 import { AudioControls } from './AudioControls';
@@ -9,7 +10,7 @@ import { useAmbientBgm } from './useAmbientBgm';
 import { useMatchVoice } from './useMatchVoice';
 import { voiceForSeat } from '@/domain/voices';
 import { agentNameForSeat, personaForSeat } from '@/domain/agents';
-import { derivePresentedState, presentationCursorAfterLoad, presentationLimit, privateActionDescription } from './presentation';
+import { derivePresentedState, featuredSpeechEvent, presentationCursorAfterLoad, presentationLimit, privateActionDescription } from './presentation';
 import { buildEpilogue, epilogueRoleLabel, fateLabel, type SpectatorDeathRecord } from './epilogue';
 import { SpectatorGuide } from './SpectatorGuide';
 
@@ -166,6 +167,13 @@ export function MatchViewer({ matchId, mode }: { matchId: string; mode: 'live' |
   const latestTally = (latestVote?.payload.tally ?? {}) as Record<string, number>;
   const maxVoteCount = Math.max(1, ...Object.values(latestTally));
   const finalEvent = [...visibleEvents].reverse().find((event) => event.type === 'match_finished');
+  const featuredSpeech = finalEvent ? null : featuredSpeechEvent(visibleEvents, speakingSeq);
+  const featuredSeatNumber = seatNumber(featuredSpeech?.payload.seat);
+  const featuredSeat = featuredSeatNumber ? `seat-${featuredSeatNumber}` as `seat-${1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9}` : null;
+  const featuredPersona = featuredSeat ? personaForSeat(featuredSeat) : null;
+  const featuredVoice = featuredSeat ? voiceForSeat(featuredSeat) : null;
+  const featuredIsSpeaking = Boolean(featuredSpeech && speakingSeq === featuredSpeech.seq && !paused);
+  const featuredIsPaused = Boolean(featuredSpeech && speakingSeq === featuredSpeech.seq && paused);
   const epilogue = finalEvent ? buildEpilogue(finalEvent.payload.roles, finalEvent.payload.winner, deathRecords) : [];
   const canSeeSecrets = view === 'gm' || terminal;
   const survivorCount = 9 - deathRecords.size;
@@ -186,7 +194,7 @@ export function MatchViewer({ matchId, mode }: { matchId: string; mode: 'live' |
           {canSeeSecrets && roleMap.size > 0 && <span className="wolf-count">人狼残り {livingWerewolves}</span>}
           <em className={match.status}>{match.status === 'running' ? 'LIVE' : match.status.toUpperCase()}</em>
         </div>
-        <div className="header-actions"><AudioControls compact bgmEnabled={bgmEnabled} bgmVolume={bgmVolume} voiceEnabled={voiceEnabled} voiceVolume={voiceVolume} voiceAvailable={voiceAvailable} speakingSeat={speakingSeat} onBgmChange={setBgmEnabled} onBgmVolumeChange={setBgmVolume} onVoiceChange={setVoiceEnabled} onVoiceVolumeChange={setVoiceVolume} /><div className="view-switch" aria-label="観戦視点"><button className={view === 'public' ? 'active' : ''} onClick={() => setView('public')}>公開視点</button><button className={view === 'gm' ? 'active' : ''} onClick={() => setView('gm')}>GM視点</button></div></div>
+        <div className="header-actions"><AudioControls compact bgmEnabled={bgmEnabled} bgmVolume={bgmVolume} voiceEnabled={voiceEnabled} voiceVolume={voiceVolume} voiceAvailable={voiceAvailable} speakingSeat={paused ? null : speakingSeat} onBgmChange={setBgmEnabled} onBgmVolumeChange={setBgmVolume} onVoiceChange={setVoiceEnabled} onVoiceVolumeChange={setVoiceVolume} /><div className="view-switch" aria-label="観戦視点"><button className={view === 'public' ? 'active' : ''} onClick={() => setView('public')}>公開視点</button><button className={view === 'gm' ? 'active' : ''} onClick={() => setView('gm')}>GM視点</button></div></div>
       </header>
       <div className="viewer-grid">
         <section className="board-panel">
@@ -207,14 +215,24 @@ export function MatchViewer({ matchId, mode }: { matchId: string; mode: 'live' |
               const voice = voiceForSeat(seat as `seat-${1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9}`);
               const persona = personaForSeat(seat as `seat-${1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9}`);
               const votedFor = latestVoteByVoter.get(seat);
-              return <article className={`agent-card ${dead ? 'dead' : ''} ${speakingSeat === seat ? 'speaking' : ''}`} key={seat}>
-                <div className="agent-top"><AgentAvatar index={number} name={persona.name} dead={dead} /><div><span className="seat-label">SEAT {String(number).padStart(2, '0')}</span><h2>{persona.name}</h2><small className="persona-name">{persona.title}</small><small className="voice-name">VOICE: {voice?.speakerName}</small>{deathRecord && <small className="death-record">{fateLabel(deathRecord)}</small>}</div><span className={`life-badge ${dead ? 'dead' : ''}`}>{speakingSeat === seat ? '発声中' : dead ? '死亡' : '生存'}</span></div>
+              const isSpeaking = speakingSeat === seat && !paused;
+              return <article className={`agent-card ${dead ? 'dead' : ''} ${isSpeaking ? 'speaking' : ''}`} key={seat}>
+                <div className="agent-top"><AgentAvatar index={number} name={persona.name} dead={dead} /><div><span className="seat-label">SEAT {String(number).padStart(2, '0')}</span><h2>{persona.name}</h2><small className="persona-name">{persona.title}</small><small className="voice-name">VOICE: {voice?.speakerName}</small>{deathRecord && <small className="death-record">{fateLabel(deathRecord)}</small>}</div><span className={`life-badge ${dead ? 'dead' : ''}`}>{speakingSeat === seat ? paused ? '一時停止' : '発声中' : dead ? '死亡' : '生存'}</span></div>
                 {role && <div className={`role-badge ${role}`}>{roleLabel[role]}</div>}
                 <blockquote>{latestSpeech.get(seat) ?? (dead ? '発言を終了しました' : '次の発言を待っています…')}</blockquote>
                 {votedFor && <div className="card-vote"><span>{latestVote?.day}日目{latestVote?.payload.round === 2 ? '決選' : ''}投票</span><strong>→ {seatName(votedFor)}</strong></div>}
               </article>;
             })}
           </div>
+          {featuredSpeech && featuredPersona && featuredSeat && <section className={`speaker-stage ${featuredIsSpeaking ? 'speaking' : ''} ${featuredIsPaused ? 'paused' : ''}`} aria-label="注目中の発言" aria-live="polite">
+            <div className="speaker-stage-portrait"><Image src={`/assets/agents/agent_${featuredSeatNumber}.png`} width={768} height={768} alt={`${featuredPersona.name}の立ち絵`} /></div>
+            <div className="speaker-stage-copy">
+              <div className="speaker-stage-status"><span>{featuredIsSpeaking ? 'NOW SPEAKING' : featuredIsPaused ? 'PAUSED' : 'LATEST SPEECH'}</span><em>SEAT {String(featuredSeatNumber).padStart(2, '0')}</em></div>
+              <h2>{featuredPersona.name}<small>{featuredPersona.title}</small></h2>
+              <blockquote>「{String(featuredSpeech.payload.speech)}」</blockquote>
+              <footer><span>VOICE: {featuredVoice?.speakerName}</span><span>{featuredSpeech.type === 'werewolf_chat' ? '人狼会話' : `${featuredSpeech.day}日目の発言`}</span></footer>
+            </div>
+          </section>}
           {latestVote && <section className={`vote-panel ${latestVote.day < day ? 'stale' : ''}`}>
             <div><span className="section-kicker">VOTE RESULT</span><h2>{latestVote.day}日目の{latestVote.payload.round === 2 ? '決選投票' : '投票結果'}</h2>{latestVote.day < day && <small>前日の結果</small>}</div>
             <div className="vote-bars">{Object.entries(latestTally).sort((a, b) => b[1] - a[1]).map(([seat, count]) => {

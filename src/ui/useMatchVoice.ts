@@ -104,8 +104,6 @@ export function useMatchVoice(events: UiEvent[], onSpeechStart: (seq: number) =>
     const item = currentItem.current;
     if (paused) {
       audio?.pause();
-      setSpeakingSeat(null);
-      setSpeakingSeq(null);
       return;
     }
     if (audio && item) {
