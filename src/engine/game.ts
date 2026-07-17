@@ -19,9 +19,26 @@ import {
 
 export interface SimulationResult { winner: Winner; day: number; state: GameState }
 
+interface ScheduledDiscussionSpeaker {
+  actor: Player;
+  promptedBySeat?: SeatId;
+  motivation?: DiscussionContext['motivation'];
+  intendedTarget?: SeatId | null;
+}
+
 const MAX_INTENT_POLLS_PER_DAY = 2;
 const INTENT_CANDIDATES_PER_POLL = 4;
-const MAX_FREE_SPEECHES_PER_PLAYER = 2;
+const MAX_SPEECHES_PER_PLAYER = 2;
+const LEGACY_MAX_FREE_SPEECHES_PER_PLAYER = 2;
+const NINE_PLAYER_MIN_SPEECHES = 14;
+const ABSOLUTE_MAX_SPEECHES = 18;
+
+function discussionSpeechLimits(aliveCount: number): { minimum: number; maximum: number } {
+  return {
+    minimum: Math.max(aliveCount, Math.ceil((NINE_PLAYER_MIN_SPEECHES * aliveCount) / 9)),
+    maximum: Math.min(ABSOLUTE_MAX_SPEECHES, aliveCount * MAX_SPEECHES_PER_PLAYER),
+  };
+}
 
 function actorByRole(state: GameState, role: string): Player | undefined {
   return state.players.find((player) => player.alive && player.role === role);
@@ -100,10 +117,11 @@ export async function runGame(
   seed: string,
   ai: DecisionProvider,
   hooks: RunHooks,
-  options: { includeDayOneDawn?: boolean; claimsVersion?: 'v1' } = {},
+  options: { includeDayOneDawn?: boolean; claimsVersion?: 'v1'; discussionVersion?: 'legacy' | 'v2' } = {},
 ): Promise<SimulationResult> {
   const players = setupPlayers(seed);
   const claimsEnabled = options.claimsVersion === 'v1';
+  const discussionVersion = options.discussionVersion ?? 'v2';
   const claimPolicies = decideClaimPolicies(seed, players);
   let state = createInitialState(players);
   const publicHistory: string[] = [];
@@ -158,7 +176,8 @@ export async function runGame(
     const base: DecisionContext = {
       matchId, seed, day, phase, kind, callKey, actor,
       players: state.players.map((player) => ({ ...player })), legalTargets,
-      publicHistory: [...publicHistory], privateFacts: privateFactsFor(actor, state, histories), round, discussion,
+      publicHistory: [...publicHistory], privateFacts: privateFactsFor(actor, state, histories), round,
+      discussion: discussion ? { ...discussion, ...(discussionVersion === 'legacy' ? { legacyRules: true } : {}) } : undefined,
     };
     if (kind === 'wolf_speech') {
       const participantSeats = state.players
@@ -190,10 +209,187 @@ export async function runGame(
     return { winner, day, state: { ...state, phase: 'finished' } };
   };
 
+  const runLegacyDiscussion = async (day: number): Promise<void> => {
+    const openingOrder = rotateAlive(state.players, day);
+    const openingIndex = new Map(openingOrder.map((player, index) => [player.seat, index]));
+    const openingPromptedBy = new Map<SeatId, SeatId>();
+    const pendingReplies = new Map<SeatId, SeatId>();
+
+    for (const [index, actor] of openingOrder.entries()) {
+      const promptedBySeat = openingPromptedBy.get(actor.seat);
+      const waitingForFreeReplySeats = [...pendingReplies.keys()];
+      const counterTargetSeat = claimsEnabled ? directiveFor(actor, day, 'opening').counterTargetSeat : null;
+      const legalTargets = openingOrder
+        .filter((player) => player.seat !== actor.seat &&
+          (!pendingReplies.has(player.seat) || player.seat === counterTargetSeat))
+        .map((player) => player.seat);
+      const discussion: DiscussionContext = {
+        stage: 'opening', turn: index + 1,
+        openingSpokenSeats: openingOrder.slice(0, index).map((player) => player.seat),
+        ...(waitingForFreeReplySeats.length > 0 ? { waitingForFreeReplySeats } : {}),
+        ...(promptedBySeat ? { promptedBySeat } : {}),
+      };
+      const speechContext = context(
+        actor, day, 'discussion', 'speech', `d${day}-speech-opening-${actor.seat}`, legalTargets, 1, discussion,
+      );
+      const decision = await ai.speech(speechContext);
+      if (speechContext.claimDirective) assertClaimWithinDirective(decision.claim, speechContext.claimDirective);
+      const speech = normalizeSpeech(decision.speech);
+      await emit(day, 'discussion', 'discussion_speech', {
+        seat: actor.seat, name: actor.name, round: 1, stage: 'opening', turn: index + 1,
+        speech, addressedTo: decision.addressedTo, requestsReply: decision.requestsReply,
+        ...(claimsEnabled ? { claim: decision.claim ?? null } : {}),
+      });
+      if (claimsEnabled) {
+        claimLedger = foldClaim(claimLedger, {
+          seat: actor.seat, name: actor.name, day, stage: 'opening', claim: decision.claim ?? null,
+        });
+      }
+      publicHistory.push(`${actor.name}: ${speech}`);
+      openingPromptedBy.delete(actor.seat);
+
+      if (decision.requestsReply && decision.addressedTo) {
+        const targetIndex = openingIndex.get(decision.addressedTo);
+        if (targetIndex !== undefined && targetIndex > index) {
+          openingPromptedBy.set(decision.addressedTo, actor.seat);
+        } else if (targetIndex !== undefined && !pendingReplies.has(decision.addressedTo)) {
+          pendingReplies.set(decision.addressedTo, actor.seat);
+        }
+      }
+    }
+
+    const freeSpeechCounts = new Map<SeatId, number>();
+    const polledSeats = new Set<SeatId>();
+    const lastIntentSpeechCount = new Map<SeatId, number>();
+    let freeSpeechCount = 0;
+    let intentPolls = 0;
+    let nextSpeaker: { actor: Player; discussion: DiscussionContext } | null = null;
+
+    while (freeSpeechCount < openingOrder.length) {
+      if (!nextSpeaker && claimsEnabled) {
+        const mandatory = openingOrder.filter((player) =>
+          (freeSpeechCounts.get(player.seat) ?? 0) < LEGACY_MAX_FREE_SPEECHES_PER_PLAYER &&
+          directiveFor(player, day, 'free').mode === 'must');
+        if (mandatory.length > 0) {
+          const actor = stableShuffle(mandatory, seed, `claims/v1/counter-order-d${day}-t${freeSpeechCount + 1}`)[0];
+          const directive = directiveFor(actor, day, 'free');
+          nextSpeaker = {
+            actor,
+            discussion: {
+              stage: 'free', turn: freeSpeechCount + 1, motivation: 'challenge',
+              intendedTarget: directive.counterTargetSeat,
+              ...(directive.counterTargetSeat ? { promptedBySeat: directive.counterTargetSeat } : {}),
+            },
+          };
+        }
+      }
+      if (!nextSpeaker) {
+        if (intentPolls >= MAX_INTENT_POLLS_PER_DAY) break;
+        const pollNumber = intentPolls + 1;
+        const eligible = openingOrder.filter((player) =>
+          (freeSpeechCounts.get(player.seat) ?? 0) < LEGACY_MAX_FREE_SPEECHES_PER_PLAYER);
+        const pollable = eligible.filter((player) =>
+          pendingReplies.has(player.seat) || lastIntentSpeechCount.get(player.seat) !== freeSpeechCount);
+        const shuffled = stableShuffle(pollable, seed, `d${day}-intent-candidates-p${pollNumber}`);
+        const shuffledIndex = new Map(shuffled.map((player, index) => [player.seat, index]));
+        const candidates = [...shuffled]
+          .sort((a, b) => {
+            const aPriority = pendingReplies.has(a.seat) ? 0 : polledSeats.has(a.seat) ? 2 : 1;
+            const bPriority = pendingReplies.has(b.seat) ? 0 : polledSeats.has(b.seat) ? 2 : 1;
+            return aPriority - bPriority || (shuffledIndex.get(a.seat) ?? 0) - (shuffledIndex.get(b.seat) ?? 0);
+          })
+          .slice(0, INTENT_CANDIDATES_PER_POLL);
+        if (candidates.length === 0) break;
+        intentPolls = pollNumber;
+
+        const intents: Array<{ actor: Player; decision: SpeechIntentDecision; promptedBySeat?: SeatId }> = [];
+        for (const actor of candidates) {
+          polledSeats.add(actor.seat);
+          lastIntentSpeechCount.set(actor.seat, freeSpeechCount);
+          const promptedBySeat = pendingReplies.get(actor.seat);
+          const legalTargets = openingOrder
+            .filter((player) => player.seat !== actor.seat &&
+              (freeSpeechCounts.get(player.seat) ?? 0) < LEGACY_MAX_FREE_SPEECHES_PER_PLAYER)
+            .map((player) => player.seat);
+          const discussion: DiscussionContext = {
+            stage: 'free', turn: freeSpeechCount + 1, ...(promptedBySeat ? { promptedBySeat } : {}),
+          };
+          const decision = await ai.speechIntent(context(
+            actor, day, 'discussion', 'speech_intent', `d${day}-speech-intent-p${intentPolls}-${actor.seat}`,
+            legalTargets, undefined, discussion,
+          ));
+          intents.push({ actor, decision, ...(promptedBySeat ? { promptedBySeat } : {}) });
+          if (decision.urgency === 0) pendingReplies.delete(actor.seat);
+        }
+
+        const selected = chooseIntent(intents, freeSpeechCounts, seed, `d${day}-intent-choice-p${intentPolls}`);
+        if (!selected) continue;
+        pendingReplies.delete(selected.actor.seat);
+        nextSpeaker = {
+          actor: selected.actor,
+          discussion: {
+            stage: 'free', turn: freeSpeechCount + 1,
+            ...(selected.promptedBySeat ? { promptedBySeat: selected.promptedBySeat } : {}),
+            motivation: selected.decision.motivation,
+            intendedTarget: selected.decision.targetSeat,
+          },
+        };
+      }
+
+      const currentSpeaker: { actor: Player; discussion: DiscussionContext } = nextSpeaker;
+      const actor = currentSpeaker.actor;
+      const discussion = currentSpeaker.discussion;
+      nextSpeaker = null;
+      if ((freeSpeechCounts.get(actor.seat) ?? 0) >= LEGACY_MAX_FREE_SPEECHES_PER_PLAYER) continue;
+      const legalTargets = openingOrder
+        .filter((player) => player.seat !== actor.seat &&
+          (freeSpeechCounts.get(player.seat) ?? 0) < LEGACY_MAX_FREE_SPEECHES_PER_PLAYER)
+        .map((player) => player.seat);
+      const speechContext = context(
+        actor, day, 'discussion', 'speech', `d${day}-speech-free-t${freeSpeechCount + 1}-${actor.seat}`,
+        legalTargets, 2, discussion,
+      );
+      const decision = await ai.speech(speechContext);
+      if (speechContext.claimDirective) assertClaimWithinDirective(decision.claim, speechContext.claimDirective);
+      const speech = normalizeSpeech(decision.speech);
+      freeSpeechCount += 1;
+      freeSpeechCounts.set(actor.seat, (freeSpeechCounts.get(actor.seat) ?? 0) + 1);
+      await emit(day, 'discussion', 'discussion_speech', {
+        seat: actor.seat, name: actor.name, round: 2, stage: 'free', turn: freeSpeechCount,
+        speech, addressedTo: decision.addressedTo, requestsReply: decision.requestsReply,
+        ...(claimsEnabled ? { claim: decision.claim ?? null } : {}),
+      });
+      if (claimsEnabled) {
+        claimLedger = foldClaim(claimLedger, {
+          seat: actor.seat, name: actor.name, day, stage: 'free', claim: decision.claim ?? null,
+        });
+      }
+      publicHistory.push(`${actor.name}: ${speech}`);
+
+      if (decision.requestsReply && decision.addressedTo &&
+        (freeSpeechCounts.get(decision.addressedTo) ?? 0) < LEGACY_MAX_FREE_SPEECHES_PER_PLAYER) {
+        const target = playerBySeat(state, decision.addressedTo);
+        nextSpeaker = {
+          actor: target,
+          discussion: {
+            stage: 'free', turn: freeSpeechCount + 1, promptedBySeat: actor.seat,
+            motivation: 'reply', intendedTarget: actor.seat,
+          },
+        };
+      }
+    }
+
+    await emit(day, 'vote', 'discussion_closed', {
+      openingSpeeches: openingOrder.length, freeSpeeches: freeSpeechCount, intentPolls,
+    });
+  };
+
   await emit(0, 'setup', 'match_created', {
     seed,
     players: players.map((player) => ({ seat: player.seat, name: player.name, role: player.role })),
-    ...(claimsEnabled ? { rules: { claims: 'v1' } } : {}),
+    ...(discussionVersion === 'v2'
+      ? { rules: { discussion: 'v2', ...(claimsEnabled ? { claims: 'v1' } : {}) } }
+      : claimsEnabled ? { rules: { claims: 'v1' } } : {}),
   }, 'private');
 
   const wolves = state.players.filter((player) => player.role === 'werewolf');
@@ -242,175 +438,163 @@ export async function runGame(
     const dawnWinner = checkVictory(state);
     if (dawnWinner) return finish(dawnWinner, day);
 
-    const openingOrder = rotateAlive(state.players, day);
-    const openingIndex = new Map(openingOrder.map((player, index) => [player.seat, index]));
-    const openingPromptedBy = new Map<SeatId, SeatId>();
-    const pendingReplies = new Map<SeatId, SeatId>();
-
-    for (const [index, actor] of openingOrder.entries()) {
-      const promptedBySeat = openingPromptedBy.get(actor.seat);
-      const waitingForFreeReplySeats = [...pendingReplies.keys()];
-      const counterTargetSeat = claimsEnabled ? directiveFor(actor, day, 'opening').counterTargetSeat : null;
-      const legalTargets = openingOrder
-        .filter((player) => player.seat !== actor.seat &&
-          (!pendingReplies.has(player.seat) || player.seat === counterTargetSeat))
-        .map((player) => player.seat);
-      const discussion: DiscussionContext = {
-        stage: 'opening', turn: index + 1,
-        openingSpokenSeats: openingOrder.slice(0, index).map((player) => player.seat),
-        ...(waitingForFreeReplySeats.length > 0 ? { waitingForFreeReplySeats } : {}),
-        ...(promptedBySeat ? { promptedBySeat } : {}),
+    if (discussionVersion === 'legacy') {
+      await runLegacyDiscussion(day);
+    } else {
+      const speakers = state.players.filter((player) => player.alive);
+      const { minimum: minimumSpeeches, maximum: maximumSpeeches } = discussionSpeechLimits(speakers.length);
+      const speechCounts = new Map<SeatId, number>();
+      const polledSeats = new Set<SeatId>();
+      const lastIntentSpeechCount = new Map<SeatId, number>();
+      let speechCount = 0;
+      let intentPolls = 0;
+      let nextSpeaker: ScheduledDiscussionSpeaker | null = {
+        actor: stableShuffle(speakers, seed, `d${day}-first-speaker`)[0],
+        motivation: 'new_information',
       };
-      const speechContext = context(
-        actor, day, 'discussion', 'speech', `d${day}-speech-opening-${actor.seat}`, legalTargets, 1, discussion,
-      );
-      const decision = await ai.speech(speechContext);
-      if (speechContext.claimDirective) assertClaimWithinDirective(decision.claim, speechContext.claimDirective);
-      const speech = normalizeSpeech(decision.speech);
-      await emit(day, 'discussion', 'discussion_speech', {
-        seat: actor.seat, name: actor.name, round: 1, stage: 'opening', turn: index + 1,
-        speech, addressedTo: decision.addressedTo, requestsReply: decision.requestsReply,
-        ...(claimsEnabled ? { claim: decision.claim ?? null } : {}),
-      });
-      if (claimsEnabled) {
-        claimLedger = foldClaim(claimLedger, {
-          seat: actor.seat, name: actor.name, day, stage: 'opening', claim: decision.claim ?? null,
-        });
-      }
-      publicHistory.push(`${actor.name}: ${speech}`);
-      openingPromptedBy.delete(actor.seat);
 
-      if (decision.requestsReply && decision.addressedTo) {
-        const targetIndex = openingIndex.get(decision.addressedTo);
-        if (targetIndex !== undefined && targetIndex > index) {
-          openingPromptedBy.set(decision.addressedTo, actor.seat);
-        } else if (targetIndex !== undefined) {
-          if (!pendingReplies.has(decision.addressedTo)) pendingReplies.set(decision.addressedTo, actor.seat);
-        }
-      }
-    }
-
-    const freeSpeechCounts = new Map<SeatId, number>();
-    const polledSeats = new Set<SeatId>();
-    const lastIntentSpeechCount = new Map<SeatId, number>();
-    let freeSpeechCount = 0;
-    let intentPolls = 0;
-    let nextSpeaker: { actor: Player; discussion: DiscussionContext } | null = null;
-
-    while (freeSpeechCount < openingOrder.length) {
-      if (!nextSpeaker) {
-        if (claimsEnabled) {
-          const mandatory = openingOrder.filter((player) =>
-            (freeSpeechCounts.get(player.seat) ?? 0) < MAX_FREE_SPEECHES_PER_PLAYER &&
-            directiveFor(player, day, 'free').mode === 'must');
-          if (mandatory.length > 0) {
-            const actor = stableShuffle(mandatory, seed, `claims/v1/counter-order-d${day}-t${freeSpeechCount + 1}`)[0];
-            const directive = directiveFor(actor, day, 'free');
-            nextSpeaker = {
-              actor,
-              discussion: {
-                stage: 'free', turn: freeSpeechCount + 1, motivation: 'challenge',
+      while (speechCount < maximumSpeeches) {
+        if (!nextSpeaker) {
+          if (claimsEnabled) {
+            const mandatory = speakers.filter((player) => {
+              const count = speechCounts.get(player.seat) ?? 0;
+              const stage = count === 0 ? 'opening' : 'free';
+              return count < MAX_SPEECHES_PER_PLAYER && directiveFor(player, day, stage).mode === 'must';
+            });
+            if (mandatory.length > 0) {
+              const actor = stableShuffle(mandatory, seed, `claims/v1/counter-order-d${day}-t${speechCount + 1}`)[0];
+              const stage = (speechCounts.get(actor.seat) ?? 0) === 0 ? 'opening' : 'free';
+              const directive = directiveFor(actor, day, stage);
+              nextSpeaker = {
+                actor,
+                motivation: 'challenge',
                 intendedTarget: directive.counterTargetSeat,
                 ...(directive.counterTargetSeat ? { promptedBySeat: directive.counterTargetSeat } : {}),
-              },
-            };
+              };
+            }
           }
         }
-      }
-      if (!nextSpeaker) {
-        if (intentPolls >= MAX_INTENT_POLLS_PER_DAY) break;
-        const pollNumber = intentPolls + 1;
+        if (!nextSpeaker) {
+          const unspoken = speakers.filter((player) => (speechCounts.get(player.seat) ?? 0) === 0);
+          if (speechCount < minimumSpeeches || unspoken.length > 0) {
+            const eligible = speakers.filter((player) => (speechCounts.get(player.seat) ?? 0) < MAX_SPEECHES_PER_PLAYER);
+            const pool = unspoken.length > 0 ? unspoken : eligible;
+            nextSpeaker = {
+              actor: stableShuffle(pool, seed, `d${day}-scheduled-speaker-t${speechCount + 1}`)[0],
+              motivation: 'new_information',
+            };
+            continue;
+          }
+          if (intentPolls >= MAX_INTENT_POLLS_PER_DAY) break;
+          const pollNumber = intentPolls + 1;
 
-        const eligible = openingOrder.filter((player) => (freeSpeechCounts.get(player.seat) ?? 0) < MAX_FREE_SPEECHES_PER_PLAYER);
-        const pollable = eligible.filter((player) =>
-          pendingReplies.has(player.seat) || lastIntentSpeechCount.get(player.seat) !== freeSpeechCount);
-        const shuffled = stableShuffle(pollable, seed, `d${day}-intent-candidates-p${pollNumber}`);
-        const shuffledIndex = new Map(shuffled.map((player, index) => [player.seat, index]));
-        const candidates = [...shuffled]
-          .sort((a, b) => {
-            const aPriority = pendingReplies.has(a.seat) ? 0 : polledSeats.has(a.seat) ? 2 : 1;
-            const bPriority = pendingReplies.has(b.seat) ? 0 : polledSeats.has(b.seat) ? 2 : 1;
-            return aPriority - bPriority || (shuffledIndex.get(a.seat) ?? 0) - (shuffledIndex.get(b.seat) ?? 0);
-          })
-          .slice(0, INTENT_CANDIDATES_PER_POLL);
-        if (candidates.length === 0) break;
-        intentPolls = pollNumber;
+          const eligible = speakers.filter((player) => (speechCounts.get(player.seat) ?? 0) < MAX_SPEECHES_PER_PLAYER);
+          const pollable = eligible.filter((player) => lastIntentSpeechCount.get(player.seat) !== speechCount);
+          const shuffled = stableShuffle(pollable, seed, `d${day}-intent-candidates-p${pollNumber}`);
+          const shuffledIndex = new Map(shuffled.map((player, index) => [player.seat, index]));
+          const candidates = [...shuffled]
+            .sort((a, b) => {
+              const aPriority = polledSeats.has(a.seat) ? 1 : 0;
+              const bPriority = polledSeats.has(b.seat) ? 1 : 0;
+              return aPriority - bPriority || (shuffledIndex.get(a.seat) ?? 0) - (shuffledIndex.get(b.seat) ?? 0);
+            })
+            .slice(0, INTENT_CANDIDATES_PER_POLL);
+          if (candidates.length === 0) break;
+          intentPolls = pollNumber;
 
-        const intents: Array<{ actor: Player; decision: SpeechIntentDecision; promptedBySeat?: SeatId }> = [];
-        for (const actor of candidates) {
-          polledSeats.add(actor.seat);
-          lastIntentSpeechCount.set(actor.seat, freeSpeechCount);
-          const promptedBySeat = pendingReplies.get(actor.seat);
-          const legalTargets = openingOrder
-            .filter((player) => player.seat !== actor.seat && (freeSpeechCounts.get(player.seat) ?? 0) < MAX_FREE_SPEECHES_PER_PLAYER)
-            .map((player) => player.seat);
-          const discussion: DiscussionContext = {
-            stage: 'free', turn: freeSpeechCount + 1, ...(promptedBySeat ? { promptedBySeat } : {}),
-          };
-          const decision = await ai.speechIntent(context(
-            actor, day, 'discussion', 'speech_intent', `d${day}-speech-intent-p${intentPolls}-${actor.seat}`,
-            legalTargets, undefined, discussion,
-          ));
-          intents.push({ actor, decision, ...(promptedBySeat ? { promptedBySeat } : {}) });
-          if (decision.urgency === 0) pendingReplies.delete(actor.seat);
-        }
+          const intents: Array<{ actor: Player; decision: SpeechIntentDecision; promptedBySeat?: SeatId }> = [];
+          for (const actor of candidates) {
+            polledSeats.add(actor.seat);
+            lastIntentSpeechCount.set(actor.seat, speechCount);
+            const legalTargets = speakers
+              .filter((player) => player.seat !== actor.seat && (speechCounts.get(player.seat) ?? 0) < MAX_SPEECHES_PER_PLAYER)
+              .map((player) => player.seat);
+            const discussion: DiscussionContext = {
+              stage: (speechCounts.get(actor.seat) ?? 0) === 0 ? 'opening' : 'free',
+              turn: speechCount + 1,
+            };
+            const decision = await ai.speechIntent(context(
+              actor, day, 'discussion', 'speech_intent', `d${day}-speech-intent-p${intentPolls}-${actor.seat}`,
+              legalTargets, undefined, discussion,
+            ));
+            intents.push({ actor, decision });
+          }
 
-        const selected = chooseIntent(intents, freeSpeechCounts, seed, `d${day}-intent-choice-p${intentPolls}`);
-        if (!selected) continue;
-        pendingReplies.delete(selected.actor.seat);
-        nextSpeaker = {
-          actor: selected.actor,
-          discussion: {
-            stage: 'free', turn: freeSpeechCount + 1,
-            ...(selected.promptedBySeat ? { promptedBySeat: selected.promptedBySeat } : {}),
+          const selected = chooseIntent(intents, speechCounts, seed, `d${day}-intent-choice-p${intentPolls}`);
+          if (!selected) continue;
+          nextSpeaker = {
+            actor: selected.actor,
             motivation: selected.decision.motivation,
             intendedTarget: selected.decision.targetSeat,
-          },
-        };
-      }
+          };
+        }
 
-      const currentSpeaker: { actor: Player; discussion: DiscussionContext } = nextSpeaker;
-      const actor: Player = currentSpeaker.actor;
-      const discussion: DiscussionContext = currentSpeaker.discussion;
-      nextSpeaker = null;
-      if ((freeSpeechCounts.get(actor.seat) ?? 0) >= MAX_FREE_SPEECHES_PER_PLAYER) continue;
-      const legalTargets = openingOrder
-        .filter((player) => player.seat !== actor.seat && (freeSpeechCounts.get(player.seat) ?? 0) < MAX_FREE_SPEECHES_PER_PLAYER)
-        .map((player) => player.seat);
-      const speechContext = context(
-        actor, day, 'discussion', 'speech', `d${day}-speech-free-t${freeSpeechCount + 1}-${actor.seat}`,
-        legalTargets, 2, discussion,
-      );
-      const decision = await ai.speech(speechContext);
-      if (speechContext.claimDirective) assertClaimWithinDirective(decision.claim, speechContext.claimDirective);
-      const speech = normalizeSpeech(decision.speech);
-      freeSpeechCount += 1;
-      freeSpeechCounts.set(actor.seat, (freeSpeechCounts.get(actor.seat) ?? 0) + 1);
-      await emit(day, 'discussion', 'discussion_speech', {
-        seat: actor.seat, name: actor.name, round: 2, stage: 'free', turn: freeSpeechCount,
-        speech, addressedTo: decision.addressedTo, requestsReply: decision.requestsReply,
-        ...(claimsEnabled ? { claim: decision.claim ?? null } : {}),
-      });
-      if (claimsEnabled) {
-        claimLedger = foldClaim(claimLedger, {
-          seat: actor.seat, name: actor.name, day, stage: 'free', claim: decision.claim ?? null,
+        const currentSpeaker: ScheduledDiscussionSpeaker = nextSpeaker;
+        const actor = currentSpeaker.actor;
+        nextSpeaker = null;
+        const actorSpeechCount = speechCounts.get(actor.seat) ?? 0;
+        if (actorSpeechCount >= MAX_SPEECHES_PER_PLAYER) continue;
+        const stage = actorSpeechCount === 0 ? 'opening' : 'free';
+        const canRequestReply = speechCount + 1 < maximumSpeeches;
+        const legalTargets = speakers
+          .filter((player) => canRequestReply && player.seat !== actor.seat &&
+            (speechCounts.get(player.seat) ?? 0) < MAX_SPEECHES_PER_PLAYER)
+          .map((player) => player.seat);
+        const spokenSeats = speakers.filter((player) => (speechCounts.get(player.seat) ?? 0) > 0).map((player) => player.seat);
+        const remainingUnspokenSeats = speakers.filter((player) => (speechCounts.get(player.seat) ?? 0) === 0).map((player) => player.seat);
+        const discussion: DiscussionContext = {
+          stage,
+          turn: speechCount + 1,
+          spokenSeats,
+          remainingUnspokenSeats,
+          canRequestReply,
+          ...(currentSpeaker.promptedBySeat ? { promptedBySeat: currentSpeaker.promptedBySeat } : {}),
+          ...(currentSpeaker.motivation ? { motivation: currentSpeaker.motivation } : {}),
+          ...('intendedTarget' in currentSpeaker ? { intendedTarget: currentSpeaker.intendedTarget } : {}),
+        };
+        const speechContext = context(
+          actor, day, 'discussion', 'speech', `d${day}-speech-t${speechCount + 1}-${actor.seat}`,
+          legalTargets, actorSpeechCount + 1, discussion,
+        );
+        const decision = await ai.speech(speechContext);
+        if (speechContext.claimDirective) assertClaimWithinDirective(decision.claim, speechContext.claimDirective);
+        const speech = normalizeSpeech(decision.speech);
+        speechCount += 1;
+        speechCounts.set(actor.seat, actorSpeechCount + 1);
+        await emit(day, 'discussion', 'discussion_speech', {
+          seat: actor.seat, name: actor.name, round: actorSpeechCount + 1, stage, turn: speechCount,
+          speech, addressedTo: decision.addressedTo, requestsReply: decision.requestsReply,
+          ...(claimsEnabled ? { claim: decision.claim ?? null } : {}),
         });
-      }
-      publicHistory.push(`${actor.name}: ${speech}`);
+        if (claimsEnabled) {
+          claimLedger = foldClaim(claimLedger, {
+            seat: actor.seat, name: actor.name, day, stage, claim: decision.claim ?? null,
+          });
+        }
+        publicHistory.push(`${actor.name}: ${speech}`);
 
-      if (decision.requestsReply && decision.addressedTo &&
-        (freeSpeechCounts.get(decision.addressedTo) ?? 0) < MAX_FREE_SPEECHES_PER_PLAYER) {
-        const target = playerBySeat(state, decision.addressedTo);
-        nextSpeaker = {
-          actor: target,
-          discussion: { stage: 'free', turn: freeSpeechCount + 1, promptedBySeat: actor.seat, motivation: 'reply', intendedTarget: actor.seat },
-        };
+        if (decision.requestsReply && decision.addressedTo &&
+          (speechCounts.get(decision.addressedTo) ?? 0) < MAX_SPEECHES_PER_PLAYER) {
+          const target = playerBySeat(state, decision.addressedTo);
+          nextSpeaker = {
+            actor: target,
+            promptedBySeat: actor.seat,
+            motivation: 'reply',
+            intendedTarget: actor.seat,
+          };
+        }
       }
+
+      const openingSpeeches = [...speechCounts.values()].filter((count) => count >= 1).length;
+      await emit(day, 'vote', 'discussion_closed', {
+        openingSpeeches,
+        freeSpeeches: speechCount - openingSpeeches,
+        totalSpeeches: speechCount,
+        minimumSpeeches,
+        maximumSpeeches,
+        intentPolls,
+      });
     }
-
-    await emit(day, 'vote', 'discussion_closed', {
-      openingSpeeches: openingOrder.length, freeSpeeches: freeSpeechCount, intentPolls,
-    });
 
     const alive = rotateAlive(state.players, day);
     const votes: Array<{ voter: SeatId; target: SeatId; statedReason: string }> = [];

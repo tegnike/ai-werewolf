@@ -25,7 +25,7 @@ export function buildPrompts(context: DecisionContext): { systemPrompt: string; 
           '今は生存している人狼同士だけの秘密会話です。仲間の発言を踏まえ、襲撃方針を自然に相談してください。',
         ]
     : [];
-  const discussionGuidance = context.discussion?.stage === 'opening'
+  const legacyDiscussionGuidance = context.discussion?.legacyRules && context.discussion.stage === 'opening'
     ? [
         '今は昼の「開始発言の一巡」です。生存者全員が決められた順番で一度ずつ話し終えるまで、自由な割り込みや即時の応答は起きません。',
         '自分より前の開始発言には反応できますが、まだ順番が来ていない人の発言を知っているように話してはいけません。',
@@ -41,9 +41,26 @@ export function buildPrompts(context: DecisionContext): { systemPrompt: string; 
         ] : []),
         ...(promptedByName ? [`${promptedByName}が先ほどあなたへ話を向けています。今はあなたの通常の開始発言の番なので、必要ならその内容へ自然に応じてください。`] : []),
       ]
-    : context.discussion?.stage === 'free'
+    : context.discussion?.legacyRules && context.discussion.stage === 'free'
       ? [
           '開始発言の一巡は終わり、今は自由討論です。直近の話題へつながる発言をし、すでに解決した古い問いを蒸し返さないでください。',
+          ...(promptedByName ? [`${promptedByName}から返答を求められて次の話者になりました。まず相手の直近の発言へ自然に答えてください。`] : []),
+        ]
+      : null;
+  const discussionGuidance = legacyDiscussionGuidance ?? (context.discussion?.stage === 'opening'
+    ? [
+        '昼の議論に固定の開始発言順はありません。これはあなたの今日1回目の発言です。直近の話題へ自然に加わってください。',
+        '誰かへ明確に返答を求める場合、その相手が次の話者になります。実際に返答してほしい台詞ならaddressedToに相手を指定し、requestsReply=trueにしてください。',
+        'まだ今日話していない人の発言を知っているように話してはいけません。進行ルール自体を説明する台詞は不要です。',
+        '仮定、今後の方針、迷い、弱い違和感を、具体的な告発や返答拒否へ勝手に強めないでください。発言者が実際に言った強さのまま受け取ってください。',
+        ...(context.discussion.turn === 1 ? [
+          'あなたが今日の最初の発言者です。他の参加者は今日まだ発言機会を得ていません。今日の沈黙、反応、便乗、返答の遅さを観察したように話してはいけません。役職情報、前日までの公開情報、または今日これから確認したいことを話してください。',
+        ] : []),
+        ...(promptedByName ? [`${promptedByName}から返答を求められて次の話者になりました。まず相手の直近の発言へ自然に答えてください。`] : []),
+      ]
+    : context.discussion?.stage === 'free'
+      ? [
+          '固定の発言順はなく、これはあなたの今日2回目で最後の発言です。直近の話題へつながる発言をし、すでに解決した古い問いを蒸し返さないでください。',
           ...(promptedByName ? [`${promptedByName}から返答を求められて次の話者になりました。まず相手の直近の発言へ自然に答えてください。`] : []),
           ...(context.discussion.motivation && context.discussion.motivation !== 'none'
             ? [`あなたが発言を希望した動機は ${context.discussion.motivation} です。最新の公開情報に合わなければ、無理に当初の話題へ固執せず調整してください。`]
@@ -52,7 +69,10 @@ export function buildPrompts(context: DecisionContext): { systemPrompt: string; 
             ? [`発言希望時に話を向けようとした相手は${agentNameForSeat(context.discussion.intendedTarget)}です。現在も必要な場合だけ、その相手へ話してください。`]
             : []),
         ]
-      : [];
+      : []);
+  if (!context.discussion?.legacyRules && context.discussion?.canRequestReply === false) {
+    discussionGuidance.push('これが今日の最後の発言枠です。新しい返答要求を出さず、addressedTo=null、requestsReply=falseにしてください。');
+  }
   const systemPrompt = [
     'あなたは一般的な9人人狼へ参加している一人の人間として振る舞います。AIアシスタントのように話してはいけません。',
     `あなたは${context.actor.name}、役職は${ROLE_LABEL[context.actor.role]}です。`,

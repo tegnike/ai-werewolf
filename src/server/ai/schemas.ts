@@ -27,7 +27,11 @@ export function speechDecisionSchema(legalSeats: SeatId[], withClaim = false, al
     addressedTo: nullableSeatSchema(legalSeats),
     requestsReply: allowReply ? z.boolean() : z.literal(false),
   };
-  return z.object(withClaim ? { ...base, claim: speechClaimSchema } : base);
+  return z.object(withClaim ? { ...base, claim: speechClaimSchema } : base).superRefine((decision, context) => {
+    if (decision.requestsReply && decision.addressedTo === null) {
+      context.addIssue({ code: 'custom', path: ['requestsReply'], message: '返答要求には宛先が必要です。' });
+    }
+  });
 }
 
 export function speechIntentDecisionSchema(legalSeats: SeatId[]) {

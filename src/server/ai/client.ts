@@ -66,7 +66,7 @@ export class RealAI implements DecisionProvider {
       speechDecisionSchema(
         context.legalTargets,
         Boolean(context.claimDirective),
-        context.wolfChat?.mode !== 'monologue',
+        context.wolfChat?.mode !== 'monologue' && context.discussion?.canRequestReply !== false,
       ),
       'speech_decision',
       (decision) => validateSpeechDisclosure(context, decision),

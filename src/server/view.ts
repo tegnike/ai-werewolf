@@ -33,7 +33,7 @@ function publicPayload(event: MatchEvent): Record<string, unknown> {
   const payload = event.payload;
   const fields: Record<string, string[]> = {
     dawn: ['victim', 'message'],
-    discussion_closed: ['openingSpeeches', 'freeSpeeches'],
+    discussion_closed: ['openingSpeeches', 'freeSpeeches', 'totalSpeeches', 'minimumSpeeches', 'maximumSpeeches', 'intentPolls'],
     execution: ['seat', 'message'],
     anomaly_flag: ['winner', 'roles', 'anomaly'],
     match_finished: ['winner', 'roles', 'anomaly'],

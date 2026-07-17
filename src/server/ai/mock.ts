@@ -83,9 +83,9 @@ export class MockAI implements DecisionProvider {
     const decision: SpeechDecision = {
       speech,
       addressedTo: addressedTo ?? null,
-      requestsReply: context.wolfChat?.mode === 'monologue'
+      requestsReply: context.wolfChat?.mode === 'monologue' || context.discussion?.canRequestReply === false
         ? false
-        : Boolean(addressedTo && /[?？]|教えて|答えて|聞かせ/.test(speech)),
+        : Boolean(addressedTo && /[?？]|教えて|答えて|聞かせ|聞きたい|聞いてみたい/.test(speech)),
     };
     if (context.claimDirective) decision.claim = null;
     return decision;

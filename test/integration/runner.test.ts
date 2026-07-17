@@ -45,6 +45,7 @@ describe('MatchRunner', () => {
     const events = manager.repo.events(match.id);
     expect(events.length).toBeGreaterThan(20);
     expect(new Set(events.map((event) => event.seq)).size).toBe(events.length);
+    expect(events.find((event) => event.type === 'match_created')?.payload.rules).toEqual({ discussion: 'v2', claims: 'v1' });
   });
   it('pause/resumeとabortを受け付ける', async () => {
     const manager = new MatchRunnerManager();
@@ -74,7 +75,7 @@ describe('MatchRunner', () => {
         repo.appendEvent(event);
       },
       checkpoint: async () => { if (seq === 20) throw new Error('simulated crash'); },
-    }, { includeDayOneDawn: true })).rejects.toThrow('simulated crash');
+    }, { includeDayOneDawn: true, discussionVersion: 'legacy' })).rejects.toThrow('simulated crash');
     expect(repo.maxSeq(record.id)).toBe(20);
     expect(repo.events(record.id).some((event) => event.day === 1 && event.type === 'dawn')).toBe(true);
     const manager = new MatchRunnerManager(repo);
@@ -98,7 +99,7 @@ describe('MatchRunner', () => {
       },
       checkpoint: async () => { if (seq === 32) throw new Error('simulated claims crash'); },
     }, { claimsVersion: 'v1' })).rejects.toThrow('simulated claims crash');
-    expect(repo.events(record.id).find((event) => event.type === 'match_created')?.payload.rules).toEqual({ claims: 'v1' });
+    expect(repo.events(record.id).find((event) => event.type === 'match_created')?.payload.rules).toEqual({ discussion: 'v2', claims: 'v1' });
     expect(repo.events(record.id).some((event) => event.type === 'discussion_speech' && event.payload.claim)).toBe(true);
 
     const manager = new MatchRunnerManager(repo);

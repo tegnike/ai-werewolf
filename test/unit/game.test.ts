@@ -13,6 +13,15 @@ describe('ゲームエンジン', () => {
     expect(first.events.map((event) => event.payload)).toEqual(second.events.map((event) => event.payload));
     expect(first.events.at(-1)?.type).toBe('match_finished');
   });
+  it('異なるseedでは昼の最初の話者が固定されない', async () => {
+    const firstSpeakers = new Set<string>();
+    for (const seed of Array.from({ length: 8 }, (_, index) => `first-speaker-${index}`)) {
+      const { events } = await runMock(seed);
+      const firstSpeech = events.find((event) => event.day === 1 && event.type === 'discussion_speech');
+      firstSpeakers.add(String(firstSpeech?.payload.seat));
+    }
+    expect(firstSpeakers.size).toBeGreaterThan(1);
+  });
   it('第0夜に襲撃・護衛・霊媒がない', async () => {
     const { events } = await runMock('night-zero');
     const forbidden = events.filter((event) => event.day === 0 && ['attack_choice', 'guard_choice', 'medium_result'].includes(event.type));
@@ -24,20 +33,28 @@ describe('ゲームエンジン', () => {
     expect(events.some((event) => event.day === 1 && event.type === 'dawn')).toBe(false);
     expect(events.find((event) => event.visibility === 'public')?.type).toBe('discussion_speech');
   });
-  it('各昼で全員が開始発言し、自由討論と発言希望確認の上限を守る', async () => {
+  it('各昼で全員が1回以上話し、人数別の総数と1人2回の上限を守る', async () => {
     const { events } = await runMock('speech-rounds');
     for (const day of new Set(events.filter((event) => event.type === 'discussion_speech').map((event) => event.day))) {
       const speeches = events.filter((event) => event.day === day && event.type === 'discussion_speech');
-      const opening = speeches.filter((event) => event.payload.stage === 'opening');
-      const free = speeches.filter((event) => event.payload.stage === 'free');
-      const openingSeats = opening.map((event) => String(event.payload.seat));
-      const freeCounts = new Map<string, number>();
-      for (const event of free) freeCounts.set(String(event.payload.seat), (freeCounts.get(String(event.payload.seat)) ?? 0) + 1);
-      expect(new Set(openingSeats).size).toBe(opening.length);
-      expect(free.length).toBeLessThanOrEqual(opening.length);
-      expect(speeches.length).toBeLessThanOrEqual(opening.length * 2);
-      expect([...freeCounts.values()].every((count) => count <= 2)).toBe(true);
-      expect(events.filter((event) => event.day === day && event.type === 'discussion_closed')).toHaveLength(1);
+      const counts = new Map<string, number>();
+      for (const event of speeches) counts.set(String(event.payload.seat), (counts.get(String(event.payload.seat)) ?? 0) + 1);
+      const closed = events.find((event) => event.day === day && event.type === 'discussion_closed')!;
+      const minimum = Number(closed.payload.minimumSpeeches);
+      const maximum = Number(closed.payload.maximumSpeeches);
+      expect(counts.size).toBe(Number(closed.payload.openingSpeeches));
+      expect(counts.size).toBe(maximum / 2);
+      expect([...counts.values()].every((count) => count >= 1 && count <= 2)).toBe(true);
+      expect(minimum).toBe(Math.max(counts.size, Math.ceil((14 * counts.size) / 9)));
+      expect(maximum).toBe(Math.min(18, counts.size * 2));
+      expect(speeches.length).toBeGreaterThanOrEqual(minimum);
+      expect(speeches.length).toBeLessThanOrEqual(maximum);
+      expect(closed.payload.totalSpeeches).toBe(speeches.length);
+      expect(maximum).toBeLessThanOrEqual(18);
+      if (day === 1) {
+        expect(minimum).toBe(14);
+        expect(maximum).toBe(18);
+      }
     }
   });
 
@@ -45,7 +62,7 @@ describe('ゲームエンジン', () => {
     const first = await runMock('1000', 'v1');
     const second = await runMock('1000', 'v1');
     expect(first.events.map((event) => event.payload)).toEqual(second.events.map((event) => event.payload));
-    expect(first.events.find((event) => event.type === 'match_created')?.payload.rules).toEqual({ claims: 'v1' });
+    expect(first.events.find((event) => event.type === 'match_created')?.payload.rules).toEqual({ discussion: 'v2', claims: 'v1' });
 
     const ledger = claimLedgerFromEvents(first.events);
     expect(ledger.length).toBeGreaterThanOrEqual(2);
@@ -99,17 +116,21 @@ describe('ゲームエンジン', () => {
   });
 
   it('必須の先出しと対抗をintent poll追加なしで自由討論の先頭へ入れる', async () => {
-    const calls: Array<{ kind: string; callKey: string }> = [];
+    const calls: Array<{ kind: string; callKey: string; claimed?: boolean }> = [];
     const base = new MockAI();
     const provider: DecisionProvider = {
-      speech: (context) => { calls.push({ kind: context.kind, callKey: context.callKey }); return base.speech(context); },
+      speech: async (context) => {
+        const decision = await base.speech(context);
+        calls.push({ kind: context.kind, callKey: context.callKey, claimed: Boolean(decision.claim) });
+        return decision;
+      },
       speechIntent: (context) => { calls.push({ kind: context.kind, callKey: context.callKey }); return base.speechIntent(context); },
       target: (context) => { calls.push({ kind: context.kind, callKey: context.callKey }); return base.target(context); },
     };
     await runGame('claim-priority', 'fixture-0', provider, { emit: async () => {}, checkpoint: async () => {} }, { claimsVersion: 'v1' });
-    const first = calls.findIndex((call) => call.callKey === 'd1-speech-free-t1-seat-1');
-    const second = calls.findIndex((call) => call.callKey === 'd1-speech-free-t2-seat-8');
-    expect(first).toBeGreaterThan(0);
+    const claimIndexes = calls.flatMap((call, index) => call.claimed && call.callKey.startsWith('d1-') ? [index] : []);
+    const [first, second] = claimIndexes;
+    expect(first).toBeGreaterThanOrEqual(0);
     expect(second).toBe(first + 1);
     expect(calls.slice(0, second + 1).some((call) => call.kind === 'speech_intent')).toBe(false);
   });
@@ -132,62 +153,37 @@ describe('ゲームエンジン', () => {
     }
   });
 
-  it('開始一巡の後まで、すでに話した相手への返答を待たせる', async () => {
+  it('返答を求めた相手へ即座に発言権を渡し、固定一巡より先に2回目の発言もできる', async () => {
     const speechContexts: DecisionContext[] = [];
+    let firstSeat: DecisionContext['actor']['seat'] | null = null;
+    let secondSeat: DecisionContext['actor']['seat'] | null = null;
     const provider: DecisionProvider = {
       async speech(context): Promise<SpeechDecision> {
         speechContexts.push(structuredClone(context));
-        const asksEarlierSpeaker = context.day === 1 && context.discussion?.stage === 'opening' && context.discussion.turn === 9;
-        return asksEarlierSpeaker
-          ? { speech: '澪さん、先ほどの考えをもう一度聞かせてください。', addressedTo: 'seat-1', requestsReply: true }
-          : { speech: '今の段階で見えていることだけを話します。', addressedTo: null, requestsReply: false };
+        if (context.day === 1 && context.discussion?.turn === 1) {
+          firstSeat = context.actor.seat;
+          secondSeat = context.legalTargets[0];
+          return { speech: 'あなたの考えを聞いてみたいです。', addressedTo: secondSeat, requestsReply: true };
+        }
+        if (context.day === 1 && context.discussion?.turn === 2) {
+          return { speech: '質問に答えます。あなたはどう思いますか？', addressedTo: firstSeat, requestsReply: true };
+        }
+        return { speech: '今の段階で見えていることだけを話します。', addressedTo: null, requestsReply: false };
       },
-      async speechIntent(context): Promise<SpeechIntentDecision> {
-        return context.day === 1 && context.actor.seat === 'seat-1' && context.discussion?.promptedBySeat === 'seat-9'
-          ? { urgency: 3, motivation: 'reply', targetSeat: 'seat-9' }
-          : { urgency: 0, motivation: 'none', targetSeat: null };
+      async speechIntent(): Promise<SpeechIntentDecision> {
+        return { urgency: 0, motivation: 'none', targetSeat: null };
       },
       async target(context): Promise<TargetDecision> {
         return { targetSeat: context.legalTargets[0], statedReason: '合法対象の先頭を選びます。' };
       },
     };
 
-    await runGame('delayed-reply', 'delayed-reply', provider, { emit: async () => {}, checkpoint: async () => {} });
+    await runGame('immediate-reply', 'immediate-reply', provider, { emit: async () => {}, checkpoint: async () => {} });
     const dayOne = speechContexts.filter((context) => context.day === 1 && context.kind === 'speech');
-    expect(dayOne.slice(0, 9).map((context) => context.discussion?.stage)).toEqual(Array(9).fill('opening'));
-    expect(dayOne[9].actor.seat).toBe('seat-1');
-    expect(dayOne[9].discussion).toMatchObject({ stage: 'free', promptedBySeat: 'seat-9', motivation: 'reply' });
-  });
-
-  it('返答不能な開始済み話者への重複質問を後続の合法対象から外す', async () => {
-    const speechContexts: DecisionContext[] = [];
-    const provider: DecisionProvider = {
-      async speech(context): Promise<SpeechDecision> {
-        speechContexts.push(structuredClone(context));
-        const firstQuestion = context.day === 1 && context.discussion?.stage === 'opening' && context.actor.seat === 'seat-2';
-        return firstQuestion
-          ? { speech: '澪さん、後で理由を聞かせて。', addressedTo: 'seat-1', requestsReply: true }
-          : { speech: '別の発言と自分の考えを見ます。', addressedTo: null, requestsReply: false };
-      },
-      async speechIntent(context): Promise<SpeechIntentDecision> {
-        return context.day === 1 && context.actor.seat === 'seat-1' && context.discussion?.promptedBySeat === 'seat-2'
-          ? { urgency: 3, motivation: 'reply', targetSeat: 'seat-2' }
-          : { urgency: 0, motivation: 'none', targetSeat: null };
-      },
-      async target(context): Promise<TargetDecision> {
-        return { targetSeat: context.legalTargets[0], statedReason: '合法対象の先頭を選びます。' };
-      },
-    };
-
-    await runGame('opening-reply-dedup', 'opening-reply-dedup', provider, { emit: async () => {}, checkpoint: async () => {} });
-    const thirdOpening = speechContexts.find((context) =>
-      context.day === 1 && context.discussion?.stage === 'opening' && context.actor.seat === 'seat-3');
-    expect(thirdOpening?.discussion?.openingSpokenSeats).toEqual(['seat-1', 'seat-2']);
-    expect(thirdOpening?.discussion?.waitingForFreeReplySeats).toEqual(['seat-1']);
-    expect(thirdOpening?.legalTargets).not.toContain('seat-1');
-    const reply = speechContexts.find((context) =>
-      context.day === 1 && context.discussion?.stage === 'free' && context.actor.seat === 'seat-1');
-    expect(reply?.discussion).toMatchObject({ promptedBySeat: 'seat-2', motivation: 'reply' });
+    expect(dayOne.slice(0, 3).map((context) => context.actor.seat)).toEqual([firstSeat, secondSeat, firstSeat]);
+    expect(dayOne.slice(0, 3).map((context) => context.discussion?.stage)).toEqual(['opening', 'opening', 'free']);
+    expect(dayOne[1].discussion).toMatchObject({ promptedBySeat: firstSeat, motivation: 'reply' });
+    expect(dayOne[2].discussion).toMatchObject({ promptedBySeat: secondSeat, motivation: 'reply' });
   });
 
   it('人狼と狩人の次の判断に最終襲撃と護衛の成否を引き継ぐ', async () => {

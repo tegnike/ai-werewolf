@@ -62,7 +62,14 @@ export interface DiscussionContext {
   promptedBySeat?: SeatId;
   motivation?: SpeechMotivation;
   intendedTarget?: SeatId | null;
+  spokenSeats?: SeatId[];
+  remainingUnspokenSeats?: SeatId[];
+  canRequestReply?: boolean;
+  /** markerのない旧試合で固定一巡プロンプトを再現する。 */
+  legacyRules?: boolean;
+  /** discussion v2より前の保存済み試合を復旧するための互換情報。 */
   openingSpokenSeats?: SeatId[];
+  /** discussion v2より前の保存済み試合を復旧するための互換情報。 */
   waitingForFreeReplySeats?: SeatId[];
 }
 

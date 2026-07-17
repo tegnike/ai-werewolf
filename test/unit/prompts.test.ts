@@ -24,7 +24,7 @@ describe('実AI人格プロンプト', () => {
       round: 1,
       discussion: {
         stage: 'opening', turn: 2, promptedBySeat: 'seat-1',
-        openingSpokenSeats: ['seat-1'], waitingForFreeReplySeats: ['seat-1'],
+        spokenSeats: ['seat-1'], remainingUnspokenSeats: players.slice(1).map((player) => player.seat), canRequestReply: true,
       },
     };
 
@@ -37,12 +37,10 @@ describe('実AI人格プロンプト', () => {
     expect(systemPrompt).toContain('神崎 レナは「レナ」');
     expect(systemPrompt).toContain('Agent番号や別の呼び方を使わず');
     expect(systemPrompt).toContain('議事録調の語を繰り返さない');
-    expect(systemPrompt).toContain('開始発言の一巡');
-    expect(systemPrompt).toContain('自由な割り込みや即時の応答は起きません');
-    expect(systemPrompt).toContain('質問後にまだ答えていないことを、無視、逃避、回答拒否');
-    expect(systemPrompt).toContain('名取 澪はすでに返答を求められています');
-    expect(systemPrompt).toContain('同じ質問や同じ疑いを重ねず');
-    expect(systemPrompt).toContain('名取 澪が先ほどあなたへ話を向けています');
+    expect(systemPrompt).toContain('固定の開始発言順はありません');
+    expect(systemPrompt).toContain('その相手が次の話者になります');
+    expect(systemPrompt).toContain('addressedToに相手を指定し、requestsReply=true');
+    expect(systemPrompt).toContain('名取 澪から返答を求められて次の話者になりました');
     expect(decisionPrompt).toContain('名取 澪');
     expect(decisionPrompt).toContain('八木 こはる');
   });
@@ -53,7 +51,7 @@ describe('実AI人格プロンプト', () => {
       matchId: 'test', callKey: 'd1-speech-opening-seat-1', seed: 'first-opening-speaker', day: 1,
       phase: 'discussion', kind: 'speech', actor: players[0], players,
       legalTargets: players.slice(1).map((player) => player.seat), publicHistory: [], privateFacts: [], round: 1,
-      discussion: { stage: 'opening', turn: 1, openingSpokenSeats: [] },
+      discussion: { stage: 'opening', turn: 1, spokenSeats: [], remainingUnspokenSeats: players.map((player) => player.seat), canRequestReply: true },
     };
 
     const prompt = buildPrompts(context).systemPrompt;
@@ -130,7 +128,7 @@ describe('実AI人格プロンプト', () => {
       players: players.map((player) => player.seat === seer.seat ? seer : player),
       legalTargets: players.slice(1).map((player) => player.seat), publicHistory: [],
       privateFacts: ['自分の役職: seer', '黒田 剛: 人狼ではない'], round: 1,
-      discussion: { stage: 'opening', turn: 1, openingSpokenSeats: [] },
+      discussion: { stage: 'opening', turn: 1, spokenSeats: [], remainingUnspokenSeats: players.map((player) => player.seat), canRequestReply: true },
       claimBoard: [],
       claimDirective: { mode: 'forbidden', claimedRole: null, results: [], counterTargetSeat: null },
     });
@@ -163,6 +161,8 @@ describe('実AI人格プロンプト', () => {
     const schema = speechDecisionSchema([], false, false);
     expect(schema.safeParse({ speech: '一人で決める。', addressedTo: null, requestsReply: false }).success).toBe(true);
     expect(schema.safeParse({ speech: 'どう思う？', addressedTo: null, requestsReply: true }).success).toBe(false);
+    expect(speechDecisionSchema(['seat-2'], false, true)
+      .safeParse({ speech: '誰か答えてください。', addressedTo: null, requestsReply: true }).success).toBe(false);
   });
 
   it('実際の席と役職に対応する行動方針だけを機械的に差し込む', () => {

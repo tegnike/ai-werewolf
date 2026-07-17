@@ -123,9 +123,10 @@ export class MatchRunner {
       this.repo.updateStatus(this.matchId, 'running');
       const includeDayOneDawn = this.existing.some((event) => event.day === 1 && event.type === 'dawn');
       const created = this.existing.find((event) => event.type === 'match_created');
-      const rules = created?.payload.rules as { claims?: unknown } | undefined;
+      const rules = created?.payload.rules as { claims?: unknown; discussion?: unknown } | undefined;
       const claimsVersion = this.existing.length === 0 || rules?.claims === 'v1' ? 'v1' : undefined;
-      const result = await runGame(this.matchId, match.seed, ai, hooks, { includeDayOneDawn, claimsVersion });
+      const discussionVersion = this.existing.length === 0 || rules?.discussion === 'v2' ? 'v2' : 'legacy';
+      const result = await runGame(this.matchId, match.seed, ai, hooks, { includeDayOneDawn, claimsVersion, discussionVersion });
       this.repo.updateStatus(this.matchId, 'finished', result.winner);
     } catch (error) {
       if (error instanceof AbortMatchError) {
