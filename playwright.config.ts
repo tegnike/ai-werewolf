@@ -5,7 +5,7 @@ export default defineConfig({
   timeout: 45_000,
   fullyParallel: false,
   workers: 1,
-  webServer: { command: 'PORT=3101 DATABASE_PATH=./data/e2e.db node node_modules/next/dist/bin/next dev', port: 3101, reuseExistingServer: false, timeout: 120_000 },
+  webServer: { command: 'PORT=3101 DATABASE_PATH=./data/e2e.db AI_PROVIDER=mock ALLOW_REAL_AI=0 node node_modules/next/dist/bin/next dev', port: 3101, reuseExistingServer: false, timeout: 120_000 },
   use: { baseURL: 'http://127.0.0.1:3101', trace: 'retain-on-failure' },
   projects: [
     { name: 'desktop-1440', use: { ...devices['Desktop Chrome'], viewport: { width: 1440, height: 900 } } },
