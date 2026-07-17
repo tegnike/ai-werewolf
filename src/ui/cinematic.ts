@@ -5,6 +5,10 @@ import type { UiEvent } from './types';
 export type CinematicTone = 'day' | 'vote' | 'attack' | 'execution';
 export type CinematicSound = 'scene' | 'vote' | 'attack' | 'execution';
 
+export const CINEMATIC_SHORT_DURATION_MS = 2400;
+export const CINEMATIC_LONG_DURATION_MS = 3600;
+export const CINEMATIC_INTER_CUE_GAP_MS = 600;
+
 export interface CinematicCue {
   seq: number;
   eyebrow: string;
@@ -30,7 +34,7 @@ export function cinematicCueForEvent(event: UiEvent): CinematicCue | null {
       subtitle: '配役確認と最初の夜の行動が始まります',
       tone: 'vote',
       sound: 'scene',
-      durationMs: 1800,
+      durationMs: CINEMATIC_LONG_DURATION_MS,
     };
   }
 
@@ -43,7 +47,7 @@ export function cinematicCueForEvent(event: UiEvent): CinematicCue | null {
       subtitle: victim ? `${playerName(victim)}が襲撃の犠牲になりました` : '昨夜の犠牲者はいません',
       tone: victim ? 'attack' : 'day',
       sound: victim ? 'attack' : 'scene',
-      durationMs: 1800,
+      durationMs: CINEMATIC_LONG_DURATION_MS,
     };
   }
 
@@ -55,7 +59,7 @@ export function cinematicCueForEvent(event: UiEvent): CinematicCue | null {
       subtitle: '生存者が処刑候補を選びます',
       tone: 'vote',
       sound: 'scene',
-      durationMs: 1200,
+      durationMs: CINEMATIC_SHORT_DURATION_MS,
     };
   }
 
@@ -68,7 +72,7 @@ export function cinematicCueForEvent(event: UiEvent): CinematicCue | null {
       subtitle: runoff ? '決選投票の結果を公開します' : '全員の投票先を公開します',
       tone: 'vote',
       sound: 'vote',
-      durationMs: 1200,
+      durationMs: CINEMATIC_SHORT_DURATION_MS,
     };
   }
 
@@ -81,7 +85,7 @@ export function cinematicCueForEvent(event: UiEvent): CinematicCue | null {
       subtitle: executed ? '投票により処刑されました' : '決選投票でも同数となりました',
       tone: executed ? 'execution' : 'vote',
       sound: executed ? 'execution' : 'scene',
-      durationMs: 1800,
+      durationMs: CINEMATIC_LONG_DURATION_MS,
     };
   }
 
@@ -108,7 +112,7 @@ export function cinematicCuesBetween(events: UiEvent[], afterSeq: number, throug
           subtitle: '最初の議論が始まります',
           tone: 'day',
           sound: 'scene',
-          durationMs: 1800,
+          durationMs: CINEMATIC_LONG_DURATION_MS,
         } satisfies CinematicCue];
       }
       const cue = cinematicCueForEvent(event);

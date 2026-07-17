@@ -75,7 +75,7 @@ test('ホームから試合を開始して公開／GM視点とリプレイを表
     return data.events.find((event) => event.type === 'discussion_closed')?.seq ?? 0;
   });
   await page.getByLabel('リプレイ位置').fill(String(voteStartSeq));
-  await expect(page.locator('.cinematic-overlay')).toContainText('投票開始');
+  await expect(page.locator('.cinematic-overlay')).toContainText('投票開始', { timeout: 15_000 });
 });
 
 test('Spaceキーでゲームと発言音声を一時停止・再開し、中断できる', async ({ page }) => {

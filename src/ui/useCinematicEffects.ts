@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { cinematicCuesBetween, type CinematicCue, type CinematicSound } from './cinematic';
+import { CINEMATIC_INTER_CUE_GAP_MS, cinematicCuesBetween, type CinematicCue, type CinematicSound } from './cinematic';
 import type { UiEvent } from './types';
 
 const SOUND_SOURCE: Record<CinematicSound, string> = {
@@ -18,11 +18,14 @@ function storedSfxEnabled(): boolean {
 
 export function useCinematicEffects(events: UiEvent[], resetKey: string, announceInitial = false) {
   const [cue, setCue] = useState<CinematicCue | null>(null);
+  const [cinematicBusy, setCinematicBusy] = useState(false);
   const [sfxEnabled, setSfxEnabledState] = useState(true);
   const sfxEnabledRef = useRef(true);
   const seenSeq = useRef<number | null>(announceInitial ? 0 : null);
   const observedResetKey = useRef(resetKey);
   const activeCue = useRef<CinematicCue | null>(null);
+  const betweenCues = useRef(false);
+  const nextCueTimer = useRef<number | null>(null);
   const queue = useRef<CinematicCue[]>([]);
   const audio = useRef<Partial<Record<CinematicSound, HTMLAudioElement>>>({});
 
@@ -54,10 +57,14 @@ export function useCinematicEffects(events: UiEvent[], resetKey: string, announc
   }, []);
 
   const startNext = useCallback(() => {
-    if (activeCue.current) return;
+    if (activeCue.current || betweenCues.current) return;
     const next = queue.current.shift();
-    if (!next) return;
+    if (!next) {
+      setCinematicBusy(false);
+      return;
+    }
     activeCue.current = next;
+    setCinematicBusy(true);
     setCue(next);
     playSound(next.sound);
   }, [playSound]);
@@ -67,7 +74,11 @@ export function useCinematicEffects(events: UiEvent[], resetKey: string, announc
     observedResetKey.current = resetKey;
     seenSeq.current = null;
     activeCue.current = null;
+    betweenCues.current = false;
+    if (nextCueTimer.current !== null) window.clearTimeout(nextCueTimer.current);
+    nextCueTimer.current = null;
     queue.current = [];
+    setCinematicBusy(false);
     setCue(null);
   }, [resetKey]);
 
@@ -81,7 +92,11 @@ export function useCinematicEffects(events: UiEvent[], resetKey: string, announc
     if (maxSeq < seenSeq.current) {
       seenSeq.current = maxSeq;
       activeCue.current = null;
+      betweenCues.current = false;
+      if (nextCueTimer.current !== null) window.clearTimeout(nextCueTimer.current);
+      nextCueTimer.current = null;
       queue.current = [];
+      setCinematicBusy(false);
       setCue(null);
       return;
     }
@@ -89,6 +104,7 @@ export function useCinematicEffects(events: UiEvent[], resetKey: string, announc
     seenSeq.current = maxSeq;
     if (freshCues.length === 0) return;
     queue.current.push(...freshCues);
+    setCinematicBusy(true);
     startNext();
   }, [events, startNext]);
 
@@ -97,10 +113,19 @@ export function useCinematicEffects(events: UiEvent[], resetKey: string, announc
     const timer = window.setTimeout(() => {
       activeCue.current = null;
       setCue(null);
-      startNext();
+      betweenCues.current = true;
+      nextCueTimer.current = window.setTimeout(() => {
+        nextCueTimer.current = null;
+        betweenCues.current = false;
+        startNext();
+      }, CINEMATIC_INTER_CUE_GAP_MS);
     }, cue.durationMs);
     return () => window.clearTimeout(timer);
   }, [cue, startNext]);
+
+  useEffect(() => () => {
+    if (nextCueTimer.current !== null) window.clearTimeout(nextCueTimer.current);
+  }, []);
 
   const setSfxEnabled = useCallback((value: boolean) => {
     window.localStorage.setItem('werewolf-sfx', value ? '1' : '0');
@@ -109,5 +134,5 @@ export function useCinematicEffects(events: UiEvent[], resetKey: string, announc
     if (!value) for (const element of Object.values(audio.current)) element?.pause();
   }, []);
 
-  return { cinematicCue: cue, sfxEnabled, setSfxEnabled };
+  return { cinematicCue: cue, cinematicBusy, sfxEnabled, setSfxEnabled };
 }

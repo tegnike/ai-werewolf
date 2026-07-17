@@ -88,14 +88,14 @@ export function MatchViewer({ matchId, mode }: { matchId: string; mode: 'live' |
   const terminal = match ? ['finished', 'aborted', 'aborted_budget'].includes(match.status) : false;
   const voiceEvents = useMemo(() => view === 'gm' ? events : events.filter((event) => event.visibility !== 'private'), [events, view]);
   const visibleEvents = useMemo(() => events.filter((event) => mode === 'live' ? event.seq <= presentedSeq : event.seq <= cursor), [cursor, events, mode, presentedSeq]);
-  const { cinematicCue, sfxEnabled, setSfxEnabled } = useCinematicEffects(visibleEvents, `${matchId}:${mode}:${view}`, announceInitialCues);
+  const { cinematicCue, cinematicBusy, sfxEnabled, setSfxEnabled } = useCinematicEffects(visibleEvents, `${matchId}:${mode}:${view}`, announceInitialCues);
   const presentedStatus = mode === 'replay' && match?.status === 'finished' && !visibleEvents.some((event) => event.type === 'match_finished') ? 'running' : match?.status;
   const presentedState = useMemo(() => derivePresentedState(visibleEvents, presentedStatus), [presentedStatus, visibleEvents]);
   const audioMood = ['night_zero', 'wolf_chat', 'night_actions', 'medium'].includes(presentedState.phase) ? 'night' : 'day';
   const { bgmEnabled, setBgmEnabled, bgmVolume, setBgmVolume } = useAmbientBgm(audioMood);
   const revealSpeech = useCallback((seq: number) => setPresentedSeq((current) => Math.max(current, seq)), []);
   const paused = match?.status === 'paused';
-  const presentationPaused = paused || Boolean(cinematicCue);
+  const presentationPaused = paused || cinematicBusy;
   const { voiceEnabled, setVoiceEnabled, voiceAvailable, speakingSeat, speakingSeq, voiceVolume, setVoiceVolume, voiceBusy } = useMatchVoice(voiceEvents, revealSpeech, presentationPaused);
 
   const load = useCallback(async () => {

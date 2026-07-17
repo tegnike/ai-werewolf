@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { cinematicCueForEvent, cinematicCuesBetween } from '@/ui/cinematic';
+import {
+  CINEMATIC_INTER_CUE_GAP_MS,
+  CINEMATIC_LONG_DURATION_MS,
+  CINEMATIC_SHORT_DURATION_MS,
+  cinematicCueForEvent,
+  cinematicCuesBetween,
+} from '@/ui/cinematic';
 import type { UiEvent } from '@/ui/types';
 
 const event = (seq: number, type: string, payload: Record<string, unknown> = {}, day = 2): UiEvent => ({
@@ -42,6 +48,17 @@ describe('見せ場の画面演出', () => {
     ].map(cinematicCueForEvent);
     expect(cues.map((cue) => cue?.title)).toEqual(['投票開始', '開票', '真壁 陽太']);
     expect(cues.map((cue) => cue?.sound)).toEqual(['scene', 'vote', 'execution']);
+    expect(cues.map((cue) => cue?.durationMs)).toEqual([
+      CINEMATIC_SHORT_DURATION_MS,
+      CINEMATIC_SHORT_DURATION_MS,
+      CINEMATIC_LONG_DURATION_MS,
+    ]);
+  });
+
+  it('カットインを長く保ち、連続時にも切替間隔を設ける', () => {
+    expect(CINEMATIC_SHORT_DURATION_MS).toBe(2400);
+    expect(CINEMATIC_LONG_DURATION_MS).toBe(3600);
+    expect(CINEMATIC_INTER_CUE_GAP_MS).toBe(600);
   });
 
   it('決選投票と処刑なしを明示する', () => {
