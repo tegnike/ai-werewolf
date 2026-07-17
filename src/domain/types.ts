@@ -69,6 +69,19 @@ export interface SpeechStructure {
   boardAnalysis: boolean;
 }
 
+export interface CandidateEvidenceEntry {
+  targetSeat: SeatId;
+  suspicionSpeakers: number;
+  voteIntentSpeakers: number;
+  suspicionBases: Partial<Record<SuspicionBasis, number>>;
+  claimedResults: Array<{
+    sourceSeat: SeatId;
+    claimedRole: 'seer' | 'medium';
+    verdict: '人狼' | '人狼ではない';
+    sameRoleClaimants: number;
+  }>;
+}
+
 export interface DiscussionContext {
   stage: 'opening' | 'free';
   turn: number;
@@ -86,6 +99,10 @@ export interface DiscussionContext {
   agenda?: string[];
   /** すでに十分に尋ねられ、追加の返答要求を受け付けない質問分類。 */
   closedQuestionTopics?: QuestionTopic[];
+  /** 3人以上の投票予定が集まった公開上の先頭候補。 */
+  consensusTarget?: SeatId;
+  /** この話者が同日すでに宣言した投票予定。 */
+  priorVoteIntentTarget?: SeatId;
   /** markerのない旧試合で固定一巡プロンプトを再現する。 */
   legacyRules?: boolean;
   /** discussion v2より前の保存済み試合を復旧するための互換情報。 */
@@ -116,6 +133,8 @@ export interface DecisionContext {
   wolfChat?: WolfChatContext;
   claimDirective?: ClaimDirective;
   claimBoard?: string[];
+  /** 公開発言と公開役職主張だけから作る候補別の証拠台帳。 */
+  candidateEvidence?: CandidateEvidenceEntry[];
 }
 
 export interface SpeechDecision {
@@ -125,6 +144,8 @@ export interface SpeechDecision {
   claim?: SpeechClaim | null;
   /** discussion v3で必須。v2以前の保存済みAI応答との互換のため型上は任意。 */
   structure?: SpeechStructure;
+  /** 同一話者による変更のない投票予定の再宣言を主要貢献から格下げした印。 */
+  contributionDemoted?: boolean;
 }
 export interface SpeechIntentDecision {
   urgency: 0 | 1 | 2 | 3;

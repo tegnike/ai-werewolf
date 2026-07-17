@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { DecisionContext } from '@/domain/types';
+import type { DecisionContext, SpeechDecision } from '@/domain/types';
 import { setupPlayers } from '@/engine/setup';
 import { validateSpeechDisclosure } from '@/server/ai/disclosure';
 
@@ -205,7 +205,7 @@ describe('能力結果の公開', () => {
       privateFacts: ['自分の役職: villager'],
       discussion: { version: 'v3', stage: 'opening', turn: 5, remainingUnspokenSeats: [] },
     };
-    const speechDecision = {
+    const speechDecision: SpeechDecision = {
       speech: '今日は発言を見比べます。', addressedTo: null, requestsReply: false,
       structure: {
         primaryAct: 'suspicion' as const, questionTopic: null,
@@ -214,7 +214,55 @@ describe('能力結果の公開', () => {
       },
     };
     expect(() => validateSpeechDisclosure(context, speechDecision)).not.toThrow();
-    expect(speechDecision.structure.suspicion).toBeNull();
-    expect(speechDecision.structure.primaryAct).toBe('other');
+    expect(speechDecision.structure!.suspicion).toBeNull();
+    expect(speechDecision.structure!.primaryAct).toBe('other');
+  });
+
+  it('同一話者の変更のない投票予定再宣言を再試行せずagreementへ格下げする', () => {
+    const base = seerContext();
+    const context: DecisionContext = {
+      ...base,
+      actor: { ...base.actor, role: 'villager' },
+      privateFacts: ['自分の役職: villager'],
+      discussion: {
+        version: 'v3', stage: 'free', turn: 12,
+        priorVoteIntentTarget: 'seat-1', remainingUnspokenSeats: [],
+      },
+    };
+    const speechDecision: SpeechDecision = {
+      speech: '予定は変えず、澪さんに投票します。', addressedTo: null, requestsReply: false,
+      structure: {
+        primaryAct: 'vote_intent' as const, questionTopic: null,
+        suspicion: null, voteIntent: 'seat-1' as const, boardAnalysis: false,
+      },
+    };
+
+    expect(() => validateSpeechDisclosure(context, speechDecision)).not.toThrow();
+    expect(speechDecision.structure!.primaryAct).toBe('agreement');
+    expect(speechDecision.contributionDemoted).toBe(true);
+  });
+
+  it('3人以上が予定を公表した候補への追加投票宣言を拒否し最終投票は拘束しない', () => {
+    const base = seerContext();
+    const context: DecisionContext = {
+      ...base,
+      actor: { ...base.actor, role: 'villager' },
+      privateFacts: ['自分の役職: villager'],
+      discussion: { version: 'v3', stage: 'free', turn: 12, consensusTarget: 'seat-1', remainingUnspokenSeats: [] },
+    };
+    expect(() => validateSpeechDisclosure(context, {
+      speech: '今日は澪さんに投票します。', addressedTo: null, requestsReply: false,
+      structure: {
+        primaryAct: 'vote_intent', questionTopic: null,
+        suspicion: { targetSeat: 'seat-1', basis: 'speech_content' }, voteIntent: 'seat-1', boardAnalysis: false,
+      },
+    })).toThrow('consensus_vote_declaration_repeated');
+    expect(() => validateSpeechDisclosure(context, {
+      speech: '澪さんの説明には反証が足りません。剛さんはどう見ていますか。', addressedTo: 'seat-6', requestsReply: true,
+      structure: {
+        primaryAct: 'question', questionTopic: 'gray_read',
+        suspicion: { targetSeat: 'seat-1', basis: 'speech_content' }, voteIntent: null, boardAnalysis: false,
+      },
+    })).not.toThrow();
   });
 });

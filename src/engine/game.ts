@@ -17,7 +17,8 @@ import {
   planWolfMediumFake, planWolfSeerFake, preserveFakeResultConsistency,
 } from './claim-policy';
 import {
-  closedQuestionTopics, discussionAgenda, discussionBoardDigest, emptyDiscussionBoard, foldDiscussionBoard, suspicionCountFor,
+  candidateEvidenceLedger, closedQuestionTopics, consensusVoteTarget, discussionAgenda, discussionBoardDigest,
+  emptyDiscussionBoard, foldDiscussionBoard, priorVoteIntentFor, suspicionCountFor, voteIntentCountFor,
 } from './discussion-board';
 
 export interface SimulationResult { winner: Winner; day: number; state: GameState }
@@ -181,14 +182,17 @@ export async function runGame(
       matchId, seed, day, phase, kind, callKey, actor,
       players: state.players.map((player) => ({ ...player })), legalTargets,
       publicHistory: [...publicHistory], privateFacts: privateFactsFor(actor, state, histories), round,
+      ...(discussionVersion === 'v3' ? { candidateEvidence: candidateEvidenceLedger(discussionBoard, claimLedger) } : {}),
       discussion: discussion ? {
         ...discussion,
         ...(discussionVersion === 'legacy' ? { legacyRules: true } : {}),
         ...(discussionVersion === 'v3' ? {
           version: 'v3' as const,
-          boardDigest: discussionBoardDigest(discussionBoard, state.players),
+          boardDigest: discussionBoardDigest(discussionBoard, state.players, claimLedger),
           agenda: discussionAgenda(discussionBoard, state.players, actor.seat, discussion.turn, discussion.promptedBySeat),
           closedQuestionTopics: closedQuestionTopics(discussionBoard),
+          ...(consensusVoteTarget(discussionBoard) ? { consensusTarget: consensusVoteTarget(discussionBoard) } : {}),
+          ...(priorVoteIntentFor(discussionBoard, actor.seat) ? { priorVoteIntentTarget: priorVoteIntentFor(discussionBoard, actor.seat) } : {}),
         } : {}),
       } : undefined,
     };
@@ -495,7 +499,7 @@ export async function runGame(
             const defenseCandidates = speakers.filter((player) =>
               !defenseScheduledSeats.has(player.seat) &&
               (speechCounts.get(player.seat) ?? 0) === 1 &&
-              suspicionCountFor(discussionBoard, player.seat) >= 2);
+              (suspicionCountFor(discussionBoard, player.seat) >= 2 || voteIntentCountFor(discussionBoard, player.seat) >= 3));
             if (defenseCandidates.length > 0) {
               const actor = stableShuffle(defenseCandidates, seed, `discussion/v3/defense-d${day}-t${speechCount + 1}`)[0];
               defenseScheduledSeats.add(actor.seat);
@@ -507,7 +511,9 @@ export async function runGame(
           const unspoken = speakers.filter((player) => (speechCounts.get(player.seat) ?? 0) === 0);
           if (speechCount < minimumSpeeches || unspoken.length > 0) {
             const eligible = speakers.filter((player) => (speechCounts.get(player.seat) ?? 0) < MAX_SPEECHES_PER_PLAYER);
-            const pool = unspoken.length > 0 ? unspoken : eligible;
+            const consensus = consensusVoteTarget(discussionBoard);
+            const consensusUnspoken = consensus ? unspoken.filter((player) => player.seat === consensus) : [];
+            const pool = consensusUnspoken.length > 0 ? consensusUnspoken : unspoken.length > 0 ? unspoken : eligible;
             nextSpeaker = {
               actor: stableShuffle(pool, seed, `d${day}-scheduled-speaker-t${speechCount + 1}`)[0],
               motivation: 'new_information',
@@ -523,8 +529,11 @@ export async function runGame(
           const shuffledIndex = new Map(shuffled.map((player, index) => [player.seat, index]));
           const candidates = [...shuffled]
             .sort((a, b) => {
-              const aPriority = polledSeats.has(a.seat) ? 1 : 0;
-              const bPriority = polledSeats.has(b.seat) ? 1 : 0;
+              const consensus = consensusVoteTarget(discussionBoard);
+              const aRepeatsConsensus = consensus && priorVoteIntentFor(discussionBoard, a.seat) === consensus ? 1 : 0;
+              const bRepeatsConsensus = consensus && priorVoteIntentFor(discussionBoard, b.seat) === consensus ? 1 : 0;
+              const aPriority = aRepeatsConsensus * 2 + (polledSeats.has(a.seat) ? 1 : 0);
+              const bPriority = bRepeatsConsensus * 2 + (polledSeats.has(b.seat) ? 1 : 0);
               return aPriority - bPriority || (shuffledIndex.get(a.seat) ?? 0) - (shuffledIndex.get(b.seat) ?? 0);
             })
             .slice(0, INTENT_CANDIDATES_PER_POLL);
@@ -596,6 +605,7 @@ export async function runGame(
           speech, addressedTo: decision.addressedTo, requestsReply: decision.requestsReply,
           ...(claimsEnabled ? { claim: decision.claim ?? null } : {}),
           ...(discussionVersion === 'v3' ? { structure: decision.structure } : {}),
+          ...(decision.contributionDemoted ? { contributionDemoted: true } : {}),
         });
         if (claimsEnabled) {
           claimLedger = foldClaim(claimLedger, {

@@ -87,6 +87,50 @@ describe('実AI人格プロンプト', () => {
     expect(prompts.decisionPrompt).toContain('structureは本文に現れる');
   });
 
+  it('集中後は投票予定の人数を証拠にせず公開材料と新情報を比較させる', () => {
+    const players = setupPlayers('consensus-evidence-prompt');
+    const actor = players[2];
+    const context: DecisionContext = {
+      matchId: 'test', callKey: 'd1-speech-t12-seat-3', seed: 'consensus-evidence-prompt', day: 1,
+      phase: 'discussion', kind: 'speech', actor, players,
+      legalTargets: players.filter((player) => player.seat !== actor.seat).map((player) => player.seat),
+      publicHistory: ['名取 澪: 私はひよりさんへ投票します。'], privateFacts: [], round: 2,
+      discussion: {
+        version: 'v3', stage: 'free', turn: 12, consensusTarget: 'seat-9', priorVoteIntentTarget: 'seat-9',
+        boardDigest: ['候補別の公開材料: 久遠 ひより（投票予定3人、疑い2人、根拠result=1、役職結果あり）'],
+      },
+      candidateEvidence: [{
+        targetSeat: 'seat-9', suspicionSpeakers: 2, voteIntentSpeakers: 3,
+        suspicionBases: { result: 1, vote_plan: 1 },
+        claimedResults: [{ sourceSeat: 'seat-4', claimedRole: 'seer', verdict: '人狼', sameRoleClaimants: 2 }],
+      }],
+    };
+
+    const prompts = buildPrompts(context);
+    expect(prompts.systemPrompt).toContain('投票予定の人数は他者の意見');
+    expect(prompts.systemPrompt).toContain('同じ相手への投票予定を本文で追加宣言せず');
+    expect(prompts.systemPrompt).toContain('最終の非公開投票先は拘束されません');
+    expect(prompts.systemPrompt).toContain('変更しない予定を本文で繰り返さず');
+    expect(prompts.decisionPrompt).toContain('candidateEvidence');
+  });
+
+  it('最終投票でも多数派そのものを根拠にせず証拠台帳を渡す', () => {
+    const players = setupPlayers('vote-evidence-prompt');
+    const actor = players[0];
+    const prompts = buildPrompts({
+      matchId: 'test', callKey: 'd1-vote-seat-1', seed: 'vote-evidence-prompt', day: 1,
+      phase: 'vote', kind: 'vote', actor, players,
+      legalTargets: players.slice(1).map((player) => player.seat), publicHistory: [], privateFacts: [],
+      candidateEvidence: [{
+        targetSeat: 'seat-9', suspicionSpeakers: 4, voteIntentSpeakers: 5,
+        suspicionBases: { result: 1, vote_plan: 3 }, claimedResults: [],
+      }],
+    });
+
+    expect(prompts.systemPrompt).toContain('多数派へ合わせること自体を理由にせず');
+    expect(prompts.decisionPrompt).toContain('candidateEvidence');
+  });
+
   it('発言希望確認では台詞を作らず、黙る選択と4段階の緊急度を示す', () => {
     const players = setupPlayers('intent-prompt');
     const context: DecisionContext = {
@@ -215,6 +259,16 @@ describe('実AI人格プロンプト', () => {
     expect(closedTopicSchema.safeParse({
       speech: '占い理由には答えました。', addressedTo: null, requestsReply: false,
       structure: { primaryAct: 'answer', questionTopic: 'inspection_reason', suspicion: null, voteIntent: null, boardAnalysis: false },
+    }).success).toBe(true);
+
+    const consensusSchema = speechDecisionSchema(['seat-2'], false, true, ['seat-1', 'seat-2'], [], ['seat-1']);
+    expect(consensusSchema.safeParse({
+      speech: '澪さんに投票します。', addressedTo: null, requestsReply: false,
+      structure: { primaryAct: 'vote_intent', questionTopic: null, suspicion: null, voteIntent: 'seat-1', boardAnalysis: false },
+    }).success).toBe(false);
+    expect(consensusSchema.safeParse({
+      speech: 'こはるさんに投票します。', addressedTo: null, requestsReply: false,
+      structure: { primaryAct: 'vote_intent', questionTopic: null, suspicion: null, voteIntent: 'seat-2', boardAnalysis: false },
     }).success).toBe(true);
   });
 

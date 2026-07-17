@@ -71,6 +71,7 @@ export class RealAI implements DecisionProvider {
           ? context.players.filter((player) => player.alive && player.seat !== context.actor.seat).map((player) => player.seat)
           : undefined,
         context.discussion?.closedQuestionTopics,
+        context.discussion?.consensusTarget ? [context.discussion.consensusTarget] : [],
       ),
       'speech_decision',
       (decision) => validateSpeechDisclosure(context, decision),

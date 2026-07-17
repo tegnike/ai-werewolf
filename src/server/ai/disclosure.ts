@@ -65,6 +65,24 @@ function validateDiscussionStructure(context: DecisionContext, decision: SpeechD
       throw new ClaimContractError('unspoken_intuition_unmarked', '未発言者を公開情報なしで疑うなら、本文でも勘・直感・仮置きであることを明示してください。未発言者の態度を観察したように話してはいけません。');
     }
   }
+  if (structure.primaryAct === 'vote_intent' && structure.voteIntent &&
+    context.discussion?.priorVoteIntentTarget === structure.voteIntent) {
+    structure.primaryAct = 'agreement';
+    decision.contributionDemoted = true;
+  }
+  const consensusTarget = context.discussion?.consensusTarget;
+  if (consensusTarget && mentionsSeat(context, decision.speech, consensusTarget)) {
+    const sentences = decision.speech.split(/[。！？\n]/).filter((sentence) =>
+      sentence.includes(agentNameForSeat(consensusTarget)) || sentence.includes(addressTermFor(context.actor.seat, consensusTarget)));
+    const repeatsConsensusDeclaration = sentences.some((sentence) =>
+      /(?:私|わたし|僕|俺|自分|今日は|今は).{0,36}(?:投票|票を入れ|に入れ|処刑する|吊る)|(?:投票|票を入れ|に入れ).{0,18}(?:予定|つもり)/.test(sentence));
+    if (repeatsConsensusDeclaration) {
+      throw new ClaimContractError(
+        'consensus_vote_declaration_repeated',
+        `${agentNameForSeat(consensusTarget)}への投票予定はすでに3人以上が公表しています。この発言では同じ予定を追加宣言せず、voteIntent=nullにして、増えた公開情報、質問、反証、または未検討の人物を話してください。最終投票先は別途選べます。`,
+      );
+    }
+  }
   if (structure.voteIntent && (!mentionsSeat(context, decision.speech, structure.voteIntent) || !/(?:投票|入れ|処刑候補|吊)/.test(decision.speech))) {
     throw new ClaimContractError('vote_intent_missing', 'voteIntentへ記録する相手は、本文でもその人へ投票する予定だと明言してください。宣言しない場合はvoteIntent=nullにしてください。');
   }

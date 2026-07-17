@@ -30,6 +30,7 @@ export function speechDecisionSchema(
   allowReply = true,
   structureSeats?: SeatId[],
   closedQuestionTopics: QuestionTopic[] = [],
+  blockedVoteIntentTargets: SeatId[] = [],
 ) {
   const base = {
     speech: z.string().max(200),
@@ -43,7 +44,7 @@ export function speechDecisionSchema(
       targetSeat: z.enum(structureSeats as [SeatId, ...SeatId[]]),
       basis: suspicionBasisSchema,
     }).nullable() : z.null(),
-    voteIntent: nullableSeatSchema(structureSeats),
+    voteIntent: nullableSeatSchema(structureSeats.filter((seat) => !blockedVoteIntentTargets.includes(seat))),
     boardAnalysis: z.boolean(),
   }) : null;
   const shape = withClaim ? { ...base, claim: speechClaimSchema } : base;

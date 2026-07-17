@@ -80,7 +80,15 @@ export function buildPrompts(context: DecisionContext): { systemPrompt: string; 
     ...(context.discussion?.closedQuestionTopics?.length
       ? [`次の質問分類はすでに2回尋ねられたため閉じています。新たな返答要求に使わず、questionTopicにも設定しないでください: ${context.discussion.closedQuestionTopics.join(', ')}`]
       : []),
-    '同じ相手への投票予定が3人以上へ集中した後は、同じ理由を言い換えて追従しないでください。その相手へ投票を続ける場合でも、対立候補、反証、またはまだ見られていない役職外の人物を一人比較してください。',
+    '投票予定の人数は他者の意見であって、人狼だと判断する証拠ではありません。候補別の公開材料にある能力結果、発言、反応、相互関係を自分で比較してください。',
+    ...(context.discussion?.consensusTarget ? [
+      `${agentNameForSeat(context.discussion.consensusTarget)}への投票予定はすでに3人以上から公表されています。この発言では、あなた自身がまだ宣言していなくても同じ相手への投票予定を本文で追加宣言せず、voteIntentにも設定しないでください。最終の非公開投票先は拘束されません。増えた公開情報、被疑者への質問、反証、または未検討の人物を話してください。`,
+    ] : [
+      '同じ相手へ投票予定を重ねる場合は、先行者の人数ではなく、自分が重く見た公開情報と変更条件を述べてください。',
+    ]),
+    ...(context.discussion?.priorVoteIntentTarget
+      ? [`あなたはすでに${agentNameForSeat(context.discussion.priorVoteIntentTarget)}への投票予定を公表しています。変更しない予定を本文で繰り返さず、voteIntentにも再設定しないでください。`]
+      : []),
     '一般的な9人人狼では、占い師候補が二人とも「人狼ではない」という結果だけを伝えている場合、直ちに占い師候補だけを処刑範囲にせず、役職を名乗っていない人から候補を探す進行も比較してください。「人狼」という結果があるなら、その結果を出された本人の反応と占い師候補を比較し、霊媒師候補が二人なら両方を順に処刑する進行を検討してください。盤面を見ず「役職候補からしかない」と決めつけないでください。',
     '別々の相手へ「人狼ではない」という結果を出した占い師候補同士は、結果が矛盾・対立・食い違っているわけではありません。結果の対立と言えるのは、同じ相手へ「人狼」と「人狼ではない」という反対の結果を出した場合です。対抗して同じ役職を名乗ったことと、結果そのものの矛盾を区別してください。',
     ...(context.discussion?.boardDigest?.length ? [`現在の議論台帳: ${context.discussion.boardDigest.join(' / ')}`] : []),
@@ -123,6 +131,9 @@ export function buildPrompts(context: DecisionContext): { systemPrompt: string; 
     ...wolfChatGuidance,
     ...discussionGuidance,
     ...v3DiscussionGuidance,
+    ...(context.kind === 'vote' || context.kind === 'runoff_vote' ? [
+      '議論中に公表された投票予定の人数は意見であって証拠ではありません。多数派へ合わせること自体を理由にせず、公開された能力結果、発言、反応、相互関係を独立に比較して投票してください。',
+    ] : []),
     ...(isSpeechIntent ? [
       'これは実際の発言ではなく、今この時点で自由討論へ割り込みたいかを決める非公開判断です。台詞や長い理由は作らないでください。',
       'urgencyは、0=今は黙る、1=機会があれば話す、2=今話したい、3=質問への返答または重要な訂正を急いで話したい、です。人格に合わない無理な発言希望は出さないでください。',
@@ -148,6 +159,7 @@ export function buildPrompts(context: DecisionContext): { systemPrompt: string; 
     privateFacts: context.privateFacts,
     ...(context.claimBoard ? { claimBoard: context.claimBoard } : {}),
     ...(context.claimDirective ? { authorizedClaim: context.claimDirective } : {}),
+    ...(context.candidateEvidence?.length ? { candidateEvidence: context.candidateEvidence } : {}),
     discussion: context.discussion,
     constraint: isSpeech
       ? context.wolfChat

@@ -53,8 +53,13 @@ function jaccard(left: Set<string>, right: Set<string>): number {
 
 function evaluate(events: MatchEvent[]) {
   const speeches = events.filter((event) => event.day === 1 && event.type === 'discussion_speech');
-  const structures = speeches.flatMap((event) => event.payload.structure
-    ? [{ seat: event.payload.seat as SeatId, requestsReply: Boolean(event.payload.requestsReply), structure: event.payload.structure as SpeechStructure }]
+  const structures = speeches.flatMap((event, speechIndex) => event.payload.structure
+    ? [{
+        seat: event.payload.seat as SeatId,
+        speechIndex,
+        requestsReply: Boolean(event.payload.requestsReply),
+        structure: event.payload.structure as SpeechStructure,
+      }]
     : []);
   const questionCounts: Partial<Record<QuestionTopic, number>> = {};
   for (const { structure, requestsReply } of structures) {
@@ -85,25 +90,89 @@ function evaluate(events: MatchEvent[]) {
   const hasClaims = claimedSeats.size > 0;
   const roleHeavyBoard = claimedSeats.size >= 3;
   const distinctVoteTargets = new Set(voteIntentBySeat.values());
+  const blackBackedTargets = new Set<SeatId>();
+  const claimantsByRole = new Map<string, Set<SeatId>>();
+  for (const speech of speeches) {
+    const claim = speech.payload.claim as { claimedRole?: string; results?: Array<{ targetSeat?: SeatId; verdict?: string }> } | null;
+    if (!claim?.claimedRole) continue;
+    const claimants = claimantsByRole.get(claim.claimedRole) ?? new Set<SeatId>();
+    claimants.add(speech.payload.seat as SeatId);
+    claimantsByRole.set(claim.claimedRole, claimants);
+    for (const result of claim.results ?? []) {
+      if (result.targetSeat && result.verdict === '人狼') blackBackedTargets.add(result.targetSeat);
+    }
+  }
+  const intentTally = new Map<SeatId, number>();
+  for (const target of voteIntentBySeat.values()) intentTally.set(target, (intentTally.get(target) ?? 0) + 1);
+  const modalIntent = [...intentTally.entries()].sort((a, b) => b[1] - a[1])[0];
+  let consensusTarget: SeatId | null = null;
+  let consensusStructureIndex = -1;
+  const runningIntentBySeat = new Map<SeatId, SeatId>();
+  for (let index = 0; index < structures.length; index += 1) {
+    const item = structures[index];
+    if (!item.structure.voteIntent) continue;
+    runningIntentBySeat.set(item.seat, item.structure.voteIntent);
+    const count = [...runningIntentBySeat.values()].filter((target) => target === item.structure.voteIntent).length;
+    if (count >= 3) {
+      consensusTarget = item.structure.voteIntent;
+      consensusStructureIndex = index;
+      break;
+    }
+  }
+  const postConsensus = consensusStructureIndex >= 0 ? structures.slice(consensusStructureIndex + 1) : [];
+  let postConsensusNovelContributions = 0;
+  for (const item of postConsensus) {
+    const { structure } = item;
+    const alternativeSuspicion = Boolean(structure.suspicion && structure.suspicion.targetSeat !== consensusTarget &&
+      structure.suspicion.basis !== 'intuition');
+    const novel = structure.primaryAct === 'role_claim' || structure.primaryAct === 'answer' ||
+      structure.primaryAct === 'defense' || structure.primaryAct === 'board_analysis' || structure.boardAnalysis ||
+      (item.requestsReply && structure.questionTopic !== null) || alternativeSuspicion;
+    if (novel) postConsensusNovelContributions += 1;
+  }
+  const requiredNovelContributions = postConsensus.length < 3
+    ? Math.min(1, postConsensus.length)
+    : Math.ceil((postConsensus.length * 3) / 5);
+  const postConsensusNovelty = consensusStructureIndex < 0 || postConsensusNovelContributions >= requiredNovelContributions;
+  const postConsensusDuplicateDeclarations = postConsensus.filter(({ structure }) =>
+    structure.voteIntent !== null && structure.voteIntent === consensusTarget).length;
+  const voteTally = new Map<SeatId, number>();
+  for (const vote of votes) voteTally.set(vote.target, (voteTally.get(vote.target) ?? 0) + 1);
+  const topVote = [...voteTally.entries()].sort((a, b) => b[1] - a[1])[0];
+  const hasUnopposedBlack = speeches.some((speech) => {
+    const claim = speech.payload.claim as { claimedRole?: string; results?: Array<{ verdict?: string }> } | null;
+    return Boolean(claim?.claimedRole && claim.results?.some((result) => result.verdict === '人狼') &&
+      claimantsByRole.get(claim.claimedRole)?.size === 1);
+  });
+  const repeatDeclarationDemotions = speeches
+    .filter((speech) => speech.payload.contributionDemoted)
+    .map((speech) => ({ turn: speech.payload.turn, seat: speech.payload.seat }));
   const checks = {
     structureComplete: structures.length === speeches.length,
     repeatedQuestionLimit: Math.max(0, ...Object.values(questionCounts)) <= 2,
     grayReadSpeakers: suspicionSpeakers.size >= (roleHeavyBoard ? 1 : 3),
     grayReadTargets: suspicionTargets.size >= (roleHeavyBoard ? 1 : 2),
     voteCommitments: voteIntentBySeat.size >= 2,
-    candidateCompetition: voteIntentBySeat.size < 4 || distinctVoteTargets.size >= 2 || suspicionTargets.size >= 2,
+    candidateCompetition: voteIntentBySeat.size < 4 || distinctVoteTargets.size >= 2 || Boolean(modalIntent && blackBackedTargets.has(modalIntent[0])),
+    postConsensusDeclarationCap: postConsensusDuplicateDeclarations === 0,
+    postConsensusNovelty,
+    antiScatterGuard: !hasUnopposedBlack || (topVote?.[1] ?? 0) >= 4,
     boardProgression: !hasClaims || structures.some(({ structure }) => structure.boardAnalysis),
     lowTextRepetition: highSimilarityPairs.filter((pair) => pair.score >= 0.55).length === 0 && highSimilarityPairs.length <= 2,
-    voteConsistency: voteIntentBySeat.size < 2 || voteConsistency >= 0.5,
   };
   return {
     passed: Object.values(checks).every(Boolean), checks, speechCount: speeches.length,
     questionCounts, claimedSeats: [...claimedSeats], suspicionSpeakers: [...suspicionSpeakers],
     suspicionTargets: [...suspicionTargets], voteIntents: Object.fromEntries(voteIntentBySeat),
+    blackBackedTargets: [...blackBackedTargets], consensusTarget,
+    postConsensusSpeechCount: postConsensus.length,
+    postConsensusNovelContributions, requiredNovelContributions, postConsensusDuplicateDeclarations,
+    repeatDeclarationDemotions,
     voteConsistency: Number(voteConsistency.toFixed(3)), highSimilarityPairs,
     transcript: speeches.map((event) => ({
       turn: event.payload.turn, name: event.payload.name, speech: event.payload.speech,
       structure: event.payload.structure, claim: event.payload.claim ?? null,
+      contributionDemoted: Boolean(event.payload.contributionDemoted),
     })),
   };
 }
