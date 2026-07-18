@@ -6,6 +6,19 @@ import {
 } from '@/engine/discussion-board';
 
 describe('discussion v3 board', () => {
+  it('先頭発言者には根拠のない疑いを要求せず、評価候補を発言済みの人物に限る', () => {
+    const players = setupPlayers('natural-first-speaker');
+    const firstAgenda = discussionAgenda(emptyDiscussionBoard(), players, 'seat-4', 1, undefined, []);
+
+    expect(firstAgenda.join('\n')).toContain('根拠のない疑い先や投票先を無理に作らず');
+    expect(firstAgenda.join('\n')).not.toContain('もっとも疑う相手');
+    expect(firstAgenda.join('\n')).not.toContain('名取 澪、八木 こはる、宮下 さくら');
+
+    const secondAgenda = discussionAgenda(emptyDiscussionBoard(), players, 'seat-5', 2, undefined, ['seat-4']);
+    expect(secondAgenda.join('\n')).toContain('雨宮 しずくについて、発言を根拠に暫定評価を出す');
+    expect(secondAgenda.join('\n')).not.toContain('名取 澪');
+  });
+
   it('質問・回答・疑い・投票予定を公開構造だけから畳み込む', () => {
     const players = setupPlayers('discussion-board');
     let board = emptyDiscussionBoard();

@@ -9,6 +9,7 @@ export function buildPrompts(context: DecisionContext): { systemPrompt: string; 
   const isSpeech = context.kind === 'speech' || context.kind === 'wolf_speech';
   const isSpeechIntent = context.kind === 'speech_intent';
   const discussionV3 = context.discussion?.version === 'v3';
+  const isFirstDiscussionSpeaker = context.kind === 'speech' && context.discussion?.turn === 1;
   const disclosureGuidance = resultDisclosureGuidance(context);
   const promptedByName = context.discussion?.promptedBySeat
     ? agentNameForSeat(context.discussion.promptedBySeat)
@@ -75,7 +76,11 @@ export function buildPrompts(context: DecisionContext): { systemPrompt: string; 
     discussionGuidance.push('これが今日の最後の発言枠です。新しい返答要求を出さず、addressedTo=null、requestsReply=falseにしてください。');
   }
   const v3DiscussionGuidance = discussionV3 ? [
-    '同じ疑問を全員でなぞるのではなく、今日の発言・疑い先・投票予定を後から検証できる形で増やしてください。質問だけで終わらず、自分自身の暫定評価か処刑方針を少なくとも一つ出してください。',
+    ...(isFirstDiscussionSpeaker ? [
+      'あなたは今日の最初の発言者です。公開済みの能力結果、自分がこの発言で公開する能力結果、前日までの発言など、実在する根拠がある場合は評価して構いません。根拠がない場合は疑い先や投票先を無理に作らず、確認したい論点、他の参加者への質問、今後の判断基準のいずれかを自然に話してください。その場合、暫定評価は不要で、structure.suspicion=null、voteIntent=nullです。',
+    ] : [
+      '同じ疑問を全員でなぞるのではなく、今日の発言・疑い先・投票予定を後から検証できる形で増やしてください。質問だけで終わらず、自分自身の暫定評価か処刑方針を少なくとも一つ出してください。',
+    ]),
     '議論台帳にすでにある質問は、未回答でも別の人が繰り返さず、回答対象本人へ任せてください。回答済みの質問を再び聞くのは、具体的な矛盾を示せる場合だけです。',
     ...(context.discussion?.closedQuestionTopics?.length
       ? [`次の質問分類はすでに2回尋ねられたため閉じています。新たな返答要求に使わず、questionTopicにも設定しないでください: ${context.discussion.closedQuestionTopics.join(', ')}`]
@@ -97,7 +102,7 @@ export function buildPrompts(context: DecisionContext): { systemPrompt: string; 
     ...(context.discussion?.boardDigest?.length ? [`現在の議論台帳: ${context.discussion.boardDigest.join(' / ')}`] : []),
     ...(context.discussion?.agenda?.length ? [`まだ不足している貢献の候補: ${context.discussion.agenda.join(' / ')}。これは台詞の指定ではありません。最新状況と人物像に合うものを選び、自分の言葉で話してください。`] : []),
     ...(!isSpeechIntent ? [
-      `structureは実際に口にする内容の自己分類です。primaryActは発言の主目的、questionTopicは本文で明確に返答を求めた質問、またはその質問への回答の話題だけを記録し、話題へ触れただけならnullにしてください。質問へ答えるだけならprimaryAct=answer、requestsReply=falseです。suspicionは本文で実際に疑う一人と根拠分類を記録し、公開情報を根拠にするならevidenceDayへその情報の日を入れてください。勘だけならbasis=intuition、evidenceDay=nullです。今日まだ発言していない人でも${context.day > 1 ? '前日以前' : '第0夜'}の公開情報は根拠にできますが、今日の未観測の態度は根拠にできません。voteIntentは本文で実際に投票予定を宣言する一人だけを記録してください。boardAnalysisは、役職を名乗った人数と今日の処刑対象範囲を本文で明示的に整理した場合だけtrueです。該当しない項目はnullまたはfalseにしてください。`,
+      `structureは実際に口にする内容の自己分類です。primaryActは発言の主目的、questionTopicは本文で明確に返答を求めた質問、またはその質問への回答の話題だけを記録し、話題へ触れただけならnullにしてください。質問へ答えるだけならprimaryAct=answer、requestsReply=falseです。suspicionは本文で実際に疑う一人と根拠分類を記録し、公開情報を根拠にするならevidenceDayへその情報の日を入れてください。勘だけならbasis=intuition、evidenceDay=nullですが、今日の最初の発言で公開根拠もない場合は勘だけの疑いを作らずsuspicion=nullにしてください。今日まだ発言していない人でも${context.day > 1 ? '前日以前' : '第0夜'}の公開情報は根拠にできますが、今日の未観測の態度は根拠にできません。voteIntentは本文で実際に投票予定を宣言する一人だけを記録してください。boardAnalysisは、役職を名乗った人数と今日の処刑対象範囲を本文で明示的に整理した場合だけtrueです。該当しない項目はnullまたはfalseにしてください。`,
     ] : [
       '自分が話したい内容が議論台帳ですでに質問・回答済みなら、具体的な新情報や訂正がない限りurgency=0を選んでください。',
     ]),

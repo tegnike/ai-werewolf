@@ -191,7 +191,14 @@ export async function runGame(
         ...(discussionVersion === 'v3' ? {
           version: 'v3' as const,
           boardDigest: discussionBoardDigest(discussionBoard, state.players, claimLedger),
-          agenda: discussionAgenda(discussionBoard, state.players, actor.seat, discussion.turn, discussion.promptedBySeat),
+          agenda: discussionAgenda(
+            discussionBoard,
+            state.players,
+            actor.seat,
+            discussion.turn,
+            discussion.promptedBySeat,
+            discussion.spokenSeats,
+          ),
           closedQuestionTopics: closedQuestionTopics(discussionBoard),
           ...(consensusVoteTarget(discussionBoard) ? { consensusTarget: consensusVoteTarget(discussionBoard) } : {}),
           ...(priorVoteIntentFor(discussionBoard, actor.seat) ? { priorVoteIntentTarget: priorVoteIntentFor(discussionBoard, actor.seat) } : {}),

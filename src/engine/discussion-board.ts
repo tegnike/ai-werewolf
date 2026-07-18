@@ -140,9 +140,11 @@ export function discussionAgenda(
   actorSeat: SeatId,
   turn: number,
   promptedBySeat?: SeatId,
+  spokenSeats: SeatId[] = [],
 ): string[] {
   const aliveOthers = players.filter((player) => player.alive && player.seat !== actorSeat);
   const names = nameBySeat(players);
+  const spoken = new Set(spokenSeats);
   const agenda: string[] = [];
   if (promptedBySeat) agenda.push(`${names.get(promptedBySeat)}の直近の質問へ、まず自分の立場を明確に答える`);
   if (suspicionCountFor(board, actorSeat) >= 2) agenda.push('自分へ出た疑いのうち一つを具体的に認めるか反論し、疑い返しだけで終えない');
@@ -151,10 +153,16 @@ export function discussionAgenda(
     agenda.push(`${names.get(consensus)}への投票予定はすでに3人以上から公表されたため同じ予定を追加宣言せず、人数を根拠にしない。増えた公開情報、被疑者への質問、反証、または未検討の人物を話す`);
   }
   const mentioned = new Set(board.suspicions.map((entry) => entry.targetSeat));
-  const unexamined = aliveOthers.filter((player) => !mentioned.has(player.seat)).slice(0, 3);
-  if (unexamined.length > 0) agenda.push(`${unexamined.map((player) => player.name).join('、')}のうち一人について、発言を根拠に暫定評価を出す`);
+  const unexamined = aliveOthers.filter((player) => spoken.has(player.seat) && !mentioned.has(player.seat)).slice(0, 3);
+  if (unexamined.length > 0) {
+    const subjects = unexamined.length === 1
+      ? unexamined[0].name
+      : `${unexamined.map((player) => player.name).join('、')}のうち一人`;
+    agenda.push(`${subjects}について、発言を根拠に暫定評価を出す`);
+  }
+  if (spoken.size === 0) agenda.push('公開済みの役職情報、自分がこの発言で公開する能力結果、前日までの発言がなければ、根拠のない疑い先や投票先を無理に作らず、確認したい論点・質問・判断基準を示す');
   if (board.boardAnalyses === 0 && turn >= 5) agenda.push('現在の役職主張数と、今日は役職候補・その他の誰から処刑候補を選ぶかを整理する');
-  if ((board.acts.suspicion ?? 0) < 4) agenda.push('質問だけで終えず、自分が今もっとも疑う相手と根拠を一つ示す');
+  if (spoken.size > 0 && (board.acts.suspicion ?? 0) < 4) agenda.push('質問だけで終えず、自分が今もっとも疑う相手と根拠を一つ示す');
   if (turn >= 10 && (board.acts.vote_intent ?? 0) < 3) agenda.push('現時点の投票予定を一人に絞り、後で変える条件も短く示す');
   return agenda.slice(0, 3);
 }

@@ -45,19 +45,27 @@ describe('実AI人格プロンプト', () => {
     expect(decisionPrompt).toContain('八木 こはる');
   });
 
-  it('その日の先頭話者に未発生の沈黙や反応を観察させない', () => {
+  it('その日の先頭話者に未発生の反応や根拠のない疑いを作らせない', () => {
     const players = setupPlayers('first-opening-speaker');
     const context: DecisionContext = {
       matchId: 'test', callKey: 'd1-speech-opening-seat-1', seed: 'first-opening-speaker', day: 1,
       phase: 'discussion', kind: 'speech', actor: players[0], players,
       legalTargets: players.slice(1).map((player) => player.seat), publicHistory: [], privateFacts: [], round: 1,
-      discussion: { stage: 'opening', turn: 1, spokenSeats: [], remainingUnspokenSeats: players.map((player) => player.seat), canRequestReply: true },
+      discussion: {
+        version: 'v3', stage: 'opening', turn: 1, spokenSeats: [],
+        remainingUnspokenSeats: players.map((player) => player.seat), canRequestReply: true,
+        boardDigest: ['今日の貢献数: suspicion=0、defense=0、vote_intent=0、board_analysis=0'],
+        agenda: ['公開済みの役職情報、自分がこの発言で公開する能力結果、前日までの発言がなければ、根拠のない疑い先や投票先を無理に作らず、確認したい論点・質問・判断基準を示す'],
+      },
     };
 
     const prompt = buildPrompts(context).systemPrompt;
     expect(prompt).toContain('あなたが今日の最初の発言者です');
     expect(prompt).toContain('今日の沈黙、反応、便乗、返答の遅さ');
     expect(prompt).toContain('仮定、今後の方針、迷い、弱い違和感');
+    expect(prompt).toContain('根拠がない場合は疑い先や投票先を無理に作らず');
+    expect(prompt).toContain('暫定評価は不要で、structure.suspicion=null、voteIntent=null');
+    expect(prompt).not.toContain('自分自身の暫定評価か処刑方針を少なくとも一つ出してください');
   });
 
   it('discussion v3では既出質問を重ねず疑い・盤面・投票予定を増やすよう促す', () => {
