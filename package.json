@@ -16,6 +16,7 @@
     "test:e2e": "playwright test",
     "sim": "tsx scripts/sim.ts",
     "accept:day1": "tsx scripts/accept-day1.ts",
+    "voicevox:dictionary": "tsx scripts/sync-voicevox-dictionary.ts",
     "db:migrate": "tsx scripts/migrate.ts"
   },
   "dependencies": {
