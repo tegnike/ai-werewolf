@@ -18,6 +18,49 @@ describe('役職主張ポリシー', () => {
     }
   });
 
+  it('claims v1の方針を凍結し、v2では占い師系の登場を初日標準へ寄せる', () => {
+    let v2DayOne = 0;
+    let v2Opening = 0;
+    const matches = 1000;
+    for (let index = 0; index < matches; index += 1) {
+      const seed = `claim-version-${index}`;
+      const players = setupPlayers(seed);
+      expect([...decideClaimPolicies(seed, players).entries()])
+        .toEqual([...decideClaimPolicies(seed, players, 'v1').entries()]);
+      const seer = [...decideClaimPolicies(seed, players, 'v2').values()]
+        .find((policy) => policy.actualRole === 'seer')!;
+      if (seer.slot?.day === 1) v2DayOne += 1;
+      if (seer.slot?.day === 1 && seer.slot.stage === 'opening') v2Opening += 1;
+    }
+    expect(v2DayOne / matches).toBeGreaterThanOrEqual(0.9);
+    expect(v2DayOne / matches).toBeLessThan(1);
+    expect(v2Opening / matches).toBeGreaterThanOrEqual(0.6);
+    expect(v2Opening / matches).toBeLessThanOrEqual(0.85);
+  });
+
+  it('claims v2の真占い師は個人スロットが遅くても1日目turn 6で必須になる', () => {
+    let fixture: { seed: string; players: ReturnType<typeof setupPlayers> } | undefined;
+    for (let index = 0; index < 1000; index += 1) {
+      const seed = `late-v2-seer-${index}`;
+      const players = setupPlayers(seed);
+      const seer = [...decideClaimPolicies(seed, players, 'v2').values()]
+        .find((policy) => policy.actualRole === 'seer')!;
+      if (seer.slot?.stage !== 'opening' || seer.slot.day > 1) {
+        fixture = { seed, players };
+        break;
+      }
+    }
+    expect(fixture).toBeDefined();
+    const seer = fixture!.players.find((player) => player.role === 'seer')!;
+    const policy = decideClaimPolicies(fixture!.seed, fixture!.players, 'v2').get(seer.seat)!;
+    const target = fixture!.players.find((player) => player.seat !== seer.seat)!.seat;
+    const available = { seer: [{ day: 0, targetSeat: target, verdict: '人狼ではない' as const }], medium: [] };
+    expect(claimDirectiveFor(fixture!.seed, policy, [], available, { day: 1, stage: 'opening', turn: 5 }).mode)
+      .not.toBe('must');
+    expect(claimDirectiveFor(fixture!.seed, policy, [], available, { day: 1, stage: 'opening', turn: 6 }).mode)
+      .toBe('must');
+  });
+
   it('狂人は人狼位置を入力せず偽結果を作り、seed群では狼への黒誤爆も起きる', () => {
     let accidentalBlack = false;
     for (let index = 0; index < 300; index += 1) {

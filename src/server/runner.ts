@@ -124,7 +124,13 @@ export class MatchRunner {
       const includeDayOneDawn = this.existing.some((event) => event.day === 1 && event.type === 'dawn');
       const created = this.existing.find((event) => event.type === 'match_created');
       const rules = created?.payload.rules as { claims?: unknown; discussion?: unknown } | undefined;
-      const claimsVersion = this.existing.length === 0 || rules?.claims === 'v1' ? 'v1' : undefined;
+      const claimsVersion = this.existing.length === 0
+        ? 'v2'
+        : rules?.claims === 'v2'
+          ? 'v2'
+          : rules?.claims === 'v1'
+            ? 'v1'
+            : undefined;
       const discussionVersion = this.existing.length === 0
         ? 'v3'
         : rules?.discussion === 'v3'

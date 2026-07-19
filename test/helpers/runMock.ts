@@ -2,7 +2,7 @@ import type { MatchEvent } from '../../src/domain/types';
 import { runGame } from '../../src/engine/game';
 import { MockAI } from '../../src/server/ai/mock';
 
-export async function runMock(seed = '1000', claimsVersion?: 'v1') {
+export async function runMock(seed = '1000', claimsVersion?: 'v1' | 'v2') {
   const events: MatchEvent[] = [];
   let seq = 0;
   const result = await runGame('test-match', seed, new MockAI(), {

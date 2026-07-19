@@ -18,7 +18,8 @@ import {
 } from './claim-policy';
 import {
   candidateEvidenceLedger, closedQuestionTopics, consensusVoteTarget, discussionAgenda, discussionBoardDigest,
-  emptyDiscussionBoard, foldDiscussionBoard, priorVoteIntentFor, sanitizeEchoSourceSeat, saturatedPointFor,
+  discussionMaterialPhase, emptyDiscussionBoard, foldDiscussionBoard, priorVoteIntentFor, publicCommitmentsFor,
+  sanitizeEchoSourceSeat, saturatedPointFor,
   suspicionCountFor, voteIntentCountFor,
 } from './discussion-board';
 
@@ -134,12 +135,13 @@ export async function runGame(
   seed: string,
   ai: DecisionProvider,
   hooks: RunHooks,
-  options: { includeDayOneDawn?: boolean; claimsVersion?: 'v1'; discussionVersion?: 'legacy' | 'v2' | 'v3' } = {},
+  options: { includeDayOneDawn?: boolean; claimsVersion?: 'v1' | 'v2'; discussionVersion?: 'legacy' | 'v2' | 'v3' } = {},
 ): Promise<SimulationResult> {
   const players = setupPlayers(seed);
-  const claimsEnabled = options.claimsVersion === 'v1';
+  const claimsEnabled = options.claimsVersion === 'v1' || options.claimsVersion === 'v2';
+  const claimsVersion = options.claimsVersion;
   const discussionVersion = options.discussionVersion ?? 'v3';
-  const claimPolicies = decideClaimPolicies(seed, players);
+  const claimPolicies = decideClaimPolicies(seed, players, claimsVersion ?? 'v1');
   let state = createInitialState(players);
   const publicHistory: string[] = [];
   let claimLedger: ClaimLedger = [];
@@ -152,7 +154,7 @@ export async function runGame(
   let discussionBoard = emptyDiscussionBoard();
   let pendingVictim: SeatId | null = null;
 
-  const directiveFor = (actor: Player, day: number, stage: 'opening' | 'free'): ClaimDirective => {
+  const directiveFor = (actor: Player, day: number, stage: 'opening' | 'free', turn?: number): ClaimDirective => {
     const policy = claimPolicies.get(actor.seat);
     if (!policy) return { mode: 'forbidden', claimedRole: null, results: [], counterTargetSeat: null };
     const actorAlreadyClaimed = claimLedger.some((entry) => entry.seat === actor.seat);
@@ -165,7 +167,7 @@ export async function runGame(
     return claimDirectiveFor(seed, policy, claimLedger, {
       seer: results.seer.map((result) => ({ ...result })),
       medium: results.medium.map((result) => ({ ...result })),
-    }, { day, stage });
+    }, { day, stage, ...(turn ? { turn } : {}) });
   };
 
   const emit = async (
@@ -203,6 +205,8 @@ export async function runGame(
         ...(discussionVersion === 'v3' ? {
           version: 'v3' as const,
           boardDigest: discussionBoardDigest(discussionBoard, state.players, claimLedger),
+          publicCommitments: publicCommitmentsFor(discussionBoard),
+          materialPhase: discussionMaterialPhase(discussionBoard, claimLedger, day, discussion.turn),
           agenda: discussionAgenda(
             discussionBoard,
             state.players,
@@ -210,6 +214,8 @@ export async function runGame(
             discussion.turn,
             discussion.promptedBySeat,
             discussion.spokenSeats,
+            claimLedger,
+            day,
           ),
           closedQuestionTopics: closedQuestionTopics(discussionBoard),
           ...(consensusVoteTarget(discussionBoard) ? { consensusTarget: consensusVoteTarget(discussionBoard) } : {}),
@@ -228,7 +234,9 @@ export async function runGame(
       };
     }
     if (claimsEnabled) base.claimBoard = claimBoardDigest(claimLedger);
-    if (claimsEnabled && kind === 'speech' && discussion) base.claimDirective = directiveFor(actor, day, discussion.stage);
+    if (claimsEnabled && kind === 'speech' && discussion) {
+      base.claimDirective = directiveFor(actor, day, discussion.stage, discussion.turn);
+    }
     return base;
   };
 
@@ -427,8 +435,8 @@ export async function runGame(
     seed,
     players: players.map((player) => ({ seat: player.seat, name: player.name, role: player.role })),
     ...(discussionVersion === 'v2' || discussionVersion === 'v3'
-      ? { rules: { discussion: discussionVersion, ...(claimsEnabled ? { claims: 'v1' } : {}) } }
-      : claimsEnabled ? { rules: { claims: 'v1' } } : {}),
+      ? { rules: { discussion: discussionVersion, ...(claimsEnabled ? { claims: claimsVersion } : {}) } }
+      : claimsEnabled ? { rules: { claims: claimsVersion } } : {}),
   }, 'private');
 
   const wolves = state.players.filter((player) => player.role === 'werewolf');
@@ -505,12 +513,12 @@ export async function runGame(
               const count = speechCounts.get(player.seat) ?? 0;
               const stage = count === 0 ? 'opening' : 'free';
               return canSpeakAfter(recentSpeakerSeats, player.seat) &&
-                count < MAX_SPEECHES_PER_PLAYER && directiveFor(player, day, stage).mode === 'must';
+                count < MAX_SPEECHES_PER_PLAYER && directiveFor(player, day, stage, speechCount + 1).mode === 'must';
             });
             if (mandatory.length > 0) {
-              const actor = stableShuffle(mandatory, seed, `claims/v1/counter-order-d${day}-t${speechCount + 1}`)[0];
+              const actor = stableShuffle(mandatory, seed, `claims/${claimsVersion}/counter-order-d${day}-t${speechCount + 1}`)[0];
               const stage = (speechCounts.get(actor.seat) ?? 0) === 0 ? 'opening' : 'free';
-              const directive = directiveFor(actor, day, stage);
+              const directive = directiveFor(actor, day, stage, speechCount + 1);
               nextSpeaker = {
                 actor,
                 motivation: 'challenge',

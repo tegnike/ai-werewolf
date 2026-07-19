@@ -4,6 +4,7 @@ import type { Player, Role, SeatId } from '@/domain/types';
 import { stableIndex } from './prng';
 
 export type ClaimStance = 'truth' | 'fake' | 'silent';
+export type ClaimsVersion = 'v1' | 'v2';
 
 export interface ClaimSlot {
   day: number;
@@ -11,6 +12,7 @@ export interface ClaimSlot {
 }
 
 export interface ClaimPolicy {
+  version: ClaimsVersion;
   seat: SeatId;
   actualRole: Role;
   stance: ClaimStance;
@@ -26,6 +28,8 @@ export interface ClaimPolicy {
 export interface ClaimMoment {
   day: number;
   stage: ClaimStage;
+  /** その日の公開議論全体で次に発言するturn。v1では未使用。 */
+  turn?: number;
 }
 
 const boldnessBySeat: Record<SeatId, number> = {
@@ -46,10 +50,17 @@ function happens(seed: string, purposeKey: string, percent: number): boolean {
   return stableIndex(seed, `claims/v1/${purposeKey}`, 100) < bounded;
 }
 
-function pickSeerSlot(seed: string, seat: SeatId): ClaimSlot {
-  const roll = stableIndex(seed, `claims/v1/slot/seer/${seat}`, 100);
-  if (roll < 30) return { day: 1, stage: 'opening' };
-  if (roll < 58) return { day: 1, stage: 'free' };
+function pickSeerSlot(seed: string, seat: SeatId, version: ClaimsVersion, bias: number): ClaimSlot {
+  const roll = stableIndex(seed, `claims/${version}/slot/seer/${seat}`, 100);
+  if (version === 'v1') {
+    if (roll < 30) return { day: 1, stage: 'opening' };
+    if (roll < 58) return { day: 1, stage: 'free' };
+    return { day: 2, stage: 'opening' };
+  }
+  const openingThreshold = 70 + bias;
+  const dayOneThreshold = Math.min(99, 95 + Math.trunc(bias / 2));
+  if (roll < openingThreshold) return { day: 1, stage: 'opening' };
+  if (roll < dayOneThreshold) return { day: 1, stage: 'free' };
   return { day: 2, stage: 'opening' };
 }
 
@@ -64,21 +75,25 @@ function fakeRole(seed: string, seat: SeatId, seerPercent: number): ClaimableRol
   return happens(seed, `fake-role/${seat}`, seerPercent) ? 'seer' : 'medium';
 }
 
-export function decideClaimPolicies(seed: string, players: Player[]): Map<SeatId, ClaimPolicy> {
+export function decideClaimPolicies(
+  seed: string,
+  players: Player[],
+  version: ClaimsVersion = 'v1',
+): Map<SeatId, ClaimPolicy> {
   const wolves = players.filter((player) => player.role === 'werewolf').sort((a, b) => a.seat.localeCompare(b.seat));
   const designatedWolf = wolves[stableIndex(seed, 'claims/v1/wolf-liar', wolves.length)]?.seat;
   return new Map(players.map((player): [SeatId, ClaimPolicy] => {
     const bias = boldnessBySeat[player.seat];
     if (player.role === 'seer') {
       return [player.seat, {
-        seat: player.seat, actualRole: player.role, stance: 'truth', claimedRole: 'seer',
-        slot: pickSeerSlot(seed, player.seat), deadline: { day: 2, stage: 'opening' },
+        version, seat: player.seat, actualRole: player.role, stance: 'truth', claimedRole: 'seer',
+        slot: pickSeerSlot(seed, player.seat, version, bias), deadline: { day: 2, stage: 'opening' },
         counterPercent: 58 + Math.trunc(bias / 2), advancePercent: 0, lateCounterPercent: 0, emergencyCounterPercent: 0,
       }];
     }
     if (player.role === 'medium') {
       return [player.seat, {
-        seat: player.seat, actualRole: player.role, stance: 'truth', claimedRole: 'medium',
+        version, seat: player.seat, actualRole: player.role, stance: 'truth', claimedRole: 'medium',
         slot: pickMediumSlot(seed, player.seat), deadline: { day: 3, stage: 'opening' },
         counterPercent: 92, advancePercent: 0, lateCounterPercent: 0, emergencyCounterPercent: 0,
       }];
@@ -87,8 +102,8 @@ export function decideClaimPolicies(seed: string, players: Player[]): Map<SeatId
       const role = fakeRole(seed, player.seat, 78);
       const fake = happens(seed, `stance/madman/${player.seat}`, 62 + bias);
       return [player.seat, {
-        seat: player.seat, actualRole: player.role, stance: fake ? 'fake' : 'silent', claimedRole: role,
-        slot: fake ? (role === 'seer' ? pickSeerSlot(seed, player.seat) : pickMediumSlot(seed, player.seat)) : null,
+        version, seat: player.seat, actualRole: player.role, stance: fake ? 'fake' : 'silent', claimedRole: role,
+        slot: fake ? (role === 'seer' ? pickSeerSlot(seed, player.seat, version, bias) : pickMediumSlot(seed, player.seat)) : null,
         deadline: null, counterPercent: 78 + Math.trunc(bias / 2), advancePercent: 42 + Math.trunc(bias / 2), lateCounterPercent: 3,
         emergencyCounterPercent: 0,
       }];
@@ -98,14 +113,14 @@ export function decideClaimPolicies(seed: string, players: Player[]): Map<SeatId
       const role = fakeRole(seed, player.seat, 68);
       const fake = designated && happens(seed, `stance/wolf/${player.seat}`, 16 + Math.trunc(bias / 2));
       return [player.seat, {
-        seat: player.seat, actualRole: player.role, stance: fake ? 'fake' : 'silent', claimedRole: role,
-        slot: fake ? (role === 'seer' ? pickSeerSlot(seed, player.seat) : pickMediumSlot(seed, player.seat)) : null,
+        version, seat: player.seat, actualRole: player.role, stance: fake ? 'fake' : 'silent', claimedRole: role,
+        slot: fake ? (role === 'seer' ? pickSeerSlot(seed, player.seat, version, bias) : pickMediumSlot(seed, player.seat)) : null,
         deadline: null, counterPercent: 62 + Math.trunc(bias / 2), advancePercent: 16 + Math.trunc(bias / 3), lateCounterPercent: designated ? 2 : 0,
         emergencyCounterPercent: 6 + Math.trunc(bias / 4),
       }];
     }
     return [player.seat, {
-      seat: player.seat, actualRole: player.role, stance: 'silent', claimedRole: null,
+      version, seat: player.seat, actualRole: player.role, stance: 'silent', claimedRole: null,
       slot: null, deadline: null, counterPercent: 0, advancePercent: 0, lateCounterPercent: 0, emergencyCounterPercent: 0,
     }];
   }));
@@ -172,9 +187,11 @@ export function claimDirectiveFor(
     policy.advancePercent,
   );
   const deadline = policy.stance === 'truth' && reached(moment, policy.deadline);
+  const dayOneSeerTurnDeadline = policy.version === 'v2' && policy.actualRole === 'seer' &&
+    moment.day === 1 && (moment.turn ?? 0) >= 6;
   const scheduled = policy.stance !== 'silent' && reached(moment, policy.slot);
 
-  if (emergency || counter || lateCounter || truthBlack || deadline || fakeAdvance || (scheduled && policy.stance === 'fake')) {
+  if (emergency || counter || lateCounter || truthBlack || deadline || dayOneSeerTurnDeadline || fakeAdvance || (scheduled && policy.stance === 'fake')) {
     return { mode: 'must', claimedRole: role, results, counterTargetSeat: rival?.seat ?? null };
   }
   if (scheduled) return { mode: 'may', claimedRole: role, results, counterTargetSeat: rival?.seat ?? null };

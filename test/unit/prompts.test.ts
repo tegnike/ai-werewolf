@@ -63,6 +63,8 @@ describe('実AI人格プロンプト', () => {
     expect(prompt).toContain('あなたが今日の最初の発言者です');
     expect(prompt).toContain('今日の沈黙、反応、便乗、返答の遅さ');
     expect(prompt).toContain('仮定、今後の方針、迷い、弱い違和感');
+    expect(prompt).toContain('今日あなたに与えられた最初の発言機会');
+    expect(prompt).toContain('「遅れた」「待たせた」「返答が遅い」とは扱わない');
     expect(prompt).toContain('根拠がない場合は疑い先や投票先を無理に作らず');
     expect(prompt).toContain('暫定評価は不要で、structure.suspicion=null、voteIntent=null');
     expect(prompt).not.toContain('自分自身の暫定評価か処刑方針を少なくとも一つ出してください');
@@ -78,10 +80,11 @@ describe('実AI人格プロンプト', () => {
       privateFacts: [], round: 1,
       discussion: {
         version: 'v3', stage: 'opening', turn: 8, spokenSeats: ['seat-5'],
+        materialPhase: 'developing',
         remainingUnspokenSeats: players.filter((player) => player.seat !== 'seat-5').map((player) => player.seat),
         canRequestReply: true,
         boardDigest: ['質問済み: inspection_reason=2回（回答1回）', '今日の貢献数: suspicion=1、defense=0、vote_intent=0、board_analysis=0'],
-        agenda: ['質問だけで終えず、自分が今もっとも疑う相手と根拠を一つ示す'],
+        agenda: ['公開された発言や役職情報を二つ以上比べ、差があるなら暫定候補を示す'],
       },
     };
 
@@ -90,10 +93,59 @@ describe('実AI人格プロンプト', () => {
     expect(prompts.systemPrompt).toContain('別々の相手へ「人狼ではない」という結果');
     expect(prompts.systemPrompt).toContain('「白」「黒」「白結果」「黒結果」のように省略しない');
     expect(prompts.systemPrompt).toContain('inspection_reason=2回');
-    expect(prompts.systemPrompt).toContain('質問だけで終えず');
+    expect(prompts.systemPrompt).toContain('少なくとも二つの発言・役職情報・候補を比べ');
     expect(prompts.systemPrompt).toContain('structureは実際に口にする内容の自己分類');
     expect(prompts.systemPrompt).toContain('evidenceDay');
     expect(prompts.decisionPrompt).toContain('structureは本文に現れる');
+  });
+
+  it('材料不足では保留を完結貢献として許し、公開済み候補・回答の不存在を主張させない', () => {
+    const players = setupPlayers('scarce-and-current');
+    const actor = players[1];
+    const prompts = buildPrompts({
+      matchId: 'test', callKey: 'd1-speech-t3-seat-2', seed: 'scarce-and-current', day: 1,
+      phase: 'discussion', kind: 'speech', actor, players,
+      legalTargets: players.filter((player) => player.seat !== actor.seat).map((player) => player.seat),
+      publicHistory: [], privateFacts: [], round: 1,
+      discussion: {
+        version: 'v3', stage: 'opening', turn: 3, materialPhase: 'scarce',
+        publicCommitments: [{
+          seat: 'seat-9', suspicionTargetSeat: 'seat-6', suspicionBasis: 'reasoning_quality', answeredTopics: ['gray_read'],
+          defended: true, changedSuspicion: false,
+        }],
+      },
+    });
+    expect(prompts.systemPrompt).toContain('疑い先や処刑先は必須ではなく');
+    expect(prompts.systemPrompt).toContain('観測できない「様子見」「便乗」「反応の遅さ」');
+    expect(prompts.systemPrompt).toContain('まだ候補を出していない');
+    expect(prompts.systemPrompt).toContain('根拠をまだ出していない');
+    expect(prompts.systemPrompt).toContain('事実に反して述べないでください');
+    expect(prompts.systemPrompt).toContain('村側として、材料が足りないときの質問');
+  });
+
+  it('人狼と狂人へ秘密知識の範囲が異なる任意のブラフを示す', () => {
+    const players = setupPlayers('faction-bluffs');
+    const base = {
+      matchId: 'test', seed: 'faction-bluffs', day: 1, phase: 'discussion' as const,
+      kind: 'speech' as const, players, legalTargets: players.map((player) => player.seat),
+      publicHistory: [], discussion: { version: 'v3' as const, stage: 'opening' as const, turn: 4, materialPhase: 'scarce' as const },
+    };
+    const wolf = { ...players[0], role: 'werewolf' as const };
+    const wolfPrompt = buildPrompts({
+      ...base, callKey: 'wolf', actor: wolf, players: players.map((player) => player.seat === wolf.seat ? wolf : player),
+      privateFacts: ['生存中の人狼仲間: 八木 こはる'],
+    }).systemPrompt;
+    expect(wolfPrompt).toContain('迷いを見せる');
+    expect(wolfPrompt).toContain('人狼仲間と自然に距離を取る');
+    expect(wolfPrompt).toContain('仲間の正体を知っていることは漏らさない');
+
+    const madman = { ...players[2], role: 'madman' as const };
+    const madmanPrompt = buildPrompts({
+      ...base, callKey: 'madman', actor: madman, players: players.map((player) => player.seat === madman.seat ? madman : player),
+      privateFacts: [],
+    }).systemPrompt;
+    expect(madmanPrompt).toContain('狂人として人狼が誰かは知りません');
+    expect(madmanPrompt).toContain('候補を競合させる');
   });
 
   it('人狼判定で議論を固定せず、人狼仲間と狂人に別方向から盤面を揺らさせる', () => {

@@ -44,6 +44,15 @@ export function buildPrompts(context: DecisionContext): { systemPrompt: string; 
     ? publicBlackClaims.find((claim) => claim.targetSeat !== context.actor.seat &&
       context.players.find((player) => player.seat === claim.targetSeat)?.role === 'werewolf')
     : undefined;
+  const publicCommitmentNames = (context.discussion?.publicCommitments ?? []).map((entry) => ({
+    name: agentNameForSeat(entry.seat),
+    suspicionName: entry.suspicionTargetSeat ? agentNameForSeat(entry.suspicionTargetSeat) : null,
+    suspicionBasis: entry.suspicionBasis,
+    voteIntentName: entry.voteIntentTargetSeat ? agentNameForSeat(entry.voteIntentTargetSeat) : null,
+    answeredTopics: entry.answeredTopics,
+    defended: entry.defended,
+    changedSuspicion: entry.changedSuspicion,
+  }));
   const blackResultGuidance = discussionV3 && publicBlackClaims.length > 0 ? [
     `占い師を名乗る人物から「人狼」という結果を出された人がいます（${publicBlackClaims.map((claim) =>
       `${agentNameForSeat(claim.claimantSeat)}→${agentNameForSeat(claim.targetSeat)}`).join('、')}）。これは公開された役職主張であり、対象の本当の役職が確定したわけではありません。同じ結果へ便乗するだけで対象を一日中追い詰めず、占い師候補の信用・対象本人の説明・他候補の公開材料を比較してください。`,
@@ -67,6 +76,19 @@ export function buildPrompts(context: DecisionContext): { systemPrompt: string; 
       : [
           '今は生存している人狼同士だけの秘密会話です。仲間の発言を踏まえ、襲撃方針を自然に相談してください。',
         ]
+    : [];
+  const factionDiscussionGuidance = discussionV3 && context.kind === 'speech'
+    ? context.actor.role === 'werewolf'
+      ? [
+          '人狼として、村人と同じ公開情報だけで通る説明を作ってください。毎回嘘や疑いを作る義務はありません。人物像に合う場合だけ、迷いを見せる、正当な質問へ少し誘導を混ぜる、もっともらしい別仮説を出す、公平な進行案へ誤候補を混ぜる、人狼仲間と自然に距離を取る、認可された役職主張を使う、のうち一つを選べます。仲間の正体を知っていることは漏らさないでください。',
+        ]
+      : context.actor.role === 'madman'
+        ? [
+            '狂人として人狼が誰かは知りません。毎回乱暴な疑いや嘘を作る義務はありません。人物像と公開状況に合う場合だけ、候補を競合させる、判断基準を少し歪める、占い師候補の信用を揺らす、または認可された役職主張を使えます。特定の相手を人狼だと知っているように扱わないでください。',
+          ]
+        : [
+            '村側として、材料が足りないときの質問、判断基準、役職確認、条件つき保留は、それだけで有効な貢献です。人物像に反してまで疑い先を作らず、公開材料が増えたら評価を更新してください。',
+          ]
     : [];
   const legacyDiscussionGuidance = context.discussion?.legacyRules && context.discussion.stage === 'opening'
     ? [
@@ -95,6 +117,7 @@ export function buildPrompts(context: DecisionContext): { systemPrompt: string; 
         '昼の議論に固定の開始発言順はありません。これはあなたの今日1回目の発言です。直近の話題へ自然に加わってください。',
         '誰かへ明確に返答を求める場合、その相手が次の話者になります。実際に返答してほしい台詞ならaddressedToに相手を指定し、requestsReply=trueにしてください。',
         'まだ今日話していない人の発言を知っているように話してはいけません。進行ルール自体を説明する台詞は不要です。',
+        'これは今日あなたに与えられた最初の発言機会です。この発言で初めて役職を名乗ったり質問へ触れたりしても、「遅れた」「待たせた」「返答が遅い」とは扱わないでください。',
         '仮定、今後の方針、迷い、弱い違和感を、具体的な告発や返答拒否へ勝手に強めないでください。発言者が実際に言った強さのまま受け取ってください。',
         ...(context.discussion.turn === 1 ? [
           'あなたが今日の最初の発言者です。他の参加者は今日まだ発言機会を得ていません。今日の沈黙、反応、便乗、返答の遅さを観察したように話してはいけません。役職情報、前日までの公開情報、または今日これから確認したいことを話してください。',
@@ -119,10 +142,27 @@ export function buildPrompts(context: DecisionContext): { systemPrompt: string; 
   const v3DiscussionGuidance = discussionV3 ? [
     ...(isFirstDiscussionSpeaker ? [
       'あなたは今日の最初の発言者です。公開済みの能力結果、自分がこの発言で公開する能力結果、前日までの発言など、実在する根拠がある場合は評価して構いません。根拠がない場合は疑い先や投票先を無理に作らず、確認したい論点、他の参加者への質問、今後の判断基準のいずれかを自然に話してください。その場合、暫定評価は不要で、structure.suspicion=null、voteIntent=nullです。',
+    ] : context.discussion?.materialPhase === 'scarce' ? [
+      '公開材料がまだ少ない序盤です。宛先つきの質問、今後の判断基準、役職の登場時機への意見、または何が起きれば評価を変えるかを伴う保留のどれか一つで発言を完結して構いません。疑い先や処刑先は必須ではなく、観測できない「様子見」「便乗」「反応の遅さ」を作らないでください。実在する公開根拠がない疑いならstructure.suspicion=null、voteIntent=nullです。',
+    ] : context.discussion?.materialPhase === 'developing' ? [
+      '公開材料が増え始めています。少なくとも二つの発言・役職情報・候補を比べ、差がある場合だけ暫定候補を示してください。差がない場合は、保留を解く条件や次の質問を示せば十分です。',
     ] : [
-      '同じ疑問を全員でなぞるのではなく、今日の発言・疑い先・投票予定を後から検証できる形で増やしてください。質問だけで終わらず、自分自身の暫定評価か処刑方針を少なくとも一つ出してください。',
+      '投票判断へ進む区間です。公開された候補と本人の応答を比較し、現時点の処刑方針または投票予定を示してください。新しい材料で変える条件も短く添えて構いません。',
     ]),
     '議論台帳にすでにある質問は、未回答でも別の人が繰り返さず、回答対象本人へ任せてください。回答済みの質問を再び聞くのは、具体的な矛盾を示せる場合だけです。',
+    ...(publicCommitmentNames.length > 0 ? [
+      `今日の最新公開立場は次のとおりです: ${publicCommitmentNames.map((entry) => {
+        const details = [
+          entry.suspicionName ? `疑い候補=${entry.suspicionName}` : null,
+          entry.suspicionBasis ? `疑い根拠=${SUSPICION_BASIS_LABELS[entry.suspicionBasis]}` : null,
+          entry.voteIntentName ? `投票予定=${entry.voteIntentName}` : null,
+          entry.answeredTopics.length > 0 ? `回答済み=${entry.answeredTopics.join('・')}` : null,
+          entry.defended ? '弁明済み' : null,
+          entry.changedSuspicion ? '候補更新済み' : null,
+        ].filter(Boolean);
+        return `${entry.name}（${details.join('、')}）`;
+      }).join(' / ')}。ここに候補・疑い根拠・回答・弁明が記録された人について「まだ候補を出していない」「根拠をまだ出していない」「まだ答えていない」「まだ説明していない」と事実に反して述べないでください。内容が弱い、質問とずれている、理由に納得できないという評価は、具体的に指摘して構いません。`,
+    ] : []),
     ...(context.discussion?.closedQuestionTopics?.length
       ? [`次の質問分類はすでに2回尋ねられたため閉じています。新たな返答要求に使わず、questionTopicにも設定しないでください: ${context.discussion.closedQuestionTopics.join(', ')}`]
       : []),
@@ -182,6 +222,7 @@ export function buildPrompts(context: DecisionContext): { systemPrompt: string; 
     '他者の本当の役職を知っているふりをしないでください。',
     ...wolfChatGuidance,
     ...discussionGuidance,
+    ...factionDiscussionGuidance,
     ...blackResultGuidance,
     ...v3DiscussionGuidance,
     ...(context.kind === 'vote' || context.kind === 'runoff_vote' ? [

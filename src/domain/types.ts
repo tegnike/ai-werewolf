@@ -95,6 +95,22 @@ export interface CandidateEvidenceEntry {
   }>;
 }
 
+export interface PublicCommitment {
+  seat: SeatId;
+  /** 今日この人物が最後に明示した暫定的な疑い先。 */
+  suspicionTargetSeat?: SeatId;
+  /** 最新の疑いで本人が自己分類した公開根拠。 */
+  suspicionBasis?: SuspicionBasis;
+  /** 今日この人物が最後に明示した投票予定。 */
+  voteIntentTargetSeat?: SeatId;
+  /** 今日この人物が明示的に回答した質問分類。 */
+  answeredTopics: QuestionTopic[];
+  /** 今日、自分への疑いへ弁明したか。 */
+  defended: boolean;
+  /** 今日、疑い先を別の人物へ更新したか。 */
+  changedSuspicion: boolean;
+}
+
 export interface DiscussionContext {
   stage: 'opening' | 'free';
   turn: number;
@@ -108,6 +124,10 @@ export interface DiscussionContext {
   version?: 'v3';
   /** 公開発言の構造化情報だけから導出した、秘密を含まない議論状況。 */
   boardDigest?: string[];
+  /** 今日各人がすでに公開した最新の候補・回答・弁明。 */
+  publicCommitments?: PublicCommitment[];
+  /** 公開材料の量から決定論的に分けた、発言で求める貢献の段階。 */
+  materialPhase?: 'scarce' | 'developing' | 'decision';
   /** 台本ではなく、まだ不足している貢献の候補。 */
   agenda?: string[];
   /** すでに十分に尋ねられ、追加の返答要求を受け付けない質問分類。 */

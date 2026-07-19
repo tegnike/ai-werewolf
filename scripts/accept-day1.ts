@@ -53,7 +53,7 @@ function defaultSeedCases(): SeedCase[] {
   const usedSeeds = new Set<string>();
   for (let index = 0; index < 50_000 && found.size < 3; index += 1) {
     const seed = `day1-v3-${index}`;
-    const policies = [...decideClaimPolicies(seed, setupPlayers(seed)).values()];
+    const policies = [...decideClaimPolicies(seed, setupPlayers(seed), 'v2').values()];
     const cases: Array<[string, boolean]> = [
       ['madman-seer-opening', policies.some((policy) =>
         policy.actualRole === 'madman' && policy.stance === 'fake' && policy.claimedRole === 'seer' &&
@@ -208,7 +208,7 @@ async function main(): Promise<void> {
     generatedAt: generatedAt.toISOString(),
     runtime: {
       ai: 'real', model: MODEL, reasoningEffort: 'low', environmentSource,
-      discussionVersion: 'v3', claimsVersion: 'v1', stopAfter: 'day-one execution',
+      discussionVersion: 'v3', claimsVersion: 'v2', stopAfter: 'day-one execution',
     },
     databasePath,
     results: results.map((result) => ({

@@ -45,7 +45,7 @@ describe('MatchRunner', () => {
     const events = manager.repo.events(match.id);
     expect(events.length).toBeGreaterThan(20);
     expect(new Set(events.map((event) => event.seq)).size).toBe(events.length);
-    expect(events.find((event) => event.type === 'match_created')?.payload.rules).toEqual({ discussion: 'v3', claims: 'v1' });
+    expect(events.find((event) => event.type === 'match_created')?.payload.rules).toEqual({ discussion: 'v3', claims: 'v2' });
     expect(events.some((event) => event.type === 'discussion_speech' && event.payload.structure)).toBe(true);
   });
   it('pause/resumeとabortを受け付ける', async () => {
@@ -102,6 +102,28 @@ describe('MatchRunner', () => {
     }, { claimsVersion: 'v1', discussionVersion: 'v2' })).rejects.toThrow('simulated claims crash');
     expect(repo.events(record.id).find((event) => event.type === 'match_created')?.payload.rules).toEqual({ discussion: 'v2', claims: 'v1' });
     expect(repo.events(record.id).some((event) => event.type === 'discussion_speech' && event.payload.claim)).toBe(true);
+
+    const manager = new MatchRunnerManager(repo);
+    manager.recover();
+    await waitFor(repo, record.id, 'finished');
+    const events = repo.events(record.id);
+    expect(events.map((event) => event.seq)).toEqual(Array.from({ length: events.length }, (_, index) => index + 1));
+  });
+
+  it('新規claims v2の公開主張後も同じversionで復旧する', async () => {
+    const repo = new MatchRepo();
+    const now = new Date().toISOString();
+    const record: MatchRecord = { id: 'claims-v2-recovery', seed: '1001', status: 'running', winner: null, speed: 0, apiCalls: 0, error: null, config: { ai: 'mock' }, createdAt: now, updatedAt: now, finishedAt: null };
+    repo.createMatch(record);
+    let seq = 0;
+    await expect(runGame(record.id, record.seed, new MockAI(), {
+      emit: async (draft) => {
+        repo.appendEvent({ ...draft, matchId: record.id, seq: ++seq, createdAt: now });
+      },
+      checkpoint: async () => { if (seq === 32) throw new Error('simulated claims v2 crash'); },
+    }, { claimsVersion: 'v2', discussionVersion: 'v3' })).rejects.toThrow('simulated claims v2 crash');
+    expect(repo.events(record.id).find((event) => event.type === 'match_created')?.payload.rules)
+      .toEqual({ discussion: 'v3', claims: 'v2' });
 
     const manager = new MatchRunnerManager(repo);
     manager.recover();

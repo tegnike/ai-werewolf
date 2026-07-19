@@ -125,7 +125,10 @@ export function resultDisclosureGuidance(context: DecisionContext): string | nul
     const action = directive.mode === 'must'
       ? `今回は必ず「私は${roleLabel}です」と名乗り`
       : `今回は「私は${roleLabel}です」と名乗っても、まだ伏せても構いません。伏せる場合はclaimをnullにし、能力結果、確認済みの正体、結果を持っている事実を本文にも匂わせないでください。名乗る場合は`;
-    return `${action}、claimにもclaimedRole=${directive.claimedRole}を設定してください。${results ? `認可された結果は「${results}」です。結果を対象・日・判定ごと変えず、本文とclaimの両方へ過不足なく入れてください。` : '結果一覧は空のままにしてください。'} この主張指示や仕組み自体には言及しないでください。`;
+    const dayOneSeerDefault = directive.mode === 'may' && context.actor.role === 'seer' && context.day === 1
+      ? '一般的な9人人狼では、人狼ではないという結果も候補を狭める公開材料になるため、1日目に占い師だと名乗って結果を出すのが基本です。伏せるのは、人物像と今の盤面に明確な理由がある例外にしてください。'
+      : '';
+    return `${action}、claimにもclaimedRole=${directive.claimedRole}を設定してください。${results ? `認可された結果は「${results}」です。結果を対象・日・判定ごと変えず、本文とclaimの両方へ過不足なく入れてください。` : '結果一覧は空のままにしてください。'} ${dayOneSeerDefault} この主張指示や仕組み自体には言及しないでください。`;
   }
   if (context.kind !== 'speech' || !['seer', 'medium'].includes(context.actor.role)) return null;
   const roleLabel = ROLE_LABEL[context.actor.role];

@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { claimLedgerFromEvents } from '../src/domain/claims';
-import type { MatchRecord } from '../src/domain/types';
+import type { MatchEvent, MatchRecord, SeatId, SpeechStructure } from '../src/domain/types';
+import { discussionMaterialPhase, emptyDiscussionBoard, foldDiscussionBoard } from '../src/engine/discussion-board';
 import { MatchRepo } from '../src/server/repo';
 import { MatchRunnerManager } from '../src/server/runner';
 
@@ -20,6 +21,7 @@ async function main() {
     matches: 0,
     trueSeerClaims: 0,
     trueSeerDayOneClaims: 0,
+    trueSeerDayOneLatestTurn: 0,
     counterclaimMatches: 0,
     loneTrueSeerMatches: 0,
     loneSeerClaimMatches: 0,
@@ -33,6 +35,7 @@ async function main() {
     allDeceptiveRolesSilentMatches: 0,
     impossibleClaims: 0,
     budgetViolations: 0,
+    scarceSuspicionStructures: 0,
   };
 
   for (let index = 0; index < matches; index += 1) {
@@ -62,6 +65,14 @@ async function main() {
         claimMetrics.matches += 1;
         if (trueSeerClaim) claimMetrics.trueSeerClaims += 1;
         if (trueSeerClaim?.coDay === 1) claimMetrics.trueSeerDayOneClaims += 1;
+        if (trueSeerClaim?.coDay === 1) {
+          const claimSpeech = events.find((event) => event.day === 1 && event.type === 'discussion_speech' &&
+            event.payload.seat === trueSeer?.seat && event.payload.claim);
+          claimMetrics.trueSeerDayOneLatestTurn = Math.max(
+            claimMetrics.trueSeerDayOneLatestTurn,
+            Number(claimSpeech?.payload.turn ?? 0),
+          );
+        }
         if (trueSeerClaim && counterclaims.length > 0) claimMetrics.counterclaimMatches += 1;
         if (trueSeerClaim && counterclaims.length === 0) claimMetrics.loneTrueSeerMatches += 1;
         if (seerClaims.length === 1) claimMetrics.loneSeerClaimMatches += 1;
@@ -91,6 +102,25 @@ async function main() {
             Number(closed.payload.consensusDefenseExtraSpeeches ?? 0);
           if (Number(closed.payload.freeSpeeches) > allowedFreeSpeeches ||
             Number(closed.payload.intentPolls) > 2) claimMetrics.budgetViolations += 1;
+        }
+        let dayOneBoard = emptyDiscussionBoard();
+        const seenEvents: MatchEvent[] = [];
+        for (const event of events) {
+          if (event.day === 1 && event.type === 'discussion_speech') {
+            const turn = Number(event.payload.turn);
+            const structure = event.payload.structure as SpeechStructure | undefined;
+            const phase = discussionMaterialPhase(dayOneBoard, claimLedgerFromEvents(seenEvents), 1, turn);
+            if (phase === 'scarce' && structure?.suspicion) claimMetrics.scarceSuspicionStructures += 1;
+            if (structure && typeof event.payload.seat === 'string') {
+              dayOneBoard = foldDiscussionBoard(
+                dayOneBoard,
+                event.payload.seat as SeatId,
+                structure,
+                event.payload.requestsReply === true,
+              );
+            }
+          }
+          seenEvents.push(event);
         }
         console.log(`${index + 1}/${matches} seed=${record.seed} winner=${current.winner} events=${events.length} apiCalls=${current.apiCalls} claims=${ledger.length}`);
         break;

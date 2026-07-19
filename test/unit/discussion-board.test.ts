@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { setupPlayers } from '@/engine/setup';
 import {
   candidateEvidenceLedger, closedQuestionTopics, consensusVoteTarget, discussionAgenda, discussionBoardDigest,
-  emptyDiscussionBoard, foldDiscussionBoard, priorVoteIntentFor, sanitizeEchoSourceSeat, saturatedPointFor,
+  discussionMaterialPhase, emptyDiscussionBoard, foldDiscussionBoard, priorVoteIntentFor, publicCommitmentsFor,
+  sanitizeEchoSourceSeat, saturatedPointFor,
   suspicionCountFor, voteIntentCountFor,
 } from '@/engine/discussion-board';
 
@@ -16,8 +17,33 @@ describe('discussion v3 board', () => {
     expect(firstAgenda.join('\n')).not.toContain('名取 澪、八木 こはる、宮下 さくら');
 
     const secondAgenda = discussionAgenda(emptyDiscussionBoard(), players, 'seat-5', 2, undefined, ['seat-4']);
-    expect(secondAgenda.join('\n')).toContain('雨宮 しずくについて、発言を根拠に暫定評価を出す');
+    expect(secondAgenda.join('\n')).toContain('公開材料がまだ少ない');
+    expect(secondAgenda.join('\n')).toContain('疑い先を無理に作らず');
+    expect(secondAgenda.join('\n')).not.toContain('雨宮 しずくについて');
     expect(secondAgenda.join('\n')).not.toContain('名取 澪');
+  });
+
+  it('序盤6turnまでは独立疑い2人または公開結果が出るまで自然な保留を許す', () => {
+    const board = emptyDiscussionBoard();
+    expect(discussionMaterialPhase(board, [], 1, 2)).toBe('scarce');
+    expect(discussionMaterialPhase(board, [], 1, 6)).toBe('scarce');
+    expect(discussionMaterialPhase(board, [], 1, 7)).toBe('developing');
+    expect(discussionMaterialPhase(board, [], 1, 10)).toBe('decision');
+
+    const once = foldDiscussionBoard(board, 'seat-1', {
+      primaryAct: 'suspicion', questionTopic: null,
+      suspicion: { targetSeat: 'seat-4', basis: 'speech_content' }, voteIntent: null, boardAnalysis: false,
+    });
+    expect(discussionMaterialPhase(once, [], 1, 5)).toBe('scarce');
+    const twice = foldDiscussionBoard(once, 'seat-2', {
+      primaryAct: 'suspicion', questionTopic: null,
+      suspicion: { targetSeat: 'seat-5', basis: 'reasoning_quality' }, voteIntent: null, boardAnalysis: false,
+    });
+    expect(discussionMaterialPhase(twice, [], 1, 5)).toBe('developing');
+    expect(discussionMaterialPhase(board, [{
+      seat: 'seat-3', name: '占い候補', claimedRole: 'seer', coDay: 1, coStage: 'opening',
+      results: [{ day: 0, targetSeat: 'seat-4', verdict: '人狼ではない', announcedDay: 1 }],
+    }], 1, 3)).toBe('developing');
   });
 
   it('質問・回答・疑い・投票予定を公開構造だけから畳み込む', () => {
@@ -119,5 +145,40 @@ describe('discussion v3 board', () => {
       voteIntent: null, boardAnalysis: false,
     });
     expect(invalid.suspicion?.echoSourceSeat).toBeNull();
+  });
+
+  it('席別の最新候補・回答・弁明・候補更新を既存structureだけから示す', () => {
+    const players = setupPlayers('public-commitments');
+    let board = emptyDiscussionBoard();
+    board = foldDiscussionBoard(board, 'seat-1', {
+      primaryAct: 'suspicion', questionTopic: null,
+      suspicion: { targetSeat: 'seat-4', basis: 'speech_content' }, voteIntent: null, boardAnalysis: false,
+    });
+    board = foldDiscussionBoard(board, 'seat-1', {
+      primaryAct: 'suspicion', questionTopic: null,
+      suspicion: { targetSeat: 'seat-5', basis: 'reasoning_quality' }, voteIntent: 'seat-5', boardAnalysis: false,
+    });
+    board = foldDiscussionBoard(board, 'seat-2', {
+      primaryAct: 'answer', questionTopic: 'gray_read', suspicion: null, voteIntent: null, boardAnalysis: false,
+    });
+    board = foldDiscussionBoard(board, 'seat-2', {
+      primaryAct: 'defense', questionTopic: null, suspicion: null, voteIntent: null, boardAnalysis: false,
+    });
+
+    expect(publicCommitmentsFor(board)).toEqual([
+      {
+        seat: 'seat-1', suspicionTargetSeat: 'seat-5', suspicionBasis: 'reasoning_quality', voteIntentTargetSeat: 'seat-5',
+        answeredTopics: [], defended: false, changedSuspicion: true,
+      },
+      {
+        seat: 'seat-2', answeredTopics: ['gray_read'], defended: true, changedSuspicion: false,
+      },
+    ]);
+    const digest = discussionBoardDigest(board, players).join('\n');
+    expect(digest).toContain('今日すでに公開した立場');
+    expect(digest).toContain('疑い根拠=reasoning_quality');
+    expect(digest).toContain('回答済み=gray_read');
+    expect(digest).toContain('弁明済み');
+    expect(digest).toContain('候補更新済み');
   });
 });
