@@ -89,6 +89,10 @@ export class MockAI implements DecisionProvider {
     const v3 = context.discussion?.version === 'v3';
     const shouldDeclareVote = v3 && (context.discussion?.turn ?? 0) >= 10 && Boolean(structureTarget);
     const shouldAnalyzeBoard = v3 && !shouldDeclareVote && (context.discussion?.turn ?? 0) % 4 === 0;
+    const mockSuspicionBases = ['speech_content', 'statement_slip', 'reasoning_quality'] as const;
+    const suspicionBasis = mockSuspicionBases[
+      stableIndex(context.seed, `${context.callKey}-suspicion-basis`, mockSuspicionBases.length)
+    ];
     const finalSpeech = shouldDeclareVote
       ? `今は${addressTermFor(context.actor.seat, structureTarget!)}に投票する。${speech}`
       : shouldAnalyzeBoard
@@ -109,7 +113,7 @@ export class MockAI implements DecisionProvider {
         primaryAct: answering ? 'answer' : shouldDeclareVote ? 'vote_intent' : shouldAnalyzeBoard ? 'board_analysis' : 'suspicion',
         questionTopic: answering || decision.requestsReply ? 'other' : null,
         suspicion: !answering && !shouldDeclareVote && !shouldAnalyzeBoard && structureTarget
-          ? { targetSeat: structureTarget, basis: 'speech_content' }
+          ? { targetSeat: structureTarget, basis: suspicionBasis, echoSourceSeat: null }
           : null,
         voteIntent: shouldDeclareVote ? structureTarget : null,
         boardAnalysis: shouldAnalyzeBoard,

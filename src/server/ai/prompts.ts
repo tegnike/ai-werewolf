@@ -4,12 +4,29 @@ import { addressGuideForSeat, agentNameForSeat, personaForSeat } from '@/domain/
 import { roleBehaviorFor } from '@/domain/role-behaviors';
 import { resultDisclosureGuidance } from './disclosure';
 
+const SUSPICION_BASIS_LABELS = {
+  speech_content: '発言内容',
+  statement_slip: '言い間違い・言い回し',
+  reasoning_quality: '説明・理由の質',
+  timing: '発言時機',
+  interaction: '他者との関わり',
+  vote_plan: '投票方針',
+  role_claim: '役職主張',
+  result: '公開された能力結果',
+  intuition: '勘',
+} as const;
+
 export function buildPrompts(context: DecisionContext): { systemPrompt: string; decisionPrompt: string } {
   const persona = personaForSeat(context.actor.seat);
   const isSpeech = context.kind === 'speech' || context.kind === 'wolf_speech';
   const isSpeechIntent = context.kind === 'speech_intent';
   const discussionV3 = context.discussion?.version === 'v3';
   const isFirstDiscussionSpeaker = context.kind === 'speech' && context.discussion?.turn === 1;
+  const comparisonSeats = [
+    ...(context.candidateEvidence ?? []).map((entry) => entry.targetSeat),
+    ...context.legalTargets,
+  ].filter((seat, index, seats) => context.legalTargets.includes(seat) && seats.indexOf(seat) === index).slice(0, 2);
+  const comparisonNames = comparisonSeats.map((seat) => agentNameForSeat(seat));
   const disclosureGuidance = resultDisclosureGuidance(context);
   const promptedByName = context.discussion?.promptedBySeat
     ? agentNameForSeat(context.discussion.promptedBySeat)
@@ -121,12 +138,15 @@ export function buildPrompts(context: DecisionContext): { systemPrompt: string; 
     ...(context.discussion?.priorVoteIntentTarget
       ? [`あなたはすでに${agentNameForSeat(context.discussion.priorVoteIntentTarget)}への投票予定を公表しています。変更しない予定を本文で繰り返さず、voteIntentにも再設定しないでください。`]
       : []),
+    ...(context.discussion?.saturatedPoint ? [
+      `${agentNameForSeat(context.discussion.saturatedPoint.targetSeat)}への「${SUSPICION_BASIS_LABELS[context.discussion.saturatedPoint.basis]}」という同じ種類の疑いは、すでに${context.discussion.saturatedPoint.speakers}人から公開されています。賛同するなら短く述べて構いませんが、同じ指摘を繰り返すだけでは公開材料は増えません。まだ検討されていない人物、2番手候補、本人の応答、別の公開根拠のいずれかとの比較を優先してください。同じ相手を新しい根拠で疑うことは妨げません。`,
+    ] : []),
     '一般的な9人人狼では、占い師候補が二人とも「人狼ではない」という結果だけを伝えている場合、直ちに占い師候補だけを処刑範囲にせず、役職を名乗っていない人から候補を探す進行も比較してください。「人狼」という結果があるなら、その結果を出された本人の反応と占い師候補を比較し、霊媒師候補が二人なら両方を順に処刑する進行を検討してください。盤面を見ず「役職候補からしかない」と決めつけないでください。',
     '別々の相手へ「人狼ではない」という結果を出した占い師候補同士は、結果が矛盾・対立・食い違っているわけではありません。結果の対立と言えるのは、同じ相手へ「人狼」と「人狼ではない」という反対の結果を出した場合です。対抗して同じ役職を名乗ったことと、結果そのものの矛盾を区別してください。',
     ...(context.discussion?.boardDigest?.length ? [`現在の議論台帳: ${context.discussion.boardDigest.join(' / ')}`] : []),
     ...(context.discussion?.agenda?.length ? [`まだ不足している貢献の候補: ${context.discussion.agenda.join(' / ')}。これは台詞の指定ではありません。最新状況と人物像に合うものを選び、自分の言葉で話してください。`] : []),
     ...(!isSpeechIntent ? [
-      `structureは実際に口にする内容の自己分類です。primaryActは発言の主目的、questionTopicは本文で明確に返答を求めた質問、またはその質問への回答の話題だけを記録し、話題へ触れただけならnullにしてください。質問へ答えるだけならprimaryAct=answer、requestsReply=falseです。suspicionは本文で実際に疑う一人と根拠分類を記録し、公開情報を根拠にするならevidenceDayへその情報の日を入れてください。勘だけならbasis=intuition、evidenceDay=nullですが、今日の最初の発言で公開根拠もない場合は勘だけの疑いを作らずsuspicion=nullにしてください。今日まだ発言していない人でも${context.day > 1 ? '前日以前' : '第0夜'}の公開情報は根拠にできますが、今日の未観測の態度は根拠にできません。voteIntentは本文で実際に投票予定を宣言する一人だけを記録してください。boardAnalysisは、役職を名乗った人数と今日の処刑対象範囲を本文で明示的に整理した場合だけtrueです。該当しない項目はnullまたはfalseにしてください。`,
+      `structureは実際に口にする内容の自己分類です。primaryActは発言の主目的、questionTopicは本文で明確に返答を求めた質問、またはその質問への回答の話題だけを記録し、話題へ触れただけならnullにしてください。質問へ答えるだけならprimaryAct=answer、requestsReply=falseです。suspicionは本文で実際に疑う一人と根拠分類を記録します。対象自身の言い間違い・言い回しを疑うならbasis=statement_slip、説明や理由の薄さ・飛躍を疑うならbasis=reasoning_qualityにし、両方に当たる場合は本文で実際に指摘した方を一つ選んでください。既出の指摘へ明示的に同調した場合だけechoSourceSeatへその引用元を入れ、独自の指摘ならnullにしてください。賛同や繰り返し自体は自然な行動であり、これは公開された立場の記録であって発言の価値を機械的に下げるものではありません。公開情報を根拠にするならevidenceDayへその情報の日を入れてください。勘だけならbasis=intuition、evidenceDay=nullですが、今日の最初の発言で公開根拠もない場合は勘だけの疑いを作らずsuspicion=nullにしてください。今日まだ発言していない人でも${context.day > 1 ? '前日以前' : '第0夜'}の公開情報は根拠にできますが、今日の未観測の態度は根拠にできません。voteIntentは本文で実際に投票予定を宣言する一人だけを記録してください。boardAnalysisは、役職を名乗った人数と今日の処刑対象範囲を本文で明示的に整理した場合だけtrueです。該当しない項目はnullまたはfalseにしてください。`,
     ] : [
       '自分が話したい内容が議論台帳ですでに質問・回答済みなら、具体的な新情報や訂正がない限りurgency=0を選んでください。',
     ]),
@@ -166,6 +186,14 @@ export function buildPrompts(context: DecisionContext): { systemPrompt: string; 
     ...v3DiscussionGuidance,
     ...(context.kind === 'vote' || context.kind === 'runoff_vote' ? [
       '議論中に公表された投票予定の人数は意見であって証拠ではありません。多数派へ合わせること自体を理由にせず、公開された能力結果、発言、反応、相互関係を独立に比較して投票してください。',
+      ...(context.candidateEvidence !== undefined ? [
+        '候補別の公開材料にある疑い人数や同調人数は、同じ論点の正しさを人数分だけ強くするものではありません。複数人が繰り返した同じ指摘は一つの論点として扱い、その中身と本人の応答を自分で確かめてください。',
+        '占い師や霊媒師を名乗る人物の結果は公開された主張であり、対象の本当の役職を確定しません。主張者の信用、対象本人の応答、対抗する役職主張を比較してください。別々の対象への結果は互いに矛盾せず、結果の対立は同じ対象へ反対の判定を主張した場合だけです。',
+        '役職を名乗った人物の言い間違いや説明の拙さと、その人物が出した結果の内容は別々に評価してください。言い間違いは信用材料の一つですが、それだけで結果の内容まで偽だと確定しません。',
+        comparisonNames.length >= 2
+          ? `${comparisonNames[0]}と${comparisonNames[1]}について、論点の中身、公開能力結果、役職主張と対抗、本人の応答を並べて比較してから選んでください。最多の投票予定が集まった相手でも別の相手でも、自分の比較から選んだ結論なら構いません。`
+          : '台帳に候補が一人しかいない場合も、他の合法な投票先から比較相手を一人選び、公開材料と本人の応答を並べてから選んでください。',
+      ] : []),
     ] : []),
     ...(isSpeechIntent ? [
       'これは実際の発言ではなく、今この時点で自由討論へ割り込みたいかを決める非公開判断です。台詞や長い理由は作らないでください。',

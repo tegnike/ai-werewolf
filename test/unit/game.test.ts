@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { DecisionContext, DecisionProvider, SpeechDecision, SpeechIntentDecision, TargetDecision } from '@/domain/types';
+import type { DecisionContext, DecisionProvider, MatchEvent, SpeechDecision, SpeechIntentDecision, TargetDecision } from '@/domain/types';
 import { runGame } from '@/engine/game';
 import { MockAI } from '@/server/ai/mock';
 import { runMock } from '../helpers/runMock';
@@ -64,6 +64,51 @@ describe('ゲームエンジン', () => {
         expect(maximum).toBe(18);
       }
     }
+  });
+
+  it('同一論点が3人へ広がると後続contextへ飽和論点を渡し、有効な引用元を公開構造へ残す', async () => {
+    const contexts: DecisionContext[] = [];
+    const events: MatchEvent[] = [];
+    let firstSource: DecisionContext['actor']['seat'] | null = null;
+    const provider: DecisionProvider = {
+      async speech(context): Promise<SpeechDecision> {
+        if (context.kind === 'wolf_speech' || !context.discussion) {
+          return { speech: '今夜の方針を考える。', addressedTo: null, requestsReply: false };
+        }
+        contexts.push(structuredClone(context));
+        const targetSeat = context.actor.seat === 'seat-9' ? 'seat-8' : 'seat-9';
+        const echoSourceSeat = targetSeat === 'seat-9' ? firstSource : null;
+        if (targetSeat === 'seat-9' && firstSource === null) firstSource = context.actor.seat;
+        return {
+          speech: `${targetSeat}の言い回しが気になる。`, addressedTo: null, requestsReply: false,
+          structure: {
+            primaryAct: 'suspicion', questionTopic: null,
+            suspicion: { targetSeat, basis: 'statement_slip', echoSourceSeat },
+            voteIntent: null, boardAnalysis: false,
+          },
+        };
+      },
+      async speechIntent(): Promise<SpeechIntentDecision> {
+        return { urgency: 0, motivation: 'none', targetSeat: null };
+      },
+      async target(context): Promise<TargetDecision> {
+        return { targetSeat: context.legalTargets[0], statedReason: '合法候補を比較した。' };
+      },
+    };
+    await runGame('saturated-point', 'saturated-point', provider, {
+      emit: async (event) => { events.push({ ...event, matchId: 'saturated-point', seq: events.length + 1, createdAt: '' }); },
+      checkpoint: async () => {},
+    });
+
+    expect(contexts.some((context) => context.day === 1 &&
+      context.discussion?.saturatedPoint?.targetSeat === 'seat-9' &&
+      context.discussion.saturatedPoint.basis === 'statement_slip' &&
+      context.discussion.saturatedPoint.speakers >= 3)).toBe(true);
+    const echoed = events.filter((event) => event.day === 1 && event.type === 'discussion_speech')
+      .map((event) => event.payload.structure as SpeechDecision['structure'])
+      .filter((structure) => structure?.suspicion?.targetSeat === 'seat-9' && structure.suspicion.echoSourceSeat);
+    expect(echoed.length).toBeGreaterThanOrEqual(2);
+    expect(echoed.every((structure) => structure?.suspicion?.echoSourceSeat === firstSource)).toBe(true);
   });
 
   it('3人目の同一投票予定後、2回発言済みの対象本人へ追加反論枠を1回だけ渡す', async () => {

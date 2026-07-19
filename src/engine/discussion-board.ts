@@ -1,7 +1,12 @@
 import type { ClaimLedger } from '@/domain/claims';
-import type { CandidateEvidenceEntry, Player, QuestionTopic, SeatId, SpeechAct, SpeechStructure, SuspicionBasis } from '@/domain/types';
+import type { CandidateEvidenceEntry, DiscussionContext, Player, QuestionTopic, SeatId, SpeechAct, SpeechStructure, SuspicionBasis } from '@/domain/types';
 
-interface SuspicionEntry { sourceSeat: SeatId; targetSeat: SeatId; basis: SuspicionBasis }
+interface SuspicionEntry {
+  sourceSeat: SeatId;
+  targetSeat: SeatId;
+  basis: SuspicionBasis;
+  echoSourceSeat?: SeatId | null;
+}
 interface VoteIntentEntry { sourceSeat: SeatId; targetSeat: SeatId }
 
 export interface DiscussionBoard {
@@ -64,6 +69,23 @@ export function priorVoteIntentFor(board: DiscussionBoard, seat: SeatId): SeatId
   return board.voteIntents.find((entry) => entry.sourceSeat === seat)?.targetSeat;
 }
 
+export function sanitizeEchoSourceSeat(
+  board: DiscussionBoard,
+  claims: ClaimLedger,
+  actorSeat: SeatId,
+  structure: SpeechStructure,
+): SpeechStructure {
+  const suspicion = structure.suspicion;
+  if (!suspicion?.echoSourceSeat) return structure;
+  const sourceSeat = suspicion.echoSourceSeat;
+  const citesPriorSuspicion = board.suspicions.some((entry) =>
+    entry.sourceSeat === sourceSeat && entry.targetSeat === suspicion.targetSeat);
+  const citesPublicResult = claims.some((claim) => claim.seat === sourceSeat &&
+    claim.results.some((result) => result.targetSeat === suspicion.targetSeat));
+  if (sourceSeat !== actorSeat && (citesPriorSuspicion || citesPublicResult)) return structure;
+  return { ...structure, suspicion: { ...suspicion, echoSourceSeat: null } };
+}
+
 export function consensusVoteTarget(board: DiscussionBoard, minimum = 3): SeatId | undefined {
   const tally = new Map<SeatId, number>();
   for (const entry of board.voteIntents) tally.set(entry.targetSeat, (tally.get(entry.targetSeat) ?? 0) + 1);
@@ -82,12 +104,20 @@ export function candidateEvidenceLedger(board: DiscussionBoard, claims: ClaimLed
   return [...targets].map((targetSeat) => {
     const bases: Partial<Record<SuspicionBasis, number>> = {};
     const suspicions = board.suspicions.filter((entry) => entry.targetSeat === targetSeat);
-    for (const suspicion of suspicions) bases[suspicion.basis] = (bases[suspicion.basis] ?? 0) + 1;
+    for (const basis of new Set(suspicions.map((entry) => entry.basis))) {
+      bases[basis] = new Set(suspicions
+        .filter((entry) => entry.basis === basis)
+        .map((entry) => entry.sourceSeat)).size;
+    }
     return {
       targetSeat,
       suspicionSpeakers: new Set(suspicions.map((entry) => entry.sourceSeat)).size,
       voteIntentSpeakers: voteIntentCountFor(board, targetSeat),
       suspicionBases: bases,
+      echoSpeakers: new Set(suspicions
+        .filter((entry) => entry.echoSourceSeat != null)
+        .map((entry) => entry.sourceSeat)).size,
+      distinctBases: Object.keys(bases).length,
       claimedResults: claims.flatMap((claim) => claim.results
         .filter((result) => result.targetSeat === targetSeat)
         .map((result) => ({
@@ -101,6 +131,41 @@ export function candidateEvidenceLedger(board: DiscussionBoard, claims: ClaimLed
     b.voteIntentSpeakers - a.voteIntentSpeakers ||
     b.suspicionSpeakers - a.suspicionSpeakers ||
     a.targetSeat.localeCompare(b.targetSeat));
+}
+
+export function saturatedPointFor(
+  board: DiscussionBoard,
+  minimumSpeakers = 3,
+  minimumEchoSpeakers = 2,
+): DiscussionContext['saturatedPoint'] {
+  const points = new Map<string, { targetSeat: SeatId; basis: SuspicionBasis; sources: Set<SeatId>; echoes: Set<SeatId> }>();
+  for (const suspicion of board.suspicions.filter((entry) => entry.basis !== 'result')) {
+    const key = `${suspicion.targetSeat}/${suspicion.basis}`;
+    const point = points.get(key) ?? {
+      targetSeat: suspicion.targetSeat,
+      basis: suspicion.basis,
+      sources: new Set<SeatId>(),
+      echoes: new Set<SeatId>(),
+    };
+    point.sources.add(suspicion.sourceSeat);
+    if (suspicion.echoSourceSeat != null) point.echoes.add(suspicion.sourceSeat);
+    points.set(key, point);
+  }
+  const candidates = [...points.values()]
+    .map((point) => ({
+      targetSeat: point.targetSeat,
+      basis: point.basis,
+      speakers: point.sources.size,
+      echoSpeakers: point.echoes.size,
+    }))
+    .filter((entry) => entry.speakers >= minimumSpeakers || entry.echoSpeakers >= minimumEchoSpeakers)
+    .sort((a, b) =>
+      b.speakers - a.speakers ||
+      b.echoSpeakers - a.echoSpeakers ||
+      a.targetSeat.localeCompare(b.targetSeat) ||
+      a.basis.localeCompare(b.basis));
+  const first = candidates[0];
+  return first ? { targetSeat: first.targetSeat, basis: first.basis, speakers: first.speakers } : undefined;
 }
 
 export function closedQuestionTopics(board: DiscussionBoard, limit = 2): QuestionTopic[] {
@@ -126,7 +191,7 @@ export function discussionBoardDigest(board: DiscussionBoard, players: Player[],
       const bases = Object.entries(entry.suspicionBases).map(([basis, count]) => `${basis}=${count}`).join('・') || 'なし';
       const results = entry.claimedResults.map((result) =>
         `${names.get(result.sourceSeat)}の${result.claimedRole}主張=${result.verdict}${result.sameRoleClaimants > 1 ? `（同役職主張${result.sameRoleClaimants}人）` : ''}`).join('・') || 'なし';
-      return `${names.get(entry.targetSeat)}（投票予定${entry.voteIntentSpeakers}人、疑い${entry.suspicionSpeakers}人、根拠${bases}、役職結果${results}）`;
+      return `${names.get(entry.targetSeat)}（投票予定${entry.voteIntentSpeakers}人、疑い${entry.suspicionSpeakers}人、論点${entry.distinctBases}種:${bases}、同調${entry.echoSpeakers}人、役職結果${results}）`;
     }).join(' / ')}`);
   }
   const productive = ['suspicion', 'defense', 'vote_intent'] as const;
@@ -151,6 +216,10 @@ export function discussionAgenda(
   const consensus = consensusVoteTarget(board);
   if (consensus) {
     agenda.push(`${names.get(consensus)}への投票予定はすでに3人以上から公表されたため同じ予定を追加宣言せず、人数を根拠にしない。増えた公開情報、被疑者への質問、反証、または未検討の人物を話す`);
+  }
+  const saturated = saturatedPointFor(board);
+  if (saturated) {
+    agenda.push(`${names.get(saturated.targetSeat)}への${saturated.basis}の疑いはすでに${saturated.speakers}人が述べた。同じ指摘の反復より、別の公開材料、2番手候補、本人の応答を比較する`);
   }
   const mentioned = new Set(board.suspicions.map((entry) => entry.targetSeat));
   const unexamined = aliveOthers.filter((player) => spoken.has(player.seat) && !mentioned.has(player.seat)).slice(0, 3);

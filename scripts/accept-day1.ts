@@ -2,8 +2,10 @@ import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { MODEL } from '../src/domain/constants';
-import type { MatchEvent, MatchRecord } from '../src/domain/types';
+import { claimLedgerFromEvents } from '../src/domain/claims';
+import type { MatchEvent, MatchRecord, SeatId, SpeechStructure } from '../src/domain/types';
 import { decideClaimPolicies } from '../src/engine/claim-policy';
+import { candidateEvidenceLedger, emptyDiscussionBoard, foldDiscussionBoard } from '../src/engine/discussion-board';
 import { setupPlayers } from '../src/engine/setup';
 import { closeDatabaseForTests } from '../src/server/db';
 import { MatchRepo } from '../src/server/repo';
@@ -90,6 +92,49 @@ function resultEvents(events: MatchEvent[]) {
   ].includes(event.type));
 }
 
+function dayOneMetrics(events: MatchEvent[]) {
+  const speeches = events.filter((event) => event.visibility === 'public' &&
+    event.day === 1 && event.type === 'discussion_speech');
+  let board = emptyDiscussionBoard();
+  for (const event of speeches) {
+    const seat = event.payload.seat;
+    const structure = event.payload.structure;
+    if (typeof seat !== 'string' || !structure || typeof structure !== 'object') continue;
+    board = foldDiscussionBoard(
+      board,
+      seat as SeatId,
+      structure as SpeechStructure,
+      event.payload.requestsReply === true,
+    );
+  }
+  const candidateEvidence = candidateEvidenceLedger(board, claimLedgerFromEvents(events))
+    .map((entry) => ({
+      targetSeat: entry.targetSeat,
+      suspicionSpeakers: entry.suspicionSpeakers,
+      voteIntentSpeakers: entry.voteIntentSpeakers,
+      distinctBases: entry.distinctBases,
+      suspicionBases: entry.suspicionBases,
+      echoSpeakers: entry.echoSpeakers,
+      claimedResultCount: entry.claimedResults.length,
+    }));
+  const voteReveal = events.find((event) => event.visibility === 'public' &&
+    event.day === 1 && event.type === 'vote_reveal');
+  const tally = voteReveal?.payload.tally && typeof voteReveal.payload.tally === 'object'
+    ? Object.values(voteReveal.payload.tally as Record<string, unknown>).map(Number).filter(Number.isFinite)
+    : [];
+  const speakerSeats = speeches.map((event) => event.payload.seat).filter((seat): seat is string => typeof seat === 'string');
+  const speakerSpacingViolations = speakerSeats.filter((seat, index) =>
+    speakerSeats.slice(Math.max(0, index - 2), index).includes(seat)).length;
+  const maxVotes = tally.length > 0 ? Math.max(...tally) : 0;
+  return {
+    speechCount: speeches.length,
+    speakerSpacingViolations,
+    maxVoteShare: tally.length > 0 ? Number((maxVotes / tally.reduce((sum, count) => sum + count, 0)).toFixed(3)) : null,
+    candidatesWithAtLeastTwoVotes: tally.filter((count) => count >= 2).length,
+    candidateEvidence,
+  };
+}
+
 async function runCase(
   manager: MatchRunnerManager,
   repo: MatchRepo,
@@ -174,6 +219,7 @@ async function main(): Promise<void> {
       apiCalls: result.match.apiCalls,
       reachedDayOneExecution: result.reachedDayOneExecution,
       error: result.runnerError,
+      metrics: dayOneMetrics(repo.events(result.match.id)),
       events: result.events,
     })),
   };

@@ -110,7 +110,7 @@ describe('実AI人格プロンプト', () => {
               : player);
     const candidateEvidence = [{
       targetSeat: wolfAlly.seat, suspicionSpeakers: 1, voteIntentSpeakers: 0,
-      suspicionBases: { result: 1 as const },
+      suspicionBases: { result: 1 as const }, echoSpeakers: 0, distinctBases: 1,
       claimedResults: [{
         sourceSeat: seerClaimant.seat, claimedRole: 'seer' as const,
         verdict: '人狼' as const, sameRoleClaimants: 1,
@@ -154,11 +154,12 @@ describe('実AI人格プロンプト', () => {
       publicHistory: ['名取 澪: 私はひよりさんへ投票します。'], privateFacts: [], round: 2,
       discussion: {
         version: 'v3', stage: 'free', turn: 12, consensusTarget: 'seat-9', priorVoteIntentTarget: 'seat-9',
+        saturatedPoint: { targetSeat: 'seat-9', basis: 'statement_slip', speakers: 3 },
         boardDigest: ['候補別の公開材料: 久遠 ひより（投票予定3人、疑い2人、根拠result=1、役職結果あり）'],
       },
       candidateEvidence: [{
         targetSeat: 'seat-9', suspicionSpeakers: 2, voteIntentSpeakers: 3,
-        suspicionBases: { result: 1, vote_plan: 1 },
+        suspicionBases: { result: 1, vote_plan: 1 }, echoSpeakers: 0, distinctBases: 2,
         claimedResults: [{ sourceSeat: 'seat-4', claimedRole: 'seer', verdict: '人狼', sameRoleClaimants: 2 }],
       }],
     };
@@ -168,6 +169,8 @@ describe('実AI人格プロンプト', () => {
     expect(prompts.systemPrompt).toContain('同じ相手への投票予定を本文で追加宣言せず');
     expect(prompts.systemPrompt).toContain('最終の非公開投票先は拘束されません');
     expect(prompts.systemPrompt).toContain('変更しない予定を本文で繰り返さず');
+    expect(prompts.systemPrompt).toContain('「言い間違い・言い回し」という同じ種類の疑い');
+    expect(prompts.systemPrompt).toContain('同じ相手を新しい根拠で疑うことは妨げません');
     expect(prompts.decisionPrompt).toContain('candidateEvidence');
   });
 
@@ -192,11 +195,14 @@ describe('実AI人格プロンプト', () => {
       legalTargets: players.slice(1).map((player) => player.seat), publicHistory: [], privateFacts: [],
       candidateEvidence: [{
         targetSeat: 'seat-9', suspicionSpeakers: 4, voteIntentSpeakers: 5,
-        suspicionBases: { result: 1, vote_plan: 3 }, claimedResults: [],
+        suspicionBases: { result: 1, statement_slip: 3 }, echoSpeakers: 2, distinctBases: 2, claimedResults: [],
       }],
     });
 
     expect(prompts.systemPrompt).toContain('多数派へ合わせること自体を理由にせず');
+    expect(prompts.systemPrompt).toContain('複数人が繰り返した同じ指摘は一つの論点');
+    expect(prompts.systemPrompt).toContain('言い間違いや説明の拙さ');
+    expect(prompts.systemPrompt).toContain(`${players[8].name}と${players[1].name}`);
     expect(prompts.decisionPrompt).toContain('candidateEvidence');
   });
 
@@ -311,14 +317,14 @@ describe('実AI人格プロンプト', () => {
       speech: 'こはるさんの便乗が気になります。', addressedTo: null, requestsReply: false,
       structure: {
         primaryAct: 'suspicion', questionTopic: null,
-        suspicion: { targetSeat: 'seat-2', basis: 'interaction', evidenceDay: 1 }, voteIntent: null, boardAnalysis: false,
+        suspicion: { targetSeat: 'seat-2', basis: 'interaction', echoSourceSeat: null, evidenceDay: 1 }, voteIntent: null, boardAnalysis: false,
       },
     }).success).toBe(true);
     expect(schema.safeParse({
       speech: 'こはるさんの便乗が気になります。', addressedTo: null, requestsReply: false,
       structure: {
         primaryAct: 'suspicion', questionTopic: null,
-        suspicion: { targetSeat: 'seat-2', basis: 'interaction' }, voteIntent: null, boardAnalysis: false,
+        suspicion: { targetSeat: 'seat-2', basis: 'interaction', echoSourceSeat: null }, voteIntent: null, boardAnalysis: false,
       },
     }).success).toBe(false);
     expect(schema.safeParse({

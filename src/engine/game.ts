@@ -18,7 +18,8 @@ import {
 } from './claim-policy';
 import {
   candidateEvidenceLedger, closedQuestionTopics, consensusVoteTarget, discussionAgenda, discussionBoardDigest,
-  emptyDiscussionBoard, foldDiscussionBoard, priorVoteIntentFor, suspicionCountFor, voteIntentCountFor,
+  emptyDiscussionBoard, foldDiscussionBoard, priorVoteIntentFor, sanitizeEchoSourceSeat, saturatedPointFor,
+  suspicionCountFor, voteIntentCountFor,
 } from './discussion-board';
 
 export interface SimulationResult { winner: Winner; day: number; state: GameState }
@@ -190,6 +191,7 @@ export async function runGame(
     round?: number,
     discussion?: DiscussionContext,
   ): DecisionContext => {
+    const saturatedPoint = discussionVersion === 'v3' ? saturatedPointFor(discussionBoard) : undefined;
     const base: DecisionContext = {
       matchId, seed, day, phase, kind, callKey, actor,
       players: state.players.map((player) => ({ ...player })), legalTargets,
@@ -212,6 +214,7 @@ export async function runGame(
           closedQuestionTopics: closedQuestionTopics(discussionBoard),
           ...(consensusVoteTarget(discussionBoard) ? { consensusTarget: consensusVoteTarget(discussionBoard) } : {}),
           ...(priorVoteIntentFor(discussionBoard, actor.seat) ? { priorVoteIntentTarget: priorVoteIntentFor(discussionBoard, actor.seat) } : {}),
+          ...(saturatedPoint ? { saturatedPoint } : {}),
         } : {}),
       } : undefined,
     };
@@ -654,6 +657,11 @@ export async function runGame(
         const decision = await ai.speech(speechContext);
         if (speechContext.claimDirective) assertClaimWithinDirective(decision.claim, speechContext.claimDirective);
         if (discussionVersion === 'v3' && !decision.structure) throw new Error('DISCUSSION_V3_STRUCTURE_REQUIRED');
+        if (discussionVersion === 'v3' && decision.structure) {
+          decision.structure = sanitizeEchoSourceSeat(
+            discussionBoard, claimLedger, actor.seat, decision.structure,
+          );
+        }
         const speech = normalizeSpeech(decision.speech);
         speechCount += 1;
         if (currentSpeaker.allowExtraSpeech && actorSpeechCount >= MAX_SPEECHES_PER_PLAYER) {

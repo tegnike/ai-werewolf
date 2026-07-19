@@ -57,7 +57,9 @@ export type DecisionKind = 'speech' | 'speech_intent' | 'wolf_speech' | 'vote' |
 export type SpeechMotivation = 'reply' | 'question' | 'challenge' | 'new_information' | 'clarify' | 'none';
 export type SpeechAct = 'role_claim' | 'question' | 'answer' | 'suspicion' | 'defense' | 'vote_intent' | 'board_analysis' | 'agreement' | 'other';
 export type QuestionTopic = 'inspection_reason' | 'claim_timing' | 'counterclaim_reason' | 'execution_policy' | 'vote_plan' | 'gray_read' | 'defense' | 'other';
-export type SuspicionBasis = 'speech_content' | 'timing' | 'interaction' | 'vote_plan' | 'role_claim' | 'result' | 'intuition';
+export type SuspicionBasis =
+  | 'speech_content' | 'statement_slip' | 'reasoning_quality'
+  | 'timing' | 'interaction' | 'vote_plan' | 'role_claim' | 'result' | 'intuition';
 
 export interface SpeechStructure {
   primaryAct: SpeechAct;
@@ -66,6 +68,8 @@ export interface SpeechStructure {
   suspicion: {
     targetSeat: SeatId;
     basis: SuspicionBasis;
+    /** 既出論点へ明示的に同調した場合の引用元。旧保存応答との互換のため任意。 */
+    echoSourceSeat?: SeatId | null;
     /** 根拠となる公開情報の日。勘だけの場合はnull。旧保存応答との互換のため任意。 */
     evidenceDay?: number | null;
   } | null;
@@ -79,6 +83,10 @@ export interface CandidateEvidenceEntry {
   suspicionSpeakers: number;
   voteIntentSpeakers: number;
   suspicionBases: Partial<Record<SuspicionBasis, number>>;
+  /** 同じ既出論点を引用した疑いのユニーク話者数。 */
+  echoSpeakers: number;
+  /** 公開された疑いの根拠分類数。 */
+  distinctBases: number;
   claimedResults: Array<{
     sourceSeat: SeatId;
     claimedRole: 'seer' | 'medium';
@@ -110,6 +118,8 @@ export interface DiscussionContext {
   consensusDefense?: boolean;
   /** この話者が同日すでに宣言した投票予定。 */
   priorVoteIntentTarget?: SeatId;
+  /** 同じ対象・根拠分類へ疑いが集中し、別材料との比較が必要な公開状況。 */
+  saturatedPoint?: { targetSeat: SeatId; basis: SuspicionBasis; speakers: number };
   /** markerのない旧試合で固定一巡プロンプトを再現する。 */
   legacyRules?: boolean;
   /** discussion v2より前の保存済み試合を復旧するための互換情報。 */

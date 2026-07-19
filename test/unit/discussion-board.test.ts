@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { setupPlayers } from '@/engine/setup';
 import {
   candidateEvidenceLedger, closedQuestionTopics, consensusVoteTarget, discussionAgenda, discussionBoardDigest,
-  emptyDiscussionBoard, foldDiscussionBoard, priorVoteIntentFor, suspicionCountFor, voteIntentCountFor,
+  emptyDiscussionBoard, foldDiscussionBoard, priorVoteIntentFor, sanitizeEchoSourceSeat, saturatedPointFor,
+  suspicionCountFor, voteIntentCountFor,
 } from '@/engine/discussion-board';
 
 describe('discussion v3 board', () => {
@@ -67,6 +68,7 @@ describe('discussion v3 board', () => {
     expect(candidateEvidenceLedger(board, claims)[0]).toMatchObject({
       targetSeat: 'seat-5', voteIntentSpeakers: 3, suspicionSpeakers: 3,
       suspicionBases: { result: 1, vote_plan: 2 },
+      echoSpeakers: 0, distinctBases: 2,
       claimedResults: [{ sourceSeat: 'seat-1', claimedRole: 'seer', verdict: '人狼' }],
     });
     const digest = discussionBoardDigest(board, players, claims).join('\n');
@@ -74,5 +76,48 @@ describe('discussion v3 board', () => {
     expect(digest).toContain('投票予定3人');
     expect(digest).toContain('役職結果');
     expect(discussionAgenda(board, players, 'seat-4', 10).join('\n')).toContain('人数を根拠にしない');
+  });
+
+  it('同一論点の反復と独立論点を区別し、不正な引用元だけを安全側へ落とす', () => {
+    const players = setupPlayers('echo-ledger');
+    let board = emptyDiscussionBoard();
+    board = foldDiscussionBoard(board, 'seat-1', {
+      primaryAct: 'suspicion', questionTopic: null,
+      suspicion: { targetSeat: 'seat-7', basis: 'statement_slip', echoSourceSeat: null },
+      voteIntent: null, boardAnalysis: false,
+    });
+
+    const echoed = sanitizeEchoSourceSeat(board, [], 'seat-2', {
+      primaryAct: 'suspicion', questionTopic: null,
+      suspicion: { targetSeat: 'seat-7', basis: 'statement_slip', echoSourceSeat: 'seat-1' },
+      voteIntent: null, boardAnalysis: false,
+    });
+    board = foldDiscussionBoard(board, 'seat-2', echoed);
+    board = foldDiscussionBoard(board, 'seat-3', {
+      primaryAct: 'suspicion', questionTopic: null,
+      suspicion: { targetSeat: 'seat-7', basis: 'statement_slip', echoSourceSeat: 'seat-1' },
+      voteIntent: null, boardAnalysis: false,
+    });
+    board = foldDiscussionBoard(board, 'seat-4', {
+      primaryAct: 'suspicion', questionTopic: null,
+      suspicion: { targetSeat: 'seat-7', basis: 'reasoning_quality', echoSourceSeat: null },
+      voteIntent: null, boardAnalysis: false,
+    });
+
+    expect(candidateEvidenceLedger(board)[0]).toMatchObject({
+      targetSeat: 'seat-7', suspicionSpeakers: 4,
+      suspicionBases: { statement_slip: 3, reasoning_quality: 1 },
+      echoSpeakers: 2, distinctBases: 2,
+    });
+    expect(saturatedPointFor(board)).toEqual({ targetSeat: 'seat-7', basis: 'statement_slip', speakers: 3 });
+    expect(discussionBoardDigest(board, players).join('\n')).toContain('論点2種:statement_slip=3・reasoning_quality=1、同調2人');
+    expect(discussionAgenda(board, players, 'seat-5', 8).join('\n')).toContain('同じ指摘の反復より');
+
+    const invalid = sanitizeEchoSourceSeat(board, [], 'seat-5', {
+      primaryAct: 'suspicion', questionTopic: null,
+      suspicion: { targetSeat: 'seat-8', basis: 'interaction', echoSourceSeat: 'seat-1' },
+      voteIntent: null, boardAnalysis: false,
+    });
+    expect(invalid.suspicion?.echoSourceSeat).toBeNull();
   });
 });
