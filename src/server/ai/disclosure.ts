@@ -1,15 +1,15 @@
 import { ROLE_LABEL } from '@/domain/constants';
 import { ClaimContractError, assertClaimWithinDirective } from '@/domain/claims';
 import type { DecisionContext, SpeechDecision } from '@/domain/types';
-import { addressTermFor, agentNameForSeat, personaForSeat } from '@/domain/agents';
+import { addressTermFor, agentNameForSeat, personaForSeat, roleClaimSentenceForSeat } from '@/domain/agents';
 
 const resultLikeClaim = /(?:人狼では(?:ない|ありません)|人狼)(?:でした|だった|です|だよ|と出|判定|結果)/;
 const abbreviatedRoleClaim = /(?:^|[^A-Za-z])(?:CO|ＣＯ)(?=$|[^A-Za-z])/i;
-const firstPersonRoleClaim = /(?:私|わたし|僕|俺|自分)(?:は|が|、)?[^。！？\n]{0,12}(?:占い師|霊媒師)(?:です|だ|である|を名乗|として)/;
+const firstPersonRoleClaim = /(?:私|わたし|あたし|僕|俺|自分)(?:は|が|、)?[^。！？\n]{0,12}(?:占い師|霊媒師)(?:です|だよ|だ|よ|である|を名乗|として)/;
 const confirmedPrivateResult = [
   /(?:人狼ではない|人狼|村人|白|黒)(?:だ|です|だった|でした|だと|であると)?[^。！？\n]{0,18}(?:確認でき|確認して|分かって|わかって|知っている|把握している)/,
   /(?:確認でき|確認して|分かって|わかって|知っている|把握している)[^。！？\n]{0,18}(?:人狼ではない|人狼|村人|白|黒)/,
-  /(?:私|わたし|僕|俺|自分)[^。！？\n]{0,30}(?:占った|占いました|霊媒した)[^。！？\n]{0,30}(?:人狼ではない|人狼|村人|白|黒)/,
+  /(?:私|わたし|あたし|僕|俺|自分)[^。！？\n]{0,30}(?:占った|占いました|霊媒した)[^。！？\n]{0,30}(?:人狼ではない|人狼|村人|白|黒)/,
 ];
 const withheldPrivateResult = [
   /(?:占い|霊媒|能力|判定|結果|正体)[^。！？\n]{0,24}(?:今は|まだ)[^。！？\n]{0,12}(?:言えない|言えません|話せない|話せません|明かせない|明かせません|伏せ)/,
@@ -32,8 +32,11 @@ function validateSelfReference(context: DecisionContext, speech: string): void {
     );
   }
   const expected = personaForSeat(context.actor.seat).firstPerson;
-  const unexpected = expected === '俺' ? '私' : '俺';
-  const unexpectedSelfReference = new RegExp(`(?:^|[。！？\\n]\\s*)${unexpected}(?:は|が|も|の|を|なら|には)`);
+  const unexpected = ['私', 'わたし', 'あたし', '僕', '俺', '自分']
+    .filter((candidate) => candidate !== expected)
+    .map(escapePattern)
+    .join('|');
+  const unexpectedSelfReference = new RegExp(`(?:^|[。！？\\n]\\s*)(?:${unexpected})(?:は|が|も|の|を|なら|には)`);
   if (unexpectedSelfReference.test(speech)) {
     throw new ClaimContractError(
       'first_person_drift',
@@ -44,10 +47,19 @@ function validateSelfReference(context: DecisionContext, speech: string): void {
 
 function validateNightZeroReasonBoundary(context: DecisionContext, speech: string): void {
   if (context.day !== 1 || context.discussion?.version !== 'v3') return;
-  const safeBoundary = /(?:無情報|推理上の理由.{0,8}(?:ない|ありません|存在しない)|(?:占い先|選定|そこ).{0,16}理由.{0,10}(?:ない|ありません|求めない|問わない|聞かない|材料にしない|評価しない)|理由.{0,10}(?:求めない|問わない|聞かない|材料にしない|評価しない))/;
-  const forbiddenReason = /(?:なぜ|どうして).{0,18}(?:占|そこを見|相手を選)|(?:占い先|そこを見た|相手を選んだ).{0,18}(?:理由|説明|一貫|具体|弱|納得|自然)|(?:結果に至った|その結果を出した).{0,12}理由/;
+  const safeBoundary = /(?:無情報|推理上の理由.{0,8}(?:ない|ありません|存在しない)|(?:占い先|選定|そこ).{0,16}理由.{0,10}(?:ない|ありません|求めない|求めません|問わない|問いません|聞かない|聞きません|材料にしない|材料にしません|評価しない|評価しません)|(?:理由|根拠).{0,10}(?:求めない|求めません|問わない|問いません|聞かない|聞きません|材料にしない|材料にしません|評価しない|評価しません))/;
+  const forbiddenReason = /(?:なぜ|どうして).{0,18}(?:占|そこを見|相手を選)|(?:占い先|そこを見た|相手を選んだ).{0,18}(?:理由|説明|一貫|具体|弱|納得|自然)|(?:結果に至った|その結果を出した).{0,12}理由|(?:その|占い|能力)?(?:結果|判定)(?:自体|そのもの)?(?:の|に至った)?(?:理由|根拠)|(?:人狼だ(?:と)?|人狼ではないと?)(?:見た|判断した|考えた)(?:理由|根拠)/;
   const reasonlessSelection = /(?:占い先|選定|選んだ対象).{0,18}理由.{0,10}(?:ない|ありません|存在しない)/;
   const credibilityEvaluation = /(?:信用|信じ|真らし|真っぽ|偽らし|偽っぽ|具体的|自然|一貫|評価|印象|差が|優れ|劣る|村っぽ|怪し|疑い|一歩)/;
+  const reasonlessUsedAsDifference = reasonlessSelection.test(speech) &&
+    /(?:この|その|そこ).{0,8}差.{0,8}(?:見|取|つけ|ある|気に)|差.{0,8}(?:評価|信用|信じ|真|偽)/.test(speech) &&
+    !/(?:この|その|そこ).{0,8}差.{0,12}(?:つけない|つけません|材料にしない|材料にしません|として見ない|として見ません)/.test(speech);
+  if (reasonlessUsedAsDifference) {
+    throw new ClaimContractError(
+      'night_zero_reason_is_not_evidence',
+      '0日目の対象選定に理由がないと明言したことと、他の占い師候補がそれへ言及しなかったことの差は、信用比較の材料にしないでください。名乗った時期、主張結果、対抗、公開後の反応と発言を比べてください。',
+    );
+  }
   const offending = speech.split(/[。！？\n]/).find((sentence) => {
     if (reasonlessSelection.test(sentence) && credibilityEvaluation.test(sentence)) return true;
     const implicitNightZeroSelection = /(?:なぜ|どうして).{1,18}を選んだ/.test(sentence) &&
@@ -127,7 +139,7 @@ function validateDiscussionStructure(context: DecisionContext, decision: SpeechD
     }
   }
   if (!context.discussion.priorVoteIntentTarget &&
-    /(?:私|俺)(?:は|も)[^。！？\n]{0,32}(?:投票予定|投票先|票を入れる相手)[^。！？\n]{0,16}(?:変えない|変えません|維持する|そのまま|のまま|続ける)/.test(decision.speech)) {
+    /(?:私|わたし|あたし|俺)(?:は|も)[^。！？\n]{0,32}(?:投票予定|投票先|票を入れる相手)[^。！？\n]{0,16}(?:変えない|変えません|維持する|そのまま|のまま|続ける)/.test(decision.speech)) {
     throw new ClaimContractError(
       'nonexistent_prior_vote_intent',
       'あなたは今日まだ投票予定を公表していません。初めて示す予定を「変えない」「維持する」「このまま」と過去から継続しているように話さず、新しい予定として述べてください。',
@@ -178,7 +190,7 @@ function validateDiscussionStructure(context: DecisionContext, decision: SpeechD
     const sentences = decision.speech.split(/[。！？\n]/).filter((sentence) =>
       sentence.includes(agentNameForSeat(consensusTarget)) || sentence.includes(addressTermFor(context.actor.seat, consensusTarget)));
     const repeatsConsensusDeclaration = sentences.some((sentence) =>
-      /(?:私|わたし|僕|俺|自分|今日は|今は).{0,36}(?:投票|票を入れ|に入れ|処刑する|吊る)|(?:投票|票を入れ|に入れ).{0,18}(?:予定|つもり)/.test(sentence));
+      /(?:私|わたし|あたし|僕|俺|自分|今日は|今は).{0,36}(?:投票|票を入れ|に入れ|処刑する|吊る)|(?:投票|票を入れ|に入れ).{0,18}(?:予定|つもり)/.test(sentence));
     if (repeatsConsensusDeclaration) {
       throw new ClaimContractError(
         'consensus_vote_declaration_repeated',
@@ -206,31 +218,31 @@ function validateDiscussionStructure(context: DecisionContext, decision: SpeechD
 export function resultDisclosureGuidance(context: DecisionContext): string | null {
   if (context.claimDirective) {
     const directive = context.claimDirective;
-    const firstPerson = personaForSeat(context.actor.seat).firstPerson;
     if (directive.mode === 'forbidden') {
       return '今回は役職を名乗らず、claimはnullにして公開情報への通常の発言だけをしてください。自分の能力結果や確認済みの正体を本文にも出さず、「村人だと確認できている」「結果はあるが今は言えない」のような匂わせもしないでください。';
     }
     const roleLabel = directive.claimedRole === 'seer' ? '占い師' : '霊媒師';
+    const roleClaimSentence = roleClaimSentenceForSeat(context.actor.seat, roleLabel);
     const results = directive.results.map((result) =>
       `${result.day}日目の${addressTermFor(context.actor.seat, result.targetSeat)}の結果は${result.verdict}`).join('、');
     const action = directive.mode === 'must'
-      ? `今回は必ず「${firstPerson}は${roleLabel}です」と名乗り`
-      : `今回は「${firstPerson}は${roleLabel}です」と名乗っても、まだ伏せても構いません。伏せる場合はclaimをnullにし、能力結果、確認済みの正体、結果を持っている事実を本文にも匂わせないでください。名乗る場合は`;
+      ? `今回は必ず「${roleClaimSentence}」と人物らしく名乗り`
+      : `今回は「${roleClaimSentence}」と人物らしく名乗っても、まだ伏せても構いません。伏せる場合はclaimをnullにし、能力結果、確認済みの正体、結果を持っている事実を本文にも匂わせないでください。名乗る場合は`;
     const dayOneSeerDefault = directive.mode === 'may' && context.actor.role === 'seer' && context.day === 1
       ? '一般的な9人人狼では、人狼ではないという結果も候補を狭める公開材料になるため、1日目に占い師だと名乗って結果を出すのが基本です。伏せるのは、人物像と今の盤面に明確な理由がある例外にしてください。'
       : '';
     const nightZeroGuidance = directive.claimedRole === 'seer' && directive.results.some((result) => result.day === 0)
       ? '0日目は誰も発言していないため、占い先を選んだ推理上の理由を作って話してはいけません。理由を聞かれたら「情報がない時点の選択なので理由はない」と自然に答えてください。人物像にある占い先選びの基準は1日目の夜以降だけに当てはまります。'
       : '';
-    return `${action}、claimにもclaimedRole=${directive.claimedRole}を設定してください。${results ? `認可された結果は「${results}」です。結果を対象・日・判定ごと変えず、本文とclaimの両方へ過不足なく入れてください。` : '結果一覧は空のままにしてください。'} ${dayOneSeerDefault} ${nightZeroGuidance} この主張指示や仕組み自体には言及しないでください。`;
+    return `${action}、claimにもclaimedRole=${directive.claimedRole}を設定してください。${results ? `認可された結果は「${results}」です。結果を対象・日・判定ごと変えず、本文とclaimの両方へ過不足なく入れてください。判定の意味を保ったまま、「人狼ではない」は「人狼ではありませんでした」「人狼じゃなかったよ」など人物の口調に合う自然な過去形へ活用し、「人狼ではない、でした」のように判定語をつなぎ合わせないでください。` : '結果一覧は空のままにしてください。'} ${dayOneSeerDefault} ${nightZeroGuidance} この主張指示や仕組み自体には言及しないでください。`;
   }
   if (context.kind !== 'speech' || !['seer', 'medium'].includes(context.actor.role)) return null;
   const roleLabel = ROLE_LABEL[context.actor.role];
   if (publicRoleClaimExists(context, roleLabel)) {
     return `あなたはすでに自分が${roleLabel}だと明かしています。能力結果を話すときは、自分が知った結果と推理を区別してください。`;
   }
-  const firstPerson = personaForSeat(context.actor.seat).firstPerson;
-  return `能力結果を初めて公開する場合は、結果だけを断定せず、必ず同じ発言内で「${firstPerson}は${roleLabel}です」と自然な日本語で名乗ってから対象と結果を伝えてください。結果を伏せるなら役職を名乗る必要はありません。`;
+  const roleClaimSentence = roleClaimSentenceForSeat(context.actor.seat, roleLabel as '占い師' | '霊媒師');
+  return `能力結果を初めて公開する場合は、結果だけを断定せず、必ず同じ発言内で「${roleClaimSentence}」と人物らしい自然な日本語で名乗ってから対象と結果を伝えてください。結果を伏せるなら役職を名乗る必要はありません。`;
 }
 
 export function validateSpeechDisclosure(context: DecisionContext, decision: SpeechDecision): void {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { addressGuideForSeat, addressTermFor, AGENT_ADDRESS_BOOKS, AGENT_PERSONAS, personaForSeat } from '@/domain/agents';
+import { addressGuideForSeat, addressTermFor, AGENT_ADDRESS_BOOKS, AGENT_PERSONAS, personaForSeat, roleClaimSentenceForSeat } from '@/domain/agents';
 
 describe('エージェント人格', () => {
   it('9席に重複しない人格を割り当てる', () => {
@@ -8,7 +8,12 @@ describe('エージェント人格', () => {
     expect(new Set(AGENT_PERSONAS.map((persona) => persona.name)).size).toBe(9);
     expect(new Set(AGENT_PERSONAS.map((persona) => persona.title)).size).toBe(9);
     expect(new Set(AGENT_PERSONAS.map((persona) => persona.exampleLine)).size).toBe(9);
-    expect(AGENT_PERSONAS.every((persona) => persona.firstPerson === '私' || persona.firstPerson === '俺')).toBe(true);
+    expect(AGENT_PERSONAS.every((persona) => ['私', 'あたし', '俺', 'わたし'].includes(persona.firstPerson))).toBe(true);
+    expect(new Set(AGENT_PERSONAS.map((persona) => persona.performanceAnchor)).size).toBe(9);
+    expect(new Set(AGENT_PERSONAS.map((persona) => persona.decisionHabit)).size).toBe(9);
+    expect(new Set(AGENT_PERSONAS.map((persona) => persona.antiStyle)).size).toBe(9);
+    expect(personaForSeat('seat-2').firstPerson).toBe('あたし');
+    expect(personaForSeat('seat-9').firstPerson).toBe('わたし');
     expect(personaForSeat('seat-6').name).toBe('黒田 剛');
     expect(personaForSeat('seat-6').title).toBe('愛想のない現実主義者');
     expect(personaForSeat('seat-6').firstPerson).toBe('俺');
@@ -28,5 +33,12 @@ describe('エージェント人格', () => {
     expect(addressTermFor('seat-6', 'seat-3')).toBe('宮下');
     expect(addressTermFor('seat-8', 'seat-7')).toBe('真壁くん');
     expect(addressGuideForSeat('seat-2')).toContain('宮下 さくらは「さくらちゃん」');
+  });
+
+  it('役職の名乗りも特殊一人称と語尾を平準化しない', () => {
+    expect(roleClaimSentenceForSeat('seat-2', '占い師')).toBe('あたし、占い師だよ');
+    expect(roleClaimSentenceForSeat('seat-5', '占い師')).toBe('私が占い師よ');
+    expect(roleClaimSentenceForSeat('seat-6', '霊媒師')).toBe('俺が霊媒師だ');
+    expect(roleClaimSentenceForSeat('seat-9', '霊媒師')).toBe('わたしが霊媒師です');
   });
 });

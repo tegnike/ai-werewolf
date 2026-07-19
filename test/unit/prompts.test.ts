@@ -32,7 +32,13 @@ describe('実AI人格プロンプト', () => {
     expect(systemPrompt).toContain('あなたは八木 こはる');
     expect(systemPrompt).toContain('内面の矛盾と欠点');
     expect(systemPrompt).toContain('台詞の見本');
-    expect(systemPrompt).toContain('一人称は「私」');
+    expect(systemPrompt).toContain('一人称は「あたし」');
+    expect(systemPrompt).toContain('この台詞の最終演技契約');
+    expect(systemPrompt).toContain('声とリズム');
+    expect(systemPrompt).toContain('公開情報の受け取り方');
+    expect(systemPrompt).toContain('禁止する平準化');
+    expect(systemPrompt).toContain('台詞直前の事実確認');
+    expect(systemPrompt).toContain('この一覧以外の人を「まだ話していない」');
     expect(systemPrompt).toContain('自分自身を自分の名前');
     expect(systemPrompt).toContain('他の参加者の呼び方');
     expect(systemPrompt).toContain('宮下 さくらは「さくらちゃん」');
@@ -300,7 +306,7 @@ describe('実AI人格プロンプト', () => {
       privateFacts: ['自分の役職: seer', '青木 征司: 人狼'], round: 1,
     };
     const prompts = buildPrompts(context);
-    expect(prompts.systemPrompt).toContain('必ず同じ発言内で「私は占い師です」');
+    expect(prompts.systemPrompt).toContain('必ず同じ発言内で「あたし、占い師だよ」');
     expect(prompts.systemPrompt).toContain('アルファベットの略語を使わず');
     expect(prompts.decisionPrompt).toContain('占い師だと名乗りました');
     expect(prompts.decisionPrompt).toContain('霊媒師だと名乗りました');
@@ -323,10 +329,12 @@ describe('実AI人格プロンプト', () => {
     const prompts = buildPrompts(context);
     expect(prompts.systemPrompt).toContain('判断材料にしてよいのは');
     expect(prompts.systemPrompt).toContain('ゲームで認められた戦術');
-    expect(prompts.systemPrompt).toContain('今回は必ず「私は占い師です」と名乗り');
+    expect(prompts.systemPrompt).toContain('今回は必ず「私は占い師です」と人物らしく名乗り');
     expect(prompts.systemPrompt).toContain('0日目は誰も発言していない');
     expect(prompts.systemPrompt).toContain('占い先を選んだ推理上の理由を作って話してはいけません');
     expect(prompts.systemPrompt).toContain('1日目の夜以降だけに当てはまります');
+    expect(prompts.systemPrompt).toContain('人物の口調に合う自然な過去形へ活用');
+    expect(prompts.systemPrompt).toContain('「人狼ではない、でした」のように判定語をつなぎ合わせない');
     expect(prompts.decisionPrompt).toContain('authorizedClaim');
     expect(prompts.decisionPrompt).toContain('claimBoard');
     expect(prompts.decisionPrompt).not.toContain('本物');
@@ -347,8 +355,8 @@ describe('実AI人格プロンプト', () => {
         results: [{ day: 0, targetSeat: 'seat-2', verdict: '人狼ではない' }],
       },
     });
-    expect(prompts.systemPrompt).toContain('今回は必ず「俺は占い師です」と名乗り');
-    expect(prompts.systemPrompt).not.toContain('今回は必ず「私は占い師です」と名乗り');
+    expect(prompts.systemPrompt).toContain('今回は必ず「俺が占い師だ」と人物らしく名乗り');
+    expect(prompts.systemPrompt).not.toContain('今回は必ず「私は占い師です」と人物らしく名乗り');
   });
 
   it('claimを伏せる場合は能力結果や確認済み正体の匂わせも禁止する', () => {

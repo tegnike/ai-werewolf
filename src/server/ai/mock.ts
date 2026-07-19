@@ -1,4 +1,4 @@
-import { addressBookForSeat, addressTermFor } from '@/domain/agents';
+import { addressBookForSeat, addressTermFor, roleClaimSentenceForSeat } from '@/domain/agents';
 import type { DecisionContext, DecisionProvider, SeatId, SpeechDecision, SpeechIntentDecision, SpeechMotivation, TargetDecision } from '@/domain/types';
 import { stableIndex } from '@/engine/prng';
 
@@ -50,6 +50,60 @@ const observations: Record<string, string[]> = {
   ],
 };
 
+const scarceLines: Record<SeatId, string> = {
+  'seat-1': 'うーん、まだ決めるのは心配です。みなさんの話をもう少し聞かせてくださいね。',
+  'seat-2': 'えー、まだわかんない！ あたしは次の反応見てから決める！',
+  'seat-3': 'まだみんなの顔が見えないかな。私、もう少し話してから決めたいな。',
+  'seat-4': 'すみません……まだ材料が少なくて、私は今決めるのが怖いです。',
+  'seat-5': 'まだ決めない。ただ、次も曖昧に逃げる人は私が絞る。',
+  'seat-6': '材料不足。まだ決めん。',
+  'seat-7': 'まだ決められない！ 俺は、次に腹を割って話すやつを見たい！',
+  'seat-8': 'まあ、焦らずに。今は判断材料を増やす方が先でしょう。',
+  'seat-9': 'あの……わたしは、まだ決められません。もう少し、言葉を聞きたいです。',
+};
+
+function voteLine(seat: SeatId, target: string): string {
+  switch (seat) {
+    case 'seat-1': return `うーん、今は${target}へ入れようと思います。間違っていたら怖いですけど……。`;
+    case 'seat-2': return `あたしは${target}に入れる！ やっぱ今の感じ、変！`;
+    case 'seat-3': return `私は${target}に入れようかな。ごめんね、でも今はそこが一番気になる。`;
+    case 'seat-4': return `すみません……私は${target}に入れます。考えたのですが、違和感が消えません。`;
+    case 'seat-5': return `私は${target}に入れる。反論があるなら、逃げずに言って。`;
+    case 'seat-6': return `${target}に入れる。以上。`;
+    case 'seat-7': return `俺は${target}に入れる！ ここは逃げちゃ駄目だ！`;
+    case 'seat-8': return `まあ、今日は${target}に入れます。先を考えれば、ここでしょう。`;
+    case 'seat-9': return `あの……わたしは${target}に入れます。これ以上、見過ごせません。`;
+  }
+}
+
+function boardLine(seat: SeatId): string {
+  switch (seat) {
+    case 'seat-1': return '役職の人だけで決めず、置いていかれた人の話も聞きたいです。';
+    case 'seat-2': return '役職の人ばっか見るの？ あたし、ほかも気になる！';
+    case 'seat-3': return '役職の人たちも気になるけど、ほかのみんなは誰を見てるのかな。';
+    case 'seat-4': return 'すみません……役職の話だけで決めていいのか、まだ不安です。';
+    case 'seat-5': return '役職の数だけ見て満足しないで。黙って安全にいる人も私は見る。';
+    case 'seat-6': return '役職だけ見るな。票も見ろ。';
+    case 'seat-7': return '役職だけで決めるのは違うだろ！ ほかのやつも腹を割れ！';
+    case 'seat-8': return 'まあ、役職候補だけに目を奪われないことです。処刑範囲は広く持ちましょう。';
+    case 'seat-9': return 'あの……役職の人だけを見ていると、その外が静かすぎて、怖いです。';
+  }
+}
+
+function suspicionLine(seat: SeatId, target: string): string {
+  switch (seat) {
+    case 'seat-1': return `うーん、${target}のことが少し心配です。責めたいわけじゃないんですけど……。`;
+    case 'seat-2': return `えっ、${target}ちょっと怪しくない？ あたしは気になる！`;
+    case 'seat-3': return `私、${target}がちょっと気になるかな。もう少し気持ちを聞きたいな。`;
+    case 'seat-4': return `すみません……私の勘違いかもしれませんが、${target}が気になります。`;
+    case 'seat-5': return `私は${target}を疑う。違うなら、こっちを納得させて。`;
+    case 'seat-6': return `${target}が怪しい。俺は外さん。`;
+    case 'seat-7': return `俺は${target}を疑う！ 今のままじゃ信じられない！`;
+    case 'seat-8': return `まあ、今は${target}を見ます。この段取りを崩す動きは感心しませんね。`;
+    case 'seat-9': return `あの……${target}が、気になります。うまく言えないけど……怖いです。`;
+  }
+}
+
 export class MockAI implements DecisionProvider {
   async speech(context: DecisionContext): Promise<SpeechDecision> {
     if (context.kind === 'speech' && context.claimDirective) {
@@ -60,7 +114,8 @@ export class MockAI implements DecisionProvider {
           const verdict = result.verdict === '人狼' ? '人狼でした' : '人狼ではありませんでした';
           return `${result.day}日目の${addressTermFor(context.actor.seat, result.targetSeat)}は${verdict}`;
         }).join('。');
-        const speech = `私は${roleLabel}です。${resultSpeech || '今は伝えられる結果はありません。'}`;
+        const roleClaim = roleClaimSentenceForSeat(context.actor.seat, roleLabel);
+        const speech = `${roleClaim}。${resultSpeech || '今は伝えられる結果はありません。'}`;
         const addressedTo = directive.counterTargetSeat && context.legalTargets.includes(directive.counterTargetSeat)
           ? directive.counterTargetSeat
           : null;
@@ -96,13 +151,13 @@ export class MockAI implements DecisionProvider {
       stableIndex(context.seed, `${context.callKey}-suspicion-basis`, mockSuspicionBases.length)
     ];
     const finalSpeech = scarce
-      ? 'まだ材料が少ないので、役職の名乗りと皆が何を重く見るかを聞いてから考えたい。'
+      ? scarceLines[context.actor.seat]
       : shouldDeclareVote
-      ? `今は${addressTermFor(context.actor.seat, structureTarget!)}に投票する。${speech}`
+      ? voteLine(context.actor.seat, addressTermFor(context.actor.seat, structureTarget!))
       : shouldAnalyzeBoard
-        ? `役職の名乗りだけでなく、その他の発言と投票方針も見たい。${speech}`
+        ? boardLine(context.actor.seat)
         : v3 && structureTarget
-          ? `今は${addressTermFor(context.actor.seat, structureTarget)}が少し気になる。${speech}`
+          ? suspicionLine(context.actor.seat, addressTermFor(context.actor.seat, structureTarget))
           : speech;
     const decision: SpeechDecision = {
       speech: finalSpeech.slice(0, 200),

@@ -29,7 +29,7 @@ describe('能力結果の公開', () => {
   it('自分を自分の名前と敬称で呼ぶ一人称崩れを拒否する', () => {
     const context = seerContext();
     expect(() => validateSpeechDisclosure(context, decision('こはるさんは占い師です。'))).toThrow('self_reference_drift');
-    expect(() => validateSpeechDisclosure(context, decision('私は占い師です。'))).not.toThrow();
+    expect(() => validateSpeechDisclosure(context, decision('あたし、占い師だよ。'))).not.toThrow();
 
     const players = setupPlayers('first-person-drift');
     const actor = { ...players[6], role: 'villager' as const };
@@ -40,6 +40,16 @@ describe('能力結果の公開', () => {
     expect(() => validateSpeechDisclosure(hotBloodedContext, decision('俺は人狼じゃない。私は話を聞きたい。')))
       .toThrow('first_person_drift');
     expect(() => validateSpeechDisclosure(hotBloodedContext, decision('俺は話を聞きたい。'))).not.toThrow();
+
+    const quietActor = { ...players[8], role: 'villager' as const };
+    const quietContext: DecisionContext = {
+      ...context, actor: quietActor,
+      players: players.map((player) => player.seat === quietActor.seat ? quietActor : player),
+      privateFacts: ['自分の役職: villager'],
+    };
+    expect(() => validateSpeechDisclosure(quietContext, decision('私は、まだ怖いです。')))
+      .toThrow('first_person_drift');
+    expect(() => validateSpeechDisclosure(quietContext, decision('わたしは、まだ怖いです。'))).not.toThrow();
   });
 
   it('1日目は0日目の占い先理由の質問と信用評価を発言契約で拒否する', () => {
@@ -62,6 +72,9 @@ describe('能力結果の公開', () => {
       '役職を名乗る人が出たら、なぜそこを見たのか聞きたいです。',
       '澪さん、なぜ陽太さんを選んだか、結果以外の説明を聞かせてください。',
       '澪さん、その結果に至った理由を逃げずに話してください。',
+      '澪さん、陽太さんを人狼だと見た根拠を話してください。',
+      '澪さんのその結果の根拠が弱いです。',
+      '澪さんは選定理由がないと明言し、陽太さんは言及していません。この差は見ます。',
       '澪さんは占い先の説明が弱くて信用できません。',
       'レナさんは占い先に理由がない点まで先に説明していて、一歩具体的に見えました。',
     ]) {
@@ -70,6 +83,12 @@ describe('能力結果の公開', () => {
     }
     expect(() => validateSpeechDisclosure(context, speech(
       '0日目は無情報なので占い先の理由を求めません。名乗った後の反応を比べます。',
+    ))).not.toThrow();
+    expect(() => validateSpeechDisclosure(context, speech(
+      '結果の根拠は求めません。澪さんが名乗った後の反応を比べます。',
+    ))).not.toThrow();
+    expect(() => validateSpeechDisclosure(context, speech(
+      '澪さんは選定理由がないと明言し、陽太さんは言及しませんでした。この差で信用はつけません。',
     ))).not.toThrow();
     expect(() => validateSpeechDisclosure({ ...context, day: 2 }, speech(
       '澪さんは昨夜の占い先を選んだ理由を説明してください。', true,
@@ -84,11 +103,11 @@ describe('能力結果の公開', () => {
   });
 
   it('初回の役職名乗りと結果が同じ発言にあれば許可する', () => {
-    expect(() => validateSpeechDisclosure(seerContext(), decision('私は占い師です。征司さんは人狼でした。'))).not.toThrow();
+    expect(() => validateSpeechDisclosure(seerContext(), decision('あたし、占い師だよ。征司さんは人狼だった。'))).not.toThrow();
   });
 
   it('公開履歴で役職を名乗り済みなら結果だけの続報を許可する', () => {
-    expect(() => validateSpeechDisclosure(seerContext(['八木 こはる: 私が占い師です。']), decision('今日の結果は人狼でした。'))).not.toThrow();
+    expect(() => validateSpeechDisclosure(seerContext(['八木 こはる: あたし、占い師だよ。']), decision('今日の結果は人狼だった。'))).not.toThrow();
   });
 
   it('霊媒師も役職を名乗らない白結果公開を拒否する', () => {
@@ -125,7 +144,7 @@ describe('能力結果の公開', () => {
       },
     };
     expect(() => validateSpeechDisclosure(context, {
-      speech: '私は占い師です。0日目のさくらちゃんは人狼ではありませんでした。',
+      speech: 'あたし、占い師だよ。0日目のさくらちゃんは人狼ではありませんでした。',
       addressedTo: null,
       requestsReply: false,
       claim: { claimedRole: 'seer', results: [{ day: 0, targetSeat: 'seat-3', verdict: '人狼ではない' }] },
@@ -139,7 +158,7 @@ describe('能力結果の公開', () => {
       ...base,
       claimDirective: { mode: 'may', claimedRole: 'seer', results: [result], counterTargetSeat: null },
     }, {
-      speech: '私は占い師です。1日目に見た征司さんは人狼ではなかった。',
+      speech: 'あたし、占い師だよ。1日目に見た征司さんは人狼ではなかった。',
       addressedTo: null,
       requestsReply: false,
       claim: { claimedRole: 'seer', results: [result] },
@@ -155,7 +174,7 @@ describe('能力結果の公開', () => {
     expect(() => validateSpeechDisclosure({
       ...base,
       claimDirective: { mode: 'forbidden', claimedRole: null, results: [], counterTargetSeat: null },
-    }, { ...decision('私は占い師です。'), claim: null })).toThrow('claim_missing_from_structure');
+    }, { ...decision('あたし、占い師だよ。'), claim: null })).toThrow('claim_missing_from_structure');
   });
 
   it.each(['forbidden', 'may'] as const)('%s中は構造化claimなしの確認済み正体と伏せ結果の匂わせを拒否する', (mode) => {
@@ -347,7 +366,7 @@ describe('能力結果の公開', () => {
       discussion: { version: 'v3', stage: 'opening', turn: 4, remainingUnspokenSeats: [] },
     };
     expect(() => validateSpeechDisclosure(context, {
-      speech: '私が先に陽太さんの反応を求めたのは、本人の受け止めを見たかったからです。',
+      speech: 'あたしが先に陽太さんの反応を求めたのは、本人の受け止めを見たかったから。',
       addressedTo: null, requestsReply: false,
       structure: { primaryAct: 'board_analysis', questionTopic: null, suspicion: null, voteIntent: null, boardAnalysis: false },
     })).toThrow('opening_self_history_fabrication');
@@ -365,10 +384,10 @@ describe('能力結果の公開', () => {
       suspicion: null, voteIntent: 'seat-1' as const, boardAnalysis: false,
     };
     expect(() => validateSpeechDisclosure(context, {
-      speech: '私はまだ澪さんへの投票予定を変えません。', addressedTo: null, requestsReply: false, structure,
+      speech: 'あたしはまだ澪さんへの投票予定を変えない。', addressedTo: null, requestsReply: false, structure,
     })).toThrow('nonexistent_prior_vote_intent');
     expect(() => validateSpeechDisclosure(context, {
-      speech: '私は澪さんに投票します。', addressedTo: null, requestsReply: false, structure: { ...structure },
+      speech: 'あたしは澪さんに投票する。', addressedTo: null, requestsReply: false, structure: { ...structure },
     })).not.toThrow();
   });
 

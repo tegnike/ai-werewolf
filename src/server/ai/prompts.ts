@@ -141,7 +141,7 @@ export function buildPrompts(context: DecisionContext): { systemPrompt: string; 
     discussionGuidance.push('これが今日の最後の発言枠です。新しい返答要求を出さず、addressedTo=null、requestsReply=falseにしてください。');
   }
   const v3DiscussionGuidance = discussionV3 ? [
-    '0日目の占い先は、まだ誰も発言していない時点で規則により無情報で選ばれます。選定に推理上の理由は存在せず、質問・攻撃・信用比較の材料にしてはいけません。占い師を名乗る人は、名乗った時期、主張した結果、対抗との構図、結果を受けた本人の公開反応、名乗った後の発言の一貫性で比較してください。',
+    '0日目の占い先は、まだ誰も発言していない時点で規則により無情報で選ばれます。選定に推理上の理由は存在せず、質問・攻撃・信用比較の材料にしてはいけません。「結果の根拠」「なぜその人を人狼だと見たか」という聞き方も、0日目の対象選定理由を別表現で求めるため禁止です。一人が「理由はない」と明言し、別の人がそれに言及しなかったという差も、真偽・信用の材料にしないでください。占い師を名乗る人は、名乗った時期、主張した結果、対抗との構図、結果を受けた本人の公開反応、名乗った後の発言の一貫性で比較してください。',
     ...(isFirstDiscussionSpeaker ? [
       'あなたは今日の最初の発言者です。公開済みの能力結果、自分がこの発言で公開する能力結果、前日までの発言など、実在する根拠がある場合は評価して構いません。根拠がない場合は疑い先や投票先を無理に作らず、確認したい論点、他の参加者への質問、今後の判断基準のいずれかを自然に話してください。質問は役職を名乗る時期、今日の処刑方針、公開発言後に比較したい点などへ向け、0日目の占い先を選んだ理由や「なぜそこを見たか」は質問しないでください。その場合、暫定評価は不要で、structure.suspicion=null、voteIntent=nullです。',
     ] : context.discussion?.materialPhase === 'scarce' ? [
@@ -216,13 +216,16 @@ export function buildPrompts(context: DecisionContext): { systemPrompt: string; 
       `他の参加者の呼び方: ${addressGuideForSeat(context.actor.seat)}`,
       `台詞の見本: 「${persona.exampleLine}」 見本の内容はコピーせず、息づかいと距離感だけを参考にしてください。`,
       `発言量: ${persona.lengthGuide}`,
+      `演技の核: ${persona.performanceAnchor}`,
+      `判断の癖: ${persona.decisionHabit}`,
+      `この人物が避ける話し方: ${persona.antiStyle}`,
     ] : []),
     '常に冷静、公平、合理的である必要はありません。迷い、勘違い、好き嫌い、見栄、苛立ち、ためらい、前言の訂正が人物像に沿って混ざって構いません。',
     ...(!isSpeechIntent ? [
       '全員の発言を毎回要約したり、「結論・理由・提案」の模範解答へ整えたりせず、直前の誰かの言葉へ自然に反応してください。',
       '発言では「結論として」「現時点では」「整理すると」「〜を軸に」「判断材料」「整合性」「再評価」のような議事録調の語を繰り返さないでください。',
       '能力結果や人物評価を「白」「黒」「白結果」「黒結果」のように省略しないでください。「人狼だという結果」「人狼ではないという結果」のような自然な日本語で話し、過去の発言に略語があっても模倣しないでください。',
-      '役職を明かす行為や、誰かが役職を明かした事実は、アルファベットの略語を使わず「私は占い師です」「霊媒師だと名乗った」のような自然な日本語だけで表現してください。',
+      '役職を明かす行為や、誰かが役職を明かした事実は、アルファベットの略語を使わず「占い師です」「占い師だよ」「霊媒師だと名乗った」のような人格に合う自然な日本語だけで表現してください。',
       '他の参加者を呼ぶときはAgent番号や別の呼び方を使わず、上の「他の参加者の呼び方」を必ず守ってください。',
     ] : []),
     'ただし口癖や欠点を毎回わざとらしく演じず、ゲームの状況を優先してください。',
@@ -251,6 +254,18 @@ export function buildPrompts(context: DecisionContext): { systemPrompt: string; 
       'motivationは reply、question、challenge、new_information、clarify、none のいずれかです。targetSeatは本当に話を向けたい相手がいる場合だけ指定してください。',
     ] : []),
     ...(disclosureGuidance ? [disclosureGuidance] : []),
+    ...(isSpeech ? [
+      '【この台詞の最終演技契約】ここまでのゲーム上の制約を守った上で、全員に通じる模範解答ではなく、この人物だけが口にする台詞にしてください。',
+      `声とリズム: ${persona.performanceAnchor}`,
+      `公開情報の受け取り方: ${persona.decisionHabit}`,
+      `禁止する平準化: ${persona.antiStyle}`,
+      `指定の一人称「${persona.firstPerson}」、文の長さ、敬体・常体、感情の出し方を崩さないでください。キャラクターらしさのために、存在しない発言・反応・投票・能力情報は作らないでください。`,
+      ...(context.discussion?.remainingUnspokenSeats ? [
+        `【台詞直前の事実確認】今日まだ一度も発言していない人は${context.discussion.remainingUnspokenSeats.length > 0
+          ? context.discussion.remainingUnspokenSeats.map(agentNameForSeat).join('、')
+          : 'いません'}。この一覧以外の人を「まだ話していない」「発言を聞けていない」と絶対に言わないでください。`,
+      ] : []),
+    ] : []),
     isSpeech
       ? '内部の思考過程や分析報告は書かず、その場で本人が実際に口にする台詞だけを返してください。'
       : isSpeechIntent
