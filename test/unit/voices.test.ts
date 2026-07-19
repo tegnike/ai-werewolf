@@ -46,6 +46,9 @@ describe('VOICEVOX話者割り当て', () => {
 
     expect(result.added).toHaveLength(AGENT_NAME_DICTIONARY.length);
     expect(requests.filter(({ method }) => method === 'POST')).toHaveLength(AGENT_NAME_DICTIONARY.length);
+    const yagi = requests.find(({ url }) => url.searchParams.get('surface') === '八木');
+    expect(yagi?.url.searchParams.get('pronunciation')).toBe('ヤギ');
+    expect(yagi?.url.searchParams.get('priority')).toBe('10');
     const kuon = requests.find(({ url }) => url.searchParams.get('surface') === '久遠');
     expect(kuon?.url.searchParams.get('pronunciation')).toBe('クオン');
     expect(kuon?.url.searchParams.get('word_type')).toBe('PROPER_NOUN');
@@ -58,7 +61,7 @@ describe('VOICEVOX話者割り当て', () => {
       surface: entry.surface,
       pronunciation: entry.pronunciation,
       accent_type: entry.accentType,
-      priority: 8,
+      priority: entry.priority ?? 8,
     }]));
     const fetchMock = vi.fn(async () => Response.json(dictionary));
     vi.stubGlobal('fetch', fetchMock);

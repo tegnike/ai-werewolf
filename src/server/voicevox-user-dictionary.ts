@@ -4,12 +4,13 @@ export interface VoicevoxDictionaryEntry {
   surface: string;
   pronunciation: string;
   accentType: number;
+  priority?: number;
 }
 
 export const AGENT_NAME_DICTIONARY: readonly VoicevoxDictionaryEntry[] = [
   { surface: '名取', pronunciation: 'ナトリ', accentType: 3 },
   { surface: '澪', pronunciation: 'ミオ', accentType: 1 },
-  { surface: '八木', pronunciation: 'ヤギ', accentType: 0 },
+  { surface: '八木', pronunciation: 'ヤギ', accentType: 0, priority: 10 },
   { surface: '宮下', pronunciation: 'ミヤシタ', accentType: 0 },
   { surface: '雨宮', pronunciation: 'アマミヤ', accentType: 2 },
   { surface: '神崎', pronunciation: 'カンザキ', accentType: 1 },
@@ -22,7 +23,7 @@ export const AGENT_NAME_DICTIONARY: readonly VoicevoxDictionaryEntry[] = [
   { surface: '久遠', pronunciation: 'クオン', accentType: 0 },
   { surface: '名取さん', pronunciation: 'ナトリサン', accentType: 3 },
   { surface: '澪さん', pronunciation: 'ミオサン', accentType: 1 },
-  { surface: '八木さん', pronunciation: 'ヤギサン', accentType: 0 },
+  { surface: '八木さん', pronunciation: 'ヤギサン', accentType: 0, priority: 10 },
   { surface: '宮下さん', pronunciation: 'ミヤシタサン', accentType: 0 },
   { surface: '雨宮さん', pronunciation: 'アマミヤサン', accentType: 2 },
   { surface: '神崎さん', pronunciation: 'カンザキサン', accentType: 1 },
@@ -58,7 +59,7 @@ const requestUrl = (baseUrl: string, path: string, entry: VoicevoxDictionaryEntr
   url.searchParams.set('pronunciation', entry.pronunciation);
   url.searchParams.set('accent_type', String(entry.accentType));
   url.searchParams.set('word_type', 'PROPER_NOUN');
-  url.searchParams.set('priority', '8');
+  url.searchParams.set('priority', String(entry.priority ?? 8));
   return url;
 };
 
@@ -90,7 +91,7 @@ export async function syncAgentNameDictionary(
     if (
       existing.word.pronunciation === entry.pronunciation &&
       existing.word.accent_type === entry.accentType &&
-      existing.word.priority === 8
+      existing.word.priority === (entry.priority ?? 8)
     ) {
       result.unchanged.push(entry.surface);
       continue;
