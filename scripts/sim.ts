@@ -36,6 +36,8 @@ async function main() {
     impossibleClaims: 0,
     budgetViolations: 0,
     scarceSuspicionStructures: 0,
+    voteReasonSanitizations: 0,
+    nightZeroReasonViolations: 0,
   };
 
   for (let index = 0; index < matches; index += 1) {
@@ -102,6 +104,16 @@ async function main() {
             Number(closed.payload.consensusDefenseExtraSpeeches ?? 0);
           if (Number(closed.payload.freeSpeeches) > allowedFreeSpeeches ||
             Number(closed.payload.intentPolls) > 2) claimMetrics.budgetViolations += 1;
+        }
+        for (const reveal of events.filter((event) => event.type === 'vote_reveal')) {
+          const votes = Array.isArray(reveal.payload.votes) ? reveal.payload.votes as Array<Record<string, unknown>> : [];
+          claimMetrics.voteReasonSanitizations += votes.filter((vote) => vote.reasonSanitized === true).length;
+        }
+        for (const speech of events.filter((event) => event.type === 'discussion_speech')) {
+          const body = String(speech.payload.speech ?? '');
+          if (/(?:0日目|第0夜|初日の占い先).{0,40}(?:選んだ理由|選定理由|言葉の癖|反応|様子見)|(?:言葉の癖|反応|様子見).{0,40}(?:0日目|第0夜|初日の占い先)/.test(body)) {
+            claimMetrics.nightZeroReasonViolations += 1;
+          }
         }
         let dayOneBoard = emptyDiscussionBoard();
         const seenEvents: MatchEvent[] = [];

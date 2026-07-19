@@ -1,4 +1,4 @@
-import { MAX_DAYS } from '@/domain/constants';
+import { MAX_DAYS, NIGHT_ZERO_UNINFORMED_FACT } from '@/domain/constants';
 import {
   assertClaimWithinDirective, claimBoardDigest, foldClaim,
   type ClaimDirective, type ClaimLedger, type ClaimResult, type ClaimableRole,
@@ -6,9 +6,10 @@ import {
 import type {
   DecisionContext, DecisionProvider, DiscussionContext, GameState, MatchEvent, Player, RunHooks, SeatId, SpeechIntentDecision, Winner,
 } from '@/domain/types';
+import { sanitizePublicVoteReason } from '@/domain/public-reason';
 import { legalAttackTargets, legalGuardTargets, legalSeerTargets, legalVoteTargets } from './legal';
 import { normalizeSpeech, seatName } from './narration';
-import { stableShuffle } from './prng';
+import { stableIndex, stableShuffle } from './prng';
 import { setupPlayers } from './setup';
 import { createInitialState } from './state';
 import { checkVictory, isWerewolfResult } from './victory';
@@ -135,12 +136,18 @@ export async function runGame(
   seed: string,
   ai: DecisionProvider,
   hooks: RunHooks,
-  options: { includeDayOneDawn?: boolean; claimsVersion?: 'v1' | 'v2'; discussionVersion?: 'legacy' | 'v2' | 'v3' } = {},
+  options: {
+    includeDayOneDawn?: boolean;
+    claimsVersion?: 'v1' | 'v2';
+    discussionVersion?: 'legacy' | 'v2' | 'v3';
+    nightZeroMode?: 'ai' | 'uniform';
+  } = {},
 ): Promise<SimulationResult> {
   const players = setupPlayers(seed);
   const claimsEnabled = options.claimsVersion === 'v1' || options.claimsVersion === 'v2';
   const claimsVersion = options.claimsVersion;
   const discussionVersion = options.discussionVersion ?? 'v3';
+  const nightZeroMode = options.nightZeroMode ?? 'uniform';
   const claimPolicies = decideClaimPolicies(seed, players, claimsVersion ?? 'v1');
   let state = createInitialState(players);
   const publicHistory: string[] = [];
@@ -431,12 +438,15 @@ export async function runGame(
     });
   };
 
+  const rules = {
+    ...(discussionVersion === 'v2' || discussionVersion === 'v3' ? { discussion: discussionVersion } : {}),
+    ...(claimsEnabled ? { claims: claimsVersion } : {}),
+    ...(nightZeroMode === 'uniform' ? { nightZero: 'uniform' as const } : {}),
+  };
   await emit(0, 'setup', 'match_created', {
     seed,
     players: players.map((player) => ({ seat: player.seat, name: player.name, role: player.role })),
-    ...(discussionVersion === 'v2' || discussionVersion === 'v3'
-      ? { rules: { discussion: discussionVersion, ...(claimsEnabled ? { claims: claimsVersion } : {}) } }
-      : claimsEnabled ? { rules: { claims: claimsVersion } } : {}),
+    ...(Object.keys(rules).length > 0 ? { rules } : {}),
   }, 'private');
 
   const wolves = state.players.filter((player) => player.role === 'werewolf');
@@ -455,12 +465,20 @@ export async function runGame(
 
   const initialSeer = actorByRole(state, 'seer');
   if (initialSeer) {
-    const target = await ai.target(context(initialSeer, 0, 'night_zero', 'seer', 'd0-seer', legalSeerTargets(state, initialSeer.seat)));
-    const result = isWerewolfResult(playerBySeat(state, target.targetSeat).role);
-    histories.seer.push(`${seatName(target.targetSeat)}: ${result}`);
-    if (discussionVersion === 'v3') histories.seer.push(`0日目に${seatName(target.targetSeat)}を占った理由: ${target.statedReason}`);
-    claimResults.get(initialSeer.seat)?.seer.push({ day: 0, targetSeat: target.targetSeat, verdict: result });
-    await emit(0, 'night_zero', 'seer_result', { seat: initialSeer.seat, targetSeat: target.targetSeat, result }, 'private', [initialSeer.seat]);
+    const legalTargets = legalSeerTargets(state, initialSeer.seat);
+    const legacyDecision = nightZeroMode === 'ai'
+      ? await ai.target(context(initialSeer, 0, 'night_zero', 'seer', 'd0-seer', legalTargets))
+      : null;
+    const targetSeat = legacyDecision?.targetSeat ?? legalTargets[stableIndex(seed, 'd0-seer', legalTargets.length)];
+    const result = isWerewolfResult(playerBySeat(state, targetSeat).role);
+    histories.seer.push(`${seatName(targetSeat)}: ${result}`);
+    if (discussionVersion === 'v3') {
+      histories.seer.push(nightZeroMode === 'uniform'
+        ? NIGHT_ZERO_UNINFORMED_FACT
+        : `0日目に${seatName(targetSeat)}を占った理由: ${legacyDecision?.statedReason ?? ''}`);
+    }
+    claimResults.get(initialSeer.seat)?.seer.push({ day: 0, targetSeat, verdict: result });
+    await emit(0, 'night_zero', 'seer_result', { seat: initialSeer.seat, targetSeat, result }, 'private', [initialSeer.seat]);
   }
 
   if (claimsEnabled) {
@@ -720,11 +738,18 @@ export async function runGame(
     }
 
     const alive = rotateAlive(state.players, day);
-    const votes: Array<{ voter: SeatId; target: SeatId; statedReason: string }> = [];
+    const votes: Array<{ voter: SeatId; target: SeatId; statedReason: string; reasonSanitized?: true }> = [];
     for (const actor of alive) {
       const decision = await ai.target(context(actor, day, 'vote', 'vote', `d${day}-vote-${actor.seat}`, legalVoteTargets(state, actor.seat)));
-      votes.push({ voter: actor.seat, target: decision.targetSeat, statedReason: decision.statedReason });
-      await emit(day, 'vote', 'vote_cast', { voter: actor.seat, target: decision.targetSeat, statedReason: decision.statedReason }, 'private');
+      const reason = nightZeroMode === 'uniform' && claimsEnabled
+        ? sanitizePublicVoteReason(decision.statedReason, actor.seat, claimLedger)
+        : { statedReason: decision.statedReason, reasonSanitized: false };
+      const vote = {
+        voter: actor.seat, target: decision.targetSeat, statedReason: reason.statedReason,
+        ...(reason.reasonSanitized ? { reasonSanitized: true as const } : {}),
+      };
+      votes.push(vote);
+      await emit(day, 'vote', 'vote_cast', vote, 'private');
     }
     const tally = countVotes(votes);
     await emit(day, 'vote', 'vote_reveal', { round: 1, votes, tally });
@@ -733,13 +758,20 @@ export async function runGame(
     let executed: SeatId | null = candidates.length === 1 ? candidates[0] : null;
 
     if (candidates.length > 1) {
-      const runoffVotes: Array<{ voter: SeatId; target: SeatId; statedReason: string }> = [];
+      const runoffVotes: Array<{ voter: SeatId; target: SeatId; statedReason: string; reasonSanitized?: true }> = [];
       for (const actor of alive) {
         const legal = legalVoteTargets(state, actor.seat, candidates);
         if (legal.length === 0) continue;
         const decision = await ai.target(context(actor, day, 'runoff', 'runoff_vote', `d${day}-runoff-${actor.seat}`, legal));
-        runoffVotes.push({ voter: actor.seat, target: decision.targetSeat, statedReason: decision.statedReason });
-        await emit(day, 'runoff', 'vote_cast', { voter: actor.seat, target: decision.targetSeat, statedReason: decision.statedReason }, 'private');
+        const reason = nightZeroMode === 'uniform' && claimsEnabled
+          ? sanitizePublicVoteReason(decision.statedReason, actor.seat, claimLedger)
+          : { statedReason: decision.statedReason, reasonSanitized: false };
+        const vote = {
+          voter: actor.seat, target: decision.targetSeat, statedReason: reason.statedReason,
+          ...(reason.reasonSanitized ? { reasonSanitized: true as const } : {}),
+        };
+        runoffVotes.push(vote);
+        await emit(day, 'runoff', 'vote_cast', vote, 'private');
       }
       const runoffTally = countVotes(runoffVotes);
       candidates = topCandidates(runoffTally);

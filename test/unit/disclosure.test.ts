@@ -26,6 +26,59 @@ function mediumContext(): DecisionContext {
 }
 
 describe('能力結果の公開', () => {
+  it('自分を自分の名前と敬称で呼ぶ一人称崩れを拒否する', () => {
+    const context = seerContext();
+    expect(() => validateSpeechDisclosure(context, decision('こはるさんは占い師です。'))).toThrow('self_reference_drift');
+    expect(() => validateSpeechDisclosure(context, decision('私は占い師です。'))).not.toThrow();
+
+    const players = setupPlayers('first-person-drift');
+    const actor = { ...players[6], role: 'villager' as const };
+    const hotBloodedContext: DecisionContext = {
+      ...context, actor, players: players.map((player) => player.seat === actor.seat ? actor : player),
+      privateFacts: ['自分の役職: villager'],
+    };
+    expect(() => validateSpeechDisclosure(hotBloodedContext, decision('俺は人狼じゃない。私は話を聞きたい。')))
+      .toThrow('first_person_drift');
+    expect(() => validateSpeechDisclosure(hotBloodedContext, decision('俺は話を聞きたい。'))).not.toThrow();
+  });
+
+  it('1日目は0日目の占い先理由の質問と信用評価を発言契約で拒否する', () => {
+    const base = seerContext();
+    const context: DecisionContext = {
+      ...base,
+      actor: { ...base.actor, role: 'villager' },
+      privateFacts: ['自分の役職: villager'],
+      discussion: { version: 'v3', stage: 'opening', turn: 4 },
+    };
+    const speech = (text: string, question = false): SpeechDecision => ({
+      speech: text, addressedTo: question ? 'seat-1' : null, requestsReply: question,
+      structure: {
+        primaryAct: question ? 'question' : 'board_analysis',
+        questionTopic: question ? 'inspection_reason' : null,
+        suspicion: null, voteIntent: null, boardAnalysis: false,
+      },
+    });
+    for (const text of [
+      '役職を名乗る人が出たら、なぜそこを見たのか聞きたいです。',
+      '澪さん、なぜ陽太さんを選んだか、結果以外の説明を聞かせてください。',
+      '澪さん、その結果に至った理由を逃げずに話してください。',
+      '澪さんは占い先の説明が弱くて信用できません。',
+      'レナさんは占い先に理由がない点まで先に説明していて、一歩具体的に見えました。',
+    ]) {
+      expect(() => validateSpeechDisclosure(context, speech(text, text.includes('聞き') || text.includes('話して'))))
+        .toThrow('night_zero_reason_is_not_evidence');
+    }
+    expect(() => validateSpeechDisclosure(context, speech(
+      '0日目は無情報なので占い先の理由を求めません。名乗った後の反応を比べます。',
+    ))).not.toThrow();
+    expect(() => validateSpeechDisclosure({ ...context, day: 2 }, speech(
+      '澪さんは昨夜の占い先を選んだ理由を説明してください。', true,
+    ))).not.toThrow();
+    expect(() => validateSpeechDisclosure(context, speech(
+      '澪さん、なぜ陽太さんを処刑候補に選んだか説明してください。', true,
+    ))).not.toThrow();
+  });
+
   it('初回に役職を名乗らず結果だけを断定する発言を拒否する', () => {
     expect(() => validateSpeechDisclosure(seerContext(), decision('征司さんが人狼だったよ。'))).toThrow('claim is required');
   });
@@ -68,14 +121,14 @@ describe('能力結果の公開', () => {
       actor: { ...base.actor, role: 'madman' },
       claimDirective: {
         mode: 'must', claimedRole: 'seer', counterTargetSeat: null,
-        results: [{ day: 0, targetSeat: 'seat-2', verdict: '人狼ではない' }],
+        results: [{ day: 0, targetSeat: 'seat-3', verdict: '人狼ではない' }],
       },
     };
     expect(() => validateSpeechDisclosure(context, {
-      speech: '私は占い師です。0日目の八木 こはるさんは人狼ではありませんでした。',
+      speech: '私は占い師です。0日目のさくらちゃんは人狼ではありませんでした。',
       addressedTo: null,
       requestsReply: false,
-      claim: { claimedRole: 'seer', results: [{ day: 0, targetSeat: 'seat-2', verdict: '人狼ではない' }] },
+      claim: { claimedRole: 'seer', results: [{ day: 0, targetSeat: 'seat-3', verdict: '人狼ではない' }] },
     })).not.toThrow();
   });
 
@@ -284,6 +337,69 @@ describe('能力結果の公開', () => {
     expect(() => validateSpeechDisclosure(context, speechDecision)).not.toThrow();
     expect(speechDecision.structure!.suspicion).toBeNull();
     expect(speechDecision.structure!.primaryAct).toBe('other');
+  });
+
+  it('当日初発言で他者の公開行動を自分の過去行動へ誤帰属することを拒否する', () => {
+    const base = seerContext();
+    const context: DecisionContext = {
+      ...base,
+      actor: { ...base.actor, role: 'villager' }, privateFacts: ['自分の役職: villager'],
+      discussion: { version: 'v3', stage: 'opening', turn: 4, remainingUnspokenSeats: [] },
+    };
+    expect(() => validateSpeechDisclosure(context, {
+      speech: '私が先に陽太さんの反応を求めたのは、本人の受け止めを見たかったからです。',
+      addressedTo: null, requestsReply: false,
+      structure: { primaryAct: 'board_analysis', questionTopic: null, suspicion: null, voteIntent: null, boardAnalysis: false },
+    })).toThrow('opening_self_history_fabrication');
+  });
+
+  it('未公表の投票予定を以前から継続しているように話すことを拒否する', () => {
+    const base = seerContext();
+    const context: DecisionContext = {
+      ...base,
+      actor: { ...base.actor, role: 'villager' }, privateFacts: ['自分の役職: villager'],
+      discussion: { version: 'v3', stage: 'free', turn: 10, remainingUnspokenSeats: [] },
+    };
+    const structure = {
+      primaryAct: 'vote_intent' as const, questionTopic: null,
+      suspicion: null, voteIntent: 'seat-1' as const, boardAnalysis: false,
+    };
+    expect(() => validateSpeechDisclosure(context, {
+      speech: '私はまだ澪さんへの投票予定を変えません。', addressedTo: null, requestsReply: false, structure,
+    })).toThrow('nonexistent_prior_vote_intent');
+    expect(() => validateSpeechDisclosure(context, {
+      speech: '私は澪さんに投票します。', addressedTo: null, requestsReply: false, structure: { ...structure },
+    })).not.toThrow();
+  });
+
+  it('発言済みの人物を未発言・未確認として扱うことを拒否し訂正は許可する', () => {
+    const base = seerContext();
+    const context: DecisionContext = {
+      ...base,
+      actor: { ...base.actor, role: 'villager' }, privateFacts: ['自分の役職: villager'],
+      discussion: {
+        version: 'v3', stage: 'opening', turn: 8,
+        remainingUnspokenSeats: ['seat-3', 'seat-6', 'seat-7', 'seat-8', 'seat-9'],
+      },
+    };
+    const structure = {
+      primaryAct: 'vote_intent' as const, questionTopic: null,
+      suspicion: null, voteIntent: 'seat-5' as const, boardAnalysis: false,
+    };
+    expect(() => validateSpeechDisclosure(context, {
+      speech: '現時点では発言を聞けていない神崎さんへ投票します。',
+      addressedTo: null, requestsReply: false, structure,
+    })).toThrow('spoken_player_treated_as_unspoken');
+    expect(() => validateSpeechDisclosure(context, {
+      speech: '神崎さんの発言を見落としていました。訂正して投票先を考え直します。',
+      addressedTo: null, requestsReply: false,
+      structure: { ...structure, primaryAct: 'defense', voteIntent: null },
+    })).not.toThrow();
+    expect(() => validateSpeechDisclosure(context, {
+      speech: '神崎さんの発言には対抗との比較がないので、説明不足だと思います。',
+      addressedTo: null, requestsReply: false,
+      structure: { ...structure, primaryAct: 'board_analysis', voteIntent: null },
+    })).not.toThrow();
   });
 
   it('同一話者の変更のない投票予定再宣言を再試行せずagreementへ格下げする', () => {

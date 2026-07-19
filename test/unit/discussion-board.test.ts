@@ -13,12 +13,14 @@ describe('discussion v3 board', () => {
     const firstAgenda = discussionAgenda(emptyDiscussionBoard(), players, 'seat-4', 1, undefined, []);
 
     expect(firstAgenda.join('\n')).toContain('根拠のない疑い先や投票先を無理に作らず');
+    expect(firstAgenda.join('\n')).toContain('0日目の占い先を選んだ理由は質問・評価しない');
     expect(firstAgenda.join('\n')).not.toContain('もっとも疑う相手');
     expect(firstAgenda.join('\n')).not.toContain('名取 澪、八木 こはる、宮下 さくら');
 
     const secondAgenda = discussionAgenda(emptyDiscussionBoard(), players, 'seat-5', 2, undefined, ['seat-4']);
     expect(secondAgenda.join('\n')).toContain('公開材料がまだ少ない');
     expect(secondAgenda.join('\n')).toContain('疑い先を無理に作らず');
+    expect(secondAgenda.join('\n')).toContain('0日目の占い先を選んだ理由は質問・評価しない');
     expect(secondAgenda.join('\n')).not.toContain('雨宮 しずくについて');
     expect(secondAgenda.join('\n')).not.toContain('名取 澪');
   });

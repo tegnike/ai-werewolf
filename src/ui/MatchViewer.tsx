@@ -189,12 +189,13 @@ export function MatchViewer({ matchId, mode }: { matchId: string; mode: 'live' |
       claim: (payload.claim ?? null) as SpeechClaim | null,
     });
   }
-  const latestVote = [...visibleEvents].reverse().find((event) => event.type === 'vote_reveal' && event.day === day);
+  const finalEvent = [...visibleEvents].reverse().find((event) => event.type === 'match_finished');
+  const latestVote = [...visibleEvents].reverse().find((event) =>
+    event.type === 'vote_reveal' && (Boolean(finalEvent) || event.day === day));
   const latestVotes = voteEntries(latestVote);
   const latestVoteByVoter = new Map(latestVotes.map((vote) => [vote.voter, vote.target]));
   const latestTally = (latestVote?.payload.tally ?? {}) as Record<string, number>;
   const maxVoteCount = Math.max(1, ...Object.values(latestTally));
-  const finalEvent = [...visibleEvents].reverse().find((event) => event.type === 'match_finished');
   const featuredSpeech = finalEvent ? null : featuredSpeechEvent(visibleEvents, speakingSeq);
   const featuredSeatNumber = seatNumber(featuredSpeech?.payload.seat);
   const featuredSeat = featuredSeatNumber ? `seat-${featuredSeatNumber}` as `seat-${1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9}` : null;

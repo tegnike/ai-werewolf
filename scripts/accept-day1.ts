@@ -126,11 +126,15 @@ function dayOneMetrics(events: MatchEvent[]) {
   const speakerSpacingViolations = speakerSeats.filter((seat, index) =>
     speakerSeats.slice(Math.max(0, index - 2), index).includes(seat)).length;
   const maxVotes = tally.length > 0 ? Math.max(...tally) : 0;
+  const voteReasonSanitizations = events.filter((event) => event.type === 'vote_reveal')
+    .flatMap((event) => Array.isArray(event.payload.votes) ? event.payload.votes as Array<Record<string, unknown>> : [])
+    .filter((vote) => vote.reasonSanitized === true).length;
   return {
     speechCount: speeches.length,
     speakerSpacingViolations,
     maxVoteShare: tally.length > 0 ? Number((maxVotes / tally.reduce((sum, count) => sum + count, 0)).toFixed(3)) : null,
     candidatesWithAtLeastTwoVotes: tally.filter((count) => count >= 2).length,
+    voteReasonSanitizations,
     candidateEvidence,
   };
 }
@@ -209,6 +213,7 @@ async function main(): Promise<void> {
     runtime: {
       ai: 'real', model: MODEL, reasoningEffort: 'low', environmentSource,
       discussionVersion: 'v3', claimsVersion: 'v2', stopAfter: 'day-one execution',
+      nightZeroMode: 'uniform',
     },
     databasePath,
     results: results.map((result) => ({

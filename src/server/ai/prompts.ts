@@ -118,6 +118,7 @@ export function buildPrompts(context: DecisionContext): { systemPrompt: string; 
         '誰かへ明確に返答を求める場合、その相手が次の話者になります。実際に返答してほしい台詞ならaddressedToに相手を指定し、requestsReply=trueにしてください。',
         'まだ今日話していない人の発言を知っているように話してはいけません。進行ルール自体を説明する台詞は不要です。',
         'これは今日あなたに与えられた最初の発言機会です。この発言で初めて役職を名乗ったり質問へ触れたりしても、「遅れた」「待たせた」「返答が遅い」とは扱わないでください。',
+        '今日の公開行動はまだ一度もしていません。他者が質問した、反応を求めた、疑った、保留した、投票予定を示したという事実を、主語を「私」や「俺」へ変えて自分の過去行動として話してはいけません。',
         '仮定、今後の方針、迷い、弱い違和感を、具体的な告発や返答拒否へ勝手に強めないでください。発言者が実際に言った強さのまま受け取ってください。',
         ...(context.discussion.turn === 1 ? [
           'あなたが今日の最初の発言者です。他の参加者は今日まだ発言機会を得ていません。今日の沈黙、反応、便乗、返答の遅さを観察したように話してはいけません。役職情報、前日までの公開情報、または今日これから確認したいことを話してください。',
@@ -140,10 +141,11 @@ export function buildPrompts(context: DecisionContext): { systemPrompt: string; 
     discussionGuidance.push('これが今日の最後の発言枠です。新しい返答要求を出さず、addressedTo=null、requestsReply=falseにしてください。');
   }
   const v3DiscussionGuidance = discussionV3 ? [
+    '0日目の占い先は、まだ誰も発言していない時点で規則により無情報で選ばれます。選定に推理上の理由は存在せず、質問・攻撃・信用比較の材料にしてはいけません。占い師を名乗る人は、名乗った時期、主張した結果、対抗との構図、結果を受けた本人の公開反応、名乗った後の発言の一貫性で比較してください。',
     ...(isFirstDiscussionSpeaker ? [
-      'あなたは今日の最初の発言者です。公開済みの能力結果、自分がこの発言で公開する能力結果、前日までの発言など、実在する根拠がある場合は評価して構いません。根拠がない場合は疑い先や投票先を無理に作らず、確認したい論点、他の参加者への質問、今後の判断基準のいずれかを自然に話してください。その場合、暫定評価は不要で、structure.suspicion=null、voteIntent=nullです。',
+      'あなたは今日の最初の発言者です。公開済みの能力結果、自分がこの発言で公開する能力結果、前日までの発言など、実在する根拠がある場合は評価して構いません。根拠がない場合は疑い先や投票先を無理に作らず、確認したい論点、他の参加者への質問、今後の判断基準のいずれかを自然に話してください。質問は役職を名乗る時期、今日の処刑方針、公開発言後に比較したい点などへ向け、0日目の占い先を選んだ理由や「なぜそこを見たか」は質問しないでください。その場合、暫定評価は不要で、structure.suspicion=null、voteIntent=nullです。',
     ] : context.discussion?.materialPhase === 'scarce' ? [
-      '公開材料がまだ少ない序盤です。宛先つきの質問、今後の判断基準、役職の登場時機への意見、または何が起きれば評価を変えるかを伴う保留のどれか一つで発言を完結して構いません。疑い先や処刑先は必須ではなく、観測できない「様子見」「便乗」「反応の遅さ」を作らないでください。実在する公開根拠がない疑いならstructure.suspicion=null、voteIntent=nullです。',
+      '公開材料がまだ少ない序盤です。宛先つきの質問、今後の判断基準、役職の登場時機への意見、または何が起きれば評価を変えるかを伴う保留のどれか一つで発言を完結して構いません。質問は公開後の発言・反応・処刑方針へ向け、0日目の占い先を選んだ理由や「なぜそこを見たか」は聞かないでください。疑い先や処刑先は必須ではなく、観測できない「様子見」「便乗」「反応の遅さ」を作らないでください。実在する公開根拠がない疑いならstructure.suspicion=null、voteIntent=nullです。',
     ] : context.discussion?.materialPhase === 'developing' ? [
       '公開材料が増え始めています。少なくとも二つの発言・役職情報・候補を比べ、差がある場合だけ暫定候補を示してください。差がない場合は、保留を解く条件や次の質問を示せば十分です。',
     ] : [
@@ -161,7 +163,12 @@ export function buildPrompts(context: DecisionContext): { systemPrompt: string; 
           entry.changedSuspicion ? '候補更新済み' : null,
         ].filter(Boolean);
         return `${entry.name}（${details.join('、')}）`;
-      }).join(' / ')}。ここに候補・疑い根拠・回答・弁明が記録された人について「まだ候補を出していない」「根拠をまだ出していない」「まだ答えていない」「まだ説明していない」と事実に反して述べないでください。内容が弱い、質問とずれている、理由に納得できないという評価は、具体的に指摘して構いません。`,
+      }).join(' / ')}。ここに候補・疑い根拠・回答・弁明が記録された人について「まだ候補を出していない」「根拠をまだ出していない」「まだ答えていない」「まだ説明していない」と事実に反して述べないでください。記録された最新の投票予定・疑い候補と矛盾する解釈で他者の立場を語らず、自分の発言への批判や質問と、自分が投票先にされていることを別の事実として区別してください。内容が弱い、質問とずれている、理由に納得できないという評価は、具体的に指摘して構いません。`,
+    ] : []),
+    ...(context.discussion?.remainingUnspokenSeats ? [
+      `今日まだ一度も発言していない人は${context.discussion.remainingUnspokenSeats.length > 0
+        ? context.discussion.remainingUnspokenSeats.map(agentNameForSeat).join('、')
+        : 'いません'}。この一覧にいない人を「未発言」「発言がない」「発言を聞けていない」と扱わないでください。内容が薄いと評価する場合は、実際の発言内容を指してください。`,
     ] : []),
     ...(context.discussion?.closedQuestionTopics?.length
       ? [`次の質問分類はすでに2回尋ねられたため閉じています。新たな返答要求に使わず、questionTopicにも設定しないでください: ${context.discussion.closedQuestionTopics.join(', ')}`]
@@ -177,7 +184,7 @@ export function buildPrompts(context: DecisionContext): { systemPrompt: string; 
     ]),
     ...(context.discussion?.priorVoteIntentTarget
       ? [`あなたはすでに${agentNameForSeat(context.discussion.priorVoteIntentTarget)}への投票予定を公表しています。変更しない予定を本文で繰り返さず、voteIntentにも再設定しないでください。`]
-      : []),
+      : ['あなたは今日まだ投票予定を公表していません。今回初めて予定を示すなら、「変えない」「維持する」「このまま」のように過去から継続している言い方をせず、新しい予定として述べてください。']),
     ...(context.discussion?.saturatedPoint ? [
       `${agentNameForSeat(context.discussion.saturatedPoint.targetSeat)}への「${SUSPICION_BASIS_LABELS[context.discussion.saturatedPoint.basis]}」という同じ種類の疑いは、すでに${context.discussion.saturatedPoint.speakers}人から公開されています。賛同するなら短く述べて構いませんが、同じ指摘を繰り返すだけでは公開材料は増えません。まだ検討されていない人物、2番手候補、本人の応答、別の公開根拠のいずれかとの比較を優先してください。同じ相手を新しい根拠で疑うことは妨げません。`,
     ] : []),
@@ -204,6 +211,7 @@ export function buildPrompts(context: DecisionContext): { systemPrompt: string; 
     `人との接し方や思い込み: ${persona.socialBias}`,
     `感情の動き: ${persona.emotionalPattern}`,
     ...(!isSpeechIntent ? [
+      `一人称は「${persona.firstPerson}」です。自分自身を自分の名前や「さん」「ちゃん」などの敬称付きで呼ばないでください。`,
       `話し方: ${persona.speechStyle}`,
       `他の参加者の呼び方: ${addressGuideForSeat(context.actor.seat)}`,
       `台詞の見本: 「${persona.exampleLine}」 見本の内容はコピーせず、息づかいと距離感だけを参考にしてください。`,
@@ -227,6 +235,7 @@ export function buildPrompts(context: DecisionContext): { systemPrompt: string; 
     ...v3DiscussionGuidance,
     ...(context.kind === 'vote' || context.kind === 'runoff_vote' ? [
       '議論中に公表された投票予定の人数は意見であって証拠ではありません。多数派へ合わせること自体を理由にせず、公開された能力結果、発言、反応、相互関係を独立に比較して投票してください。',
+      '投票理由で新しく役職を名乗ったり、能力結果を初めて公表したりしないでください。役職と能力結果の公開は昼の発言で構造化して行います。0日目の占い先の選び方は投票判断の材料にしないでください。',
       ...(context.candidateEvidence !== undefined ? [
         '候補別の公開材料にある疑い人数や同調人数は、同じ論点の正しさを人数分だけ強くするものではありません。複数人が繰り返した同じ指摘は一つの論点として扱い、その中身と本人の応答を自分で確かめてください。',
         '占い師や霊媒師を名乗る人物の結果は公開された主張であり、対象の本当の役職を確定しません。主張者の信用、対象本人の応答、対抗する役職主張を比較してください。別々の対象への結果は互いに矛盾せず、結果の対立は同じ対象へ反対の判定を主張した場合だけです。',

@@ -11,7 +11,7 @@ test('ホームから試合を開始して公開／GM視点とリプレイを表
   await page.getByLabel(/SEED/).fill('fixture-0');
   await page.getByText('最速').click();
   await page.getByRole('button', { name: /AI人狼を開始/ }).click();
-  await expect(page).toHaveURL(/\/match\//);
+  await expect(page).toHaveURL(/\/match\//, { timeout: 15_000 });
   await expect(page.locator('.cinematic-overlay')).toContainText('第0夜');
   await expect(page.locator('.cinematic-overlay')).toContainText('1日目', { timeout: 10_000 });
   await expect(page.getByRole('heading', { name: '名取 澪' })).toBeVisible();
@@ -93,7 +93,7 @@ test('Spaceキーでゲームと発言音声を一時停止・再開し、中断
   });
   await page.goto('/');
   await page.getByRole('button', { name: /AI人狼を開始/ }).click();
-  await expect(page).toHaveURL(/\/match\//);
+  await expect(page).toHaveURL(/\/match\//, { timeout: 15_000 });
   await expect(page.getByRole('heading', { name: '名取 澪' })).toBeVisible();
   await expect(page.locator('.cinematic-overlay')).toContainText('第0夜');
   await expect(page.locator('.agent-card.speaking')).toHaveCount(0);

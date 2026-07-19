@@ -32,6 +32,8 @@ describe('実AI人格プロンプト', () => {
     expect(systemPrompt).toContain('あなたは八木 こはる');
     expect(systemPrompt).toContain('内面の矛盾と欠点');
     expect(systemPrompt).toContain('台詞の見本');
+    expect(systemPrompt).toContain('一人称は「私」');
+    expect(systemPrompt).toContain('自分自身を自分の名前');
     expect(systemPrompt).toContain('他の参加者の呼び方');
     expect(systemPrompt).toContain('宮下 さくらは「さくらちゃん」');
     expect(systemPrompt).toContain('神崎 レナは「レナ」');
@@ -65,7 +67,9 @@ describe('実AI人格プロンプト', () => {
     expect(prompt).toContain('仮定、今後の方針、迷い、弱い違和感');
     expect(prompt).toContain('今日あなたに与えられた最初の発言機会');
     expect(prompt).toContain('「遅れた」「待たせた」「返答が遅い」とは扱わない');
+    expect(prompt).toContain('主語を「私」や「俺」へ変えて自分の過去行動');
     expect(prompt).toContain('根拠がない場合は疑い先や投票先を無理に作らず');
+    expect(prompt).toContain('「なぜそこを見たか」は質問しない');
     expect(prompt).toContain('暫定評価は不要で、structure.suspicion=null、voteIntent=null');
     expect(prompt).not.toContain('自分自身の暫定評価か処刑方針を少なくとも一つ出してください');
   });
@@ -95,6 +99,11 @@ describe('実AI人格プロンプト', () => {
     expect(prompts.systemPrompt).toContain('inspection_reason=2回');
     expect(prompts.systemPrompt).toContain('少なくとも二つの発言・役職情報・候補を比べ');
     expect(prompts.systemPrompt).toContain('structureは実際に口にする内容の自己分類');
+    expect(prompts.systemPrompt).toContain('0日目の占い先');
+    expect(prompts.systemPrompt).toContain('質問・攻撃・信用比較の材料にしてはいけません');
+    expect(prompts.systemPrompt).toContain('今日まだ投票予定を公表していません');
+    expect(prompts.systemPrompt).toContain('今日まだ一度も発言していない人');
+    expect(prompts.systemPrompt).toContain('この一覧にいない人を「未発言」');
     expect(prompts.systemPrompt).toContain('evidenceDay');
     expect(prompts.decisionPrompt).toContain('structureは本文に現れる');
   });
@@ -120,6 +129,8 @@ describe('実AI人格プロンプト', () => {
     expect(prompts.systemPrompt).toContain('まだ候補を出していない');
     expect(prompts.systemPrompt).toContain('根拠をまだ出していない');
     expect(prompts.systemPrompt).toContain('事実に反して述べないでください');
+    expect(prompts.systemPrompt).toContain('自分の発言への批判や質問');
+    expect(prompts.systemPrompt).toContain('自分が投票先にされていることを別の事実');
     expect(prompts.systemPrompt).toContain('村側として、材料が足りないときの質問');
   });
 
@@ -254,6 +265,8 @@ describe('実AI人格プロンプト', () => {
     expect(prompts.systemPrompt).toContain('多数派へ合わせること自体を理由にせず');
     expect(prompts.systemPrompt).toContain('複数人が繰り返した同じ指摘は一つの論点');
     expect(prompts.systemPrompt).toContain('言い間違いや説明の拙さ');
+    expect(prompts.systemPrompt).toContain('投票理由で新しく役職を名乗ったり');
+    expect(prompts.systemPrompt).toContain('0日目の占い先の選び方は投票判断の材料にしない');
     expect(prompts.systemPrompt).toContain(`${players[8].name}と${players[1].name}`);
     expect(prompts.decisionPrompt).toContain('candidateEvidence');
   });
@@ -311,10 +324,31 @@ describe('実AI人格プロンプト', () => {
     expect(prompts.systemPrompt).toContain('判断材料にしてよいのは');
     expect(prompts.systemPrompt).toContain('ゲームで認められた戦術');
     expect(prompts.systemPrompt).toContain('今回は必ず「私は占い師です」と名乗り');
+    expect(prompts.systemPrompt).toContain('0日目は誰も発言していない');
+    expect(prompts.systemPrompt).toContain('占い先を選んだ推理上の理由を作って話してはいけません');
+    expect(prompts.systemPrompt).toContain('1日目の夜以降だけに当てはまります');
     expect(prompts.decisionPrompt).toContain('authorizedClaim');
     expect(prompts.decisionPrompt).toContain('claimBoard');
     expect(prompts.decisionPrompt).not.toContain('本物');
     expect(prompts.decisionPrompt).not.toContain('偽物');
+  });
+
+  it('役職主張の固定文も人格ごとの一人称へ統一する', () => {
+    const players = setupPlayers('claim-first-person');
+    const actor = { ...players[6], role: 'werewolf' as const };
+    const prompts = buildPrompts({
+      matchId: 'test', callKey: 'd1-wolf-fake-seer', seed: 'claim-first-person', day: 1,
+      phase: 'discussion', kind: 'speech', actor,
+      players: players.map((player) => player.seat === actor.seat ? actor : player),
+      legalTargets: [], publicHistory: [], privateFacts: ['自分の役職: werewolf'], round: 1,
+      discussion: { version: 'v3', stage: 'opening', turn: 2 },
+      claimDirective: {
+        mode: 'must', claimedRole: 'seer', counterTargetSeat: null,
+        results: [{ day: 0, targetSeat: 'seat-2', verdict: '人狼ではない' }],
+      },
+    });
+    expect(prompts.systemPrompt).toContain('今回は必ず「俺は占い師です」と名乗り');
+    expect(prompts.systemPrompt).not.toContain('今回は必ず「私は占い師です」と名乗り');
   });
 
   it('claimを伏せる場合は能力結果や確認済み正体の匂わせも禁止する', () => {

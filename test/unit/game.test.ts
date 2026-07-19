@@ -4,6 +4,9 @@ import { runGame } from '@/engine/game';
 import { MockAI } from '@/server/ai/mock';
 import { runMock } from '../helpers/runMock';
 import { claimLedgerFromEvents } from '@/domain/claims';
+import { NIGHT_ZERO_UNINFORMED_FACT } from '@/domain/constants';
+import { setupPlayers } from '@/engine/setup';
+import { stableIndex } from '@/engine/prng';
 
 describe('ゲームエンジン', () => {
   it('MockAIで終端し、同seedのpayload列が一致する', async () => {
@@ -27,6 +30,80 @@ describe('ゲームエンジン', () => {
     const forbidden = events.filter((event) => event.day === 0 && ['attack_choice', 'guard_choice', 'medium_result'].includes(event.type));
     expect(forbidden).toHaveLength(0);
     expect(events.filter((event) => event.day === 0 && event.type === 'seer_result')).toHaveLength(1);
+  });
+  it('新規第0夜はAI targetを呼ばずseedで選び、後夜だけ選択理由を保持する', async () => {
+    const seed = 'night-zero-uninformed';
+    const players = setupPlayers(seed);
+    const seerSeat = players.find((player) => player.role === 'seer')!.seat;
+    const base = new MockAI();
+    const targetContexts: DecisionContext[] = [];
+    const speechContexts: DecisionContext[] = [];
+    const laterReason = '1日目の公開発言を比較した決定です。';
+    const provider: DecisionProvider = {
+      speech: async (context) => {
+        speechContexts.push(structuredClone(context));
+        return base.speech(context);
+      },
+      speechIntent: (context) => base.speechIntent(context),
+      target: async (context) => {
+        targetContexts.push(structuredClone(context));
+        const protectedTarget = context.legalTargets.find((seat) => seat !== seerSeat) ?? context.legalTargets[0];
+        return {
+          targetSeat: context.kind === 'seer' ? context.legalTargets[0] : protectedTarget,
+          statedReason: context.kind === 'seer' ? laterReason : '公開情報を比較した決定です。',
+        };
+      },
+    };
+    const events: MatchEvent[] = [];
+    await runGame('night-zero-uninformed', seed, provider, {
+      emit: async (draft) => {
+        events.push({ ...draft, matchId: 'night-zero-uninformed', seq: events.length + 1, createdAt: '' });
+      },
+      checkpoint: async () => {},
+    }, { claimsVersion: 'v2', discussionVersion: 'v3' });
+
+    expect(targetContexts.some((context) => context.callKey === 'd0-seer')).toBe(false);
+    const legalNightZeroTargets = players.filter((player) => player.seat !== seerSeat).map((player) => player.seat);
+    const expectedTarget = legalNightZeroTargets[stableIndex(seed, 'd0-seer', legalNightZeroTargets.length)];
+    expect(events.find((event) => event.day === 0 && event.type === 'seer_result')?.payload.targetSeat).toBe(expectedTarget);
+    expect(events.find((event) => event.type === 'match_created')?.payload.rules).toMatchObject({ nightZero: 'uniform' });
+    const dayOneSeerContext = speechContexts.find((context) => context.day === 1 && context.actor.seat === seerSeat);
+    expect(dayOneSeerContext?.privateFacts).toContain(NIGHT_ZERO_UNINFORMED_FACT);
+    expect(dayOneSeerContext?.privateFacts.join('\n')).not.toMatch(/0日目に.+を占った理由/);
+    const laterSeerContext = speechContexts.find((context) => context.day >= 2 && context.actor.seat === seerSeat);
+    expect(laterSeerContext?.privateFacts.join('\n')).toContain(`占った理由: ${laterReason}`);
+  });
+  it('投票理由の未宣言役職COを票先を変えずfail-closedで置換する', async () => {
+    const seed = 'vote-reason-claim-bypass';
+    const players = setupPlayers(seed);
+    const unclaimedSeat = players.find((player) => player.role === 'villager')!.seat;
+    const base = new MockAI();
+    let intendedTarget: string | null = null;
+    const provider: DecisionProvider = {
+      speech: (context) => base.speech(context),
+      speechIntent: (context) => base.speechIntent(context),
+      target: async (context) => {
+        const decision = await base.target(context);
+        if (context.kind === 'vote' && context.day === 1 && context.actor.seat === unclaimedSeat) {
+          intendedTarget = decision.targetSeat;
+          return { ...decision, statedReason: '俺が霊媒師だ。この候補へ投票する。' };
+        }
+        return decision;
+      },
+    };
+    const events: MatchEvent[] = [];
+    await runGame('vote-reason-claim-bypass', seed, provider, {
+      emit: async (draft) => {
+        events.push({ ...draft, matchId: 'vote-reason-claim-bypass', seq: events.length + 1, createdAt: '' });
+      },
+      checkpoint: async () => {},
+    }, { claimsVersion: 'v2', discussionVersion: 'v3' });
+
+    const reveal = events.find((event) => event.day === 1 && event.type === 'vote_reveal')!;
+    const vote = (reveal.payload.votes as Array<Record<string, unknown>>).find((item) => item.voter === unclaimedSeat);
+    expect(vote).toMatchObject({ target: intendedTarget, reasonSanitized: true });
+    expect(vote?.statedReason).toBe('公開された議論と候補を比較して決めました。');
+    expect(String(vote?.statedReason)).not.toContain('霊媒師');
   });
   it('1日目は当然の犠牲者なしを省略し、公開イベントが発言から始まる', async () => {
     const { events } = await runMock('day-one-start');
@@ -184,7 +261,7 @@ describe('ゲームエンジン', () => {
     const first = await runMock('1000', 'v1');
     const second = await runMock('1000', 'v1');
     expect(first.events.map((event) => event.payload)).toEqual(second.events.map((event) => event.payload));
-    expect(first.events.find((event) => event.type === 'match_created')?.payload.rules).toEqual({ discussion: 'v3', claims: 'v1' });
+    expect(first.events.find((event) => event.type === 'match_created')?.payload.rules).toEqual({ discussion: 'v3', claims: 'v1', nightZero: 'uniform' });
 
     const ledger = claimLedgerFromEvents(first.events);
     expect(ledger.length).toBeGreaterThanOrEqual(2);

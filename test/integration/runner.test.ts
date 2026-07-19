@@ -45,7 +45,7 @@ describe('MatchRunner', () => {
     const events = manager.repo.events(match.id);
     expect(events.length).toBeGreaterThan(20);
     expect(new Set(events.map((event) => event.seq)).size).toBe(events.length);
-    expect(events.find((event) => event.type === 'match_created')?.payload.rules).toEqual({ discussion: 'v3', claims: 'v2' });
+    expect(events.find((event) => event.type === 'match_created')?.payload.rules).toEqual({ discussion: 'v3', claims: 'v2', nightZero: 'uniform' });
     expect(events.some((event) => event.type === 'discussion_speech' && event.payload.structure)).toBe(true);
   });
   it('pause/resumeとabortを受け付ける', async () => {
@@ -76,7 +76,7 @@ describe('MatchRunner', () => {
         repo.appendEvent(event);
       },
       checkpoint: async () => { if (seq === 20) throw new Error('simulated crash'); },
-    }, { includeDayOneDawn: true, discussionVersion: 'legacy' })).rejects.toThrow('simulated crash');
+    }, { includeDayOneDawn: true, discussionVersion: 'legacy', nightZeroMode: 'ai' })).rejects.toThrow('simulated crash');
     expect(repo.maxSeq(record.id)).toBe(20);
     expect(repo.events(record.id).some((event) => event.day === 1 && event.type === 'dawn')).toBe(true);
     const manager = new MatchRunnerManager(repo);
@@ -99,7 +99,7 @@ describe('MatchRunner', () => {
         repo.appendEvent({ ...draft, matchId: record.id, seq: ++seq, createdAt: now });
       },
       checkpoint: async () => { if (seq === 32) throw new Error('simulated claims crash'); },
-    }, { claimsVersion: 'v1', discussionVersion: 'v2' })).rejects.toThrow('simulated claims crash');
+    }, { claimsVersion: 'v1', discussionVersion: 'v2', nightZeroMode: 'ai' })).rejects.toThrow('simulated claims crash');
     expect(repo.events(record.id).find((event) => event.type === 'match_created')?.payload.rules).toEqual({ discussion: 'v2', claims: 'v1' });
     expect(repo.events(record.id).some((event) => event.type === 'discussion_speech' && event.payload.claim)).toBe(true);
 
@@ -121,9 +121,9 @@ describe('MatchRunner', () => {
         repo.appendEvent({ ...draft, matchId: record.id, seq: ++seq, createdAt: now });
       },
       checkpoint: async () => { if (seq === 32) throw new Error('simulated claims v2 crash'); },
-    }, { claimsVersion: 'v2', discussionVersion: 'v3' })).rejects.toThrow('simulated claims v2 crash');
+    }, { claimsVersion: 'v2', discussionVersion: 'v3', nightZeroMode: 'uniform' })).rejects.toThrow('simulated claims v2 crash');
     expect(repo.events(record.id).find((event) => event.type === 'match_created')?.payload.rules)
-      .toEqual({ discussion: 'v3', claims: 'v2' });
+      .toEqual({ discussion: 'v3', claims: 'v2', nightZero: 'uniform' });
 
     const manager = new MatchRunnerManager(repo);
     manager.recover();

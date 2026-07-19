@@ -8,8 +8,10 @@ describe('エージェント人格', () => {
     expect(new Set(AGENT_PERSONAS.map((persona) => persona.name)).size).toBe(9);
     expect(new Set(AGENT_PERSONAS.map((persona) => persona.title)).size).toBe(9);
     expect(new Set(AGENT_PERSONAS.map((persona) => persona.exampleLine)).size).toBe(9);
+    expect(AGENT_PERSONAS.every((persona) => persona.firstPerson === '私' || persona.firstPerson === '俺')).toBe(true);
     expect(personaForSeat('seat-6').name).toBe('黒田 剛');
     expect(personaForSeat('seat-6').title).toBe('愛想のない現実主義者');
+    expect(personaForSeat('seat-6').firstPerson).toBe('俺');
     expect(personaForSeat('seat-8').contradiction).toContain('子ども扱い');
   });
 
