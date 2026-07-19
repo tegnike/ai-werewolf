@@ -98,6 +98,14 @@ ALLOW_REAL_AI=1 npm run sim -- --matches 1 --ai real --seed-base 1000
 
 CLIは `--ai real` と `ALLOW_REAL_AI=1` の両方がなければ実AIを起動しません。別モデルへのフォールバックやランダム代替行動はありません。物理API呼び出しはリトライを含め240回未満で停止します。
 
+1日目だけを本番条件で再現し、AIによる事後評価用の結果を保存する場合は次を使います。`.env.local` があれば開発サーバーと同じ方法で読み込み、スクリプト自身は品質の合否判定を行いません。
+
+```bash
+ALLOW_REAL_AI=1 npm run accept:day1 -- --ai real
+# 1 seedだけを再現する場合
+ALLOW_REAL_AI=1 npm run accept:day1 -- --ai real --seed day1-v3-0
+```
+
 ## 構成
 
 - Next.js App Router + React + TypeScript

@@ -13,4 +13,5 @@ data/
 .env.local
 .env.*.local
 !.env.example
+!.dockerignore
 .DS_Store
