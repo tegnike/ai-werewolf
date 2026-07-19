@@ -37,6 +37,11 @@ describe('ゲームエンジン', () => {
     const { events } = await runMock('speech-rounds');
     for (const day of new Set(events.filter((event) => event.type === 'discussion_speech').map((event) => event.day))) {
       const speeches = events.filter((event) => event.day === day && event.type === 'discussion_speech');
+      const speakerOrder = speeches.map((event) => String(event.payload.seat));
+      for (let index = 0; index < speakerOrder.length; index += 1) {
+        expect(speakerOrder[index]).not.toBe(speakerOrder[index - 1]);
+        expect(speakerOrder[index]).not.toBe(speakerOrder[index - 2]);
+      }
       const counts = new Map<string, number>();
       for (const event of speeches) counts.set(String(event.payload.seat), (counts.get(String(event.payload.seat)) ?? 0) + 1);
       const closed = events.find((event) => event.day === day && event.type === 'discussion_closed')!;
@@ -226,10 +231,11 @@ describe('ゲームエンジン', () => {
     }
   });
 
-  it('返答を求めた相手へ即座に発言権を渡し、固定一巡より先に2回目の発言もできる', async () => {
+  it('返答要求をつなげても同じ話者の間に必ず別の2人を挟む', async () => {
     const speechContexts: DecisionContext[] = [];
     let firstSeat: DecisionContext['actor']['seat'] | null = null;
     let secondSeat: DecisionContext['actor']['seat'] | null = null;
+    let thirdSeat: DecisionContext['actor']['seat'] | null = null;
     const provider: DecisionProvider = {
       async speech(context): Promise<SpeechDecision> {
         speechContexts.push(structuredClone(context));
@@ -239,7 +245,11 @@ describe('ゲームエンジン', () => {
           return { speech: 'あなたの考えを聞いてみたいです。', addressedTo: secondSeat, requestsReply: true };
         }
         if (context.day === 1 && context.discussion?.turn === 2) {
-          return { speech: '質問に答えます。あなたはどう思いますか？', addressedTo: firstSeat, requestsReply: true };
+          thirdSeat = context.legalTargets[0];
+          return { speech: '質問に答えます。次はあなたの考えを聞かせてください。', addressedTo: thirdSeat, requestsReply: true };
+        }
+        if (context.day === 1 && context.discussion?.turn === 3) {
+          return { speech: '私も答えます。最初の話者はどう思いますか？', addressedTo: firstSeat, requestsReply: true };
         }
         return { speech: '今の段階で見えていることだけを話します。', addressedTo: null, requestsReply: false };
       },
@@ -253,10 +263,11 @@ describe('ゲームエンジン', () => {
 
     await runGame('immediate-reply', 'immediate-reply', provider, { emit: async () => {}, checkpoint: async () => {} }, { discussionVersion: 'v2' });
     const dayOne = speechContexts.filter((context) => context.day === 1 && context.kind === 'speech');
-    expect(dayOne.slice(0, 3).map((context) => context.actor.seat)).toEqual([firstSeat, secondSeat, firstSeat]);
-    expect(dayOne.slice(0, 3).map((context) => context.discussion?.stage)).toEqual(['opening', 'opening', 'free']);
+    expect(dayOne.slice(0, 4).map((context) => context.actor.seat)).toEqual([firstSeat, secondSeat, thirdSeat, firstSeat]);
+    expect(dayOne.slice(0, 4).map((context) => context.discussion?.stage)).toEqual(['opening', 'opening', 'opening', 'free']);
     expect(dayOne[1].discussion).toMatchObject({ promptedBySeat: firstSeat, motivation: 'reply' });
     expect(dayOne[2].discussion).toMatchObject({ promptedBySeat: secondSeat, motivation: 'reply' });
+    expect(dayOne[3].discussion).toMatchObject({ promptedBySeat: thirdSeat, motivation: 'reply' });
   });
 
   it('人狼と狩人の次の判断に最終襲撃と護衛の成否を引き継ぐ', async () => {

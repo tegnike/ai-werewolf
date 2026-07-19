@@ -38,6 +38,16 @@ const MAX_SPEECHES_PER_PLAYER = 2;
 const LEGACY_MAX_FREE_SPEECHES_PER_PLAYER = 2;
 const NINE_PLAYER_MIN_SPEECHES = 14;
 const ABSOLUTE_MAX_SPEECHES = 18;
+const DISCUSSION_SPEAKER_COOLDOWN = 2;
+
+function canSpeakAfter(recentSpeakerSeats: SeatId[], seat: SeatId): boolean {
+  return !recentSpeakerSeats.slice(-DISCUSSION_SPEAKER_COOLDOWN).includes(seat);
+}
+
+function rememberSpeaker(recentSpeakerSeats: SeatId[], seat: SeatId): void {
+  recentSpeakerSeats.push(seat);
+  if (recentSpeakerSeats.length > DISCUSSION_SPEAKER_COOLDOWN) recentSpeakerSeats.shift();
+}
 
 function discussionSpeechLimits(aliveCount: number): { minimum: number; maximum: number } {
   return {
@@ -476,6 +486,7 @@ export async function runGame(
       const lastIntentSpeechCount = new Map<SeatId, number>();
       const defenseScheduledSeats = new Set<SeatId>();
       const consensusDefenseScheduledSeats = new Set<SeatId>();
+      const recentSpeakerSeats: SeatId[] = [];
       let speechCount = 0;
       let consensusDefenseExtraSpeeches = 0;
       let intentPolls = 0;
@@ -490,7 +501,8 @@ export async function runGame(
             const mandatory = speakers.filter((player) => {
               const count = speechCounts.get(player.seat) ?? 0;
               const stage = count === 0 ? 'opening' : 'free';
-              return count < MAX_SPEECHES_PER_PLAYER && directiveFor(player, day, stage).mode === 'must';
+              return canSpeakAfter(recentSpeakerSeats, player.seat) &&
+                count < MAX_SPEECHES_PER_PLAYER && directiveFor(player, day, stage).mode === 'must';
             });
             if (mandatory.length > 0) {
               const actor = stableShuffle(mandatory, seed, `claims/v1/counter-order-d${day}-t${speechCount + 1}`)[0];
@@ -510,6 +522,7 @@ export async function runGame(
           const actor = consensus ? speakers.find((player) => player.seat === consensus) : undefined;
           const actorSpeechCount = actor ? (speechCounts.get(actor.seat) ?? 0) : 0;
           if (actor && !consensusDefenseScheduledSeats.has(actor.seat) &&
+            canSpeakAfter(recentSpeakerSeats, actor.seat) &&
             actorSpeechCount >= 1 && actorSpeechCount < MAX_SPEECHES_PER_PLAYER + 1) {
             consensusDefenseScheduledSeats.add(actor.seat);
             nextSpeaker = {
@@ -524,6 +537,7 @@ export async function runGame(
         if (!nextSpeaker) {
           if (discussionVersion === 'v3') {
             const defenseCandidates = speakers.filter((player) =>
+              canSpeakAfter(recentSpeakerSeats, player.seat) &&
               !defenseScheduledSeats.has(player.seat) &&
               (speechCounts.get(player.seat) ?? 0) === 1 &&
               (suspicionCountFor(discussionBoard, player.seat) >= 2 || voteIntentCountFor(discussionBoard, player.seat) >= 3));
@@ -535,12 +549,16 @@ export async function runGame(
           }
         }
         if (!nextSpeaker) {
-          const unspoken = speakers.filter((player) => (speechCounts.get(player.seat) ?? 0) === 0);
+          const unspoken = speakers.filter((player) =>
+            canSpeakAfter(recentSpeakerSeats, player.seat) && (speechCounts.get(player.seat) ?? 0) === 0);
           if (speechCount < minimumSpeeches || unspoken.length > 0) {
-            const eligible = speakers.filter((player) => (speechCounts.get(player.seat) ?? 0) < MAX_SPEECHES_PER_PLAYER);
+            const eligible = speakers.filter((player) =>
+              canSpeakAfter(recentSpeakerSeats, player.seat) &&
+              (speechCounts.get(player.seat) ?? 0) < MAX_SPEECHES_PER_PLAYER);
             const consensus = consensusVoteTarget(discussionBoard);
             const consensusUnspoken = consensus ? unspoken.filter((player) => player.seat === consensus) : [];
             const pool = consensusUnspoken.length > 0 ? consensusUnspoken : unspoken.length > 0 ? unspoken : eligible;
+            if (pool.length === 0) break;
             nextSpeaker = {
               actor: stableShuffle(pool, seed, `d${day}-scheduled-speaker-t${speechCount + 1}`)[0],
               motivation: 'new_information',
@@ -550,7 +568,9 @@ export async function runGame(
           if (intentPolls >= MAX_INTENT_POLLS_PER_DAY) break;
           const pollNumber = intentPolls + 1;
 
-          const eligible = speakers.filter((player) => (speechCounts.get(player.seat) ?? 0) < MAX_SPEECHES_PER_PLAYER);
+          const eligible = speakers.filter((player) =>
+            canSpeakAfter(recentSpeakerSeats, player.seat) &&
+            (speechCounts.get(player.seat) ?? 0) < MAX_SPEECHES_PER_PLAYER);
           const pollable = eligible.filter((player) => lastIntentSpeechCount.get(player.seat) !== speechCount);
           const shuffled = stableShuffle(pollable, seed, `d${day}-intent-candidates-p${pollNumber}`);
           const shuffledIndex = new Map(shuffled.map((player, index) => [player.seat, index]));
@@ -572,7 +592,9 @@ export async function runGame(
             polledSeats.add(actor.seat);
             lastIntentSpeechCount.set(actor.seat, speechCount);
             const legalTargets = speakers
-              .filter((player) => player.seat !== actor.seat && (speechCounts.get(player.seat) ?? 0) < MAX_SPEECHES_PER_PLAYER)
+              .filter((player) => player.seat !== actor.seat &&
+                player.seat !== recentSpeakerSeats.at(-1) &&
+                (speechCounts.get(player.seat) ?? 0) < MAX_SPEECHES_PER_PLAYER)
               .map((player) => player.seat);
             const discussion: DiscussionContext = {
               stage: (speechCounts.get(actor.seat) ?? 0) === 0 ? 'opening' : 'free',
@@ -597,15 +619,19 @@ export async function runGame(
         const currentSpeaker: ScheduledDiscussionSpeaker = nextSpeaker;
         const actor = currentSpeaker.actor;
         nextSpeaker = null;
+        if (!canSpeakAfter(recentSpeakerSeats, actor.seat)) continue;
         const actorSpeechCount = speechCounts.get(actor.seat) ?? 0;
         const actorSpeechLimit = currentSpeaker.allowExtraSpeech
           ? MAX_SPEECHES_PER_PLAYER + 1
           : MAX_SPEECHES_PER_PLAYER;
         if (actorSpeechCount >= actorSpeechLimit) continue;
         const stage = actorSpeechCount === 0 ? 'opening' : 'free';
-        const canRequestReply = speechCount + 1 < maximumSpeeches;
+        const canRequestReply = speechCount + 1 < maximumSpeeches && speakers.some((player) =>
+          player.seat !== actor.seat && player.seat !== recentSpeakerSeats.at(-1) &&
+          (speechCounts.get(player.seat) ?? 0) < MAX_SPEECHES_PER_PLAYER);
         const legalTargets = speakers
           .filter((player) => canRequestReply && player.seat !== actor.seat &&
+            player.seat !== recentSpeakerSeats.at(-1) &&
             (speechCounts.get(player.seat) ?? 0) < MAX_SPEECHES_PER_PLAYER)
           .map((player) => player.seat);
         const spokenSeats = speakers.filter((player) => (speechCounts.get(player.seat) ?? 0) > 0).map((player) => player.seat);
@@ -647,11 +673,13 @@ export async function runGame(
           });
         }
         publicHistory.push(`${actor.name}: ${speech}`);
+        rememberSpeaker(recentSpeakerSeats, actor.seat);
         if (discussionVersion === 'v3' && decision.structure) {
           discussionBoard = foldDiscussionBoard(discussionBoard, actor.seat, decision.structure, decision.requestsReply);
         }
 
         if (decision.requestsReply && decision.addressedTo &&
+          canSpeakAfter(recentSpeakerSeats, decision.addressedTo) &&
           (speechCounts.get(decision.addressedTo) ?? 0) < MAX_SPEECHES_PER_PLAYER) {
           const target = playerBySeat(state, decision.addressedTo);
           nextSpeaker = {

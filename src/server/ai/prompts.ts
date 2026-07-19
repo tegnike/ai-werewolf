@@ -16,6 +16,30 @@ export function buildPrompts(context: DecisionContext): { systemPrompt: string; 
     : null;
   const waitingForFreeReplyNames = (context.discussion?.waitingForFreeReplySeats ?? [])
     .map((seat) => agentNameForSeat(seat));
+  const publicBlackClaims = (context.candidateEvidence ?? []).flatMap((entry) =>
+    context.players.find((player) => player.seat === entry.targetSeat)?.alive === false
+      ? []
+      : entry.claimedResults
+      .filter((result) => result.claimedRole === 'seer' && result.verdict === '人狼')
+      .map((result) => ({ claimantSeat: result.sourceSeat, targetSeat: entry.targetSeat })));
+  const blackenedSelf = publicBlackClaims.some((claim) => claim.targetSeat === context.actor.seat);
+  const blackenedWolfAlly = context.actor.role === 'werewolf'
+    ? publicBlackClaims.find((claim) => claim.targetSeat !== context.actor.seat &&
+      context.players.find((player) => player.seat === claim.targetSeat)?.role === 'werewolf')
+    : undefined;
+  const blackResultGuidance = discussionV3 && publicBlackClaims.length > 0 ? [
+    `占い師を名乗る人物から「人狼」という結果を出された人がいます（${publicBlackClaims.map((claim) =>
+      `${agentNameForSeat(claim.claimantSeat)}→${agentNameForSeat(claim.targetSeat)}`).join('、')}）。これは公開された役職主張であり、対象の本当の役職が確定したわけではありません。同じ結果へ便乗するだけで対象を一日中追い詰めず、占い師候補の信用・対象本人の説明・他候補の公開材料を比較してください。`,
+    ...(blackenedSelf ? [
+      'あなた自身が「人狼」という結果を出されています。受け身で同じ否定を繰り返さず、結果を出した占い師候補の不自然な点へ具体的に反論し、自分と比較すべき別候補を公開根拠つきで一人示してください。',
+    ] : []),
+    ...(blackenedWolfAlly ? [
+      `人狼仲間の${agentNameForSeat(blackenedWolfAlly.targetSeat)}が「人狼」という結果を出されています。仲間が処刑候補に固定されないよう、露骨に正体を知っている庇い方は避けながら、結果を出した占い師候補の信用を崩す、別候補を公開根拠つきで示す、処刑方針を組み替える、のいずれかを自分の発言の中心にしてください。仲間とだけ応酬せず、村全体の判断を別方向へ動かしてください。`,
+    ] : []),
+    ...(context.actor.role === 'madman' ? [
+      `あなたは狂人ですが、人狼が誰かは知りません。この「人狼」という結果の真偽を知ったふりはせず、傍観や多数派への便乗もせず、${context.claimDirective?.mode !== 'forbidden' ? '認可された対抗の役職主張、' : ''}占い師候補への具体的な疑義、または別の処刑候補の提示によって、村の結論が一人へ固定されるのを積極的に崩してください。`,
+    ] : []),
+  ] : [];
   const wolfChatGuidance = context.kind === 'wolf_speech'
     ? context.wolfChat?.mode === 'monologue'
       ? [
@@ -138,6 +162,7 @@ export function buildPrompts(context: DecisionContext): { systemPrompt: string; 
     '他者の本当の役職を知っているふりをしないでください。',
     ...wolfChatGuidance,
     ...discussionGuidance,
+    ...blackResultGuidance,
     ...v3DiscussionGuidance,
     ...(context.kind === 'vote' || context.kind === 'runoff_vote' ? [
       '議論中に公表された投票予定の人数は意見であって証拠ではありません。多数派へ合わせること自体を理由にせず、公開された能力結果、発言、反応、相互関係を独立に比較して投票してください。',

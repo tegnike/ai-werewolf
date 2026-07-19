@@ -96,6 +96,54 @@ describe('実AI人格プロンプト', () => {
     expect(prompts.decisionPrompt).toContain('structureは本文に現れる');
   });
 
+  it('人狼判定で議論を固定せず、人狼仲間と狂人に別方向から盤面を揺らさせる', () => {
+    const basePlayers = setupPlayers('contested-black-result');
+    const wolfActor = { ...basePlayers[0], role: 'werewolf' as const };
+    const wolfAlly = { ...basePlayers[1], role: 'werewolf' as const };
+    const seerClaimant = { ...basePlayers[2], role: 'seer' as const };
+    const madmanActor = { ...basePlayers[3], role: 'madman' as const };
+    const players = basePlayers.map((player) =>
+      player.seat === wolfActor.seat ? wolfActor
+        : player.seat === wolfAlly.seat ? wolfAlly
+          : player.seat === seerClaimant.seat ? seerClaimant
+            : player.seat === madmanActor.seat ? madmanActor
+              : player);
+    const candidateEvidence = [{
+      targetSeat: wolfAlly.seat, suspicionSpeakers: 1, voteIntentSpeakers: 0,
+      suspicionBases: { result: 1 as const },
+      claimedResults: [{
+        sourceSeat: seerClaimant.seat, claimedRole: 'seer' as const,
+        verdict: '人狼' as const, sameRoleClaimants: 1,
+      }],
+    }];
+    const baseContext = {
+      matchId: 'test', seed: 'contested-black-result', day: 1,
+      phase: 'discussion' as const, kind: 'speech' as const, players,
+      legalTargets: players.map((player) => player.seat), publicHistory: [],
+      discussion: { version: 'v3' as const, stage: 'opening' as const, turn: 5 },
+      candidateEvidence,
+    };
+
+    const wolfPrompt = buildPrompts({
+      ...baseContext, callKey: 'wolf-reaction', actor: wolfActor,
+      privateFacts: ['自分の役職: werewolf', `生存中の人狼仲間: ${wolfAlly.name}`],
+    }).systemPrompt;
+    expect(wolfPrompt).toContain('対象の本当の役職が確定したわけではありません');
+    expect(wolfPrompt).toContain('同じ結果へ便乗するだけで対象を一日中追い詰めず');
+    expect(wolfPrompt).toContain(`人狼仲間の${wolfAlly.name}`);
+    expect(wolfPrompt).toContain('占い師候補の信用を崩す');
+    expect(wolfPrompt).toContain('仲間とだけ応酬せず');
+
+    const madmanPrompt = buildPrompts({
+      ...baseContext, callKey: 'madman-reaction', actor: madmanActor,
+      privateFacts: ['自分の役職: madman'],
+      claimDirective: { mode: 'forbidden', claimedRole: null, results: [], counterTargetSeat: null },
+    }).systemPrompt;
+    expect(madmanPrompt).toContain('人狼が誰かは知りません');
+    expect(madmanPrompt).toContain('傍観や多数派への便乗もせず');
+    expect(madmanPrompt).toContain('村の結論が一人へ固定されるのを積極的に崩してください');
+  });
+
   it('集中後は投票予定の人数を証拠にせず公開材料と新情報を比較させる', () => {
     const players = setupPlayers('consensus-evidence-prompt');
     const actor = players[2];
