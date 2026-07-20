@@ -30,6 +30,7 @@ function storedSfxVolume(): number {
 export function useCinematicEffects(events: UiEvent[], resetKey: string, announceInitial = false, resolveName?: (seat: SeatId) => string) {
   const [cue, setCue] = useState<CinematicCue | null>(null);
   const [cinematicBusy, setCinematicBusy] = useState(false);
+  const [deferredEventSeqs, setDeferredEventSeqs] = useState<ReadonlySet<number>>(() => new Set());
   const [sfxEnabled, setSfxEnabledState] = useState(true);
   const [sfxVolume, setSfxVolumeState] = useState(DEFAULT_SFX_VOLUME);
   const sfxEnabledRef = useRef(true);
@@ -70,6 +71,13 @@ export function useCinematicEffects(events: UiEvent[], resetKey: string, announc
     });
   }, []);
 
+  const presentCue = useCallback((next: CinematicCue) => {
+    activeCue.current = next;
+    setCinematicBusy(true);
+    setCue(next);
+    playSound(next.sound);
+  }, [playSound]);
+
   const startNext = useCallback(() => {
     if (activeCue.current || betweenCues.current) return;
     const next = queue.current.shift();
@@ -77,11 +85,18 @@ export function useCinematicEffects(events: UiEvent[], resetKey: string, announc
       setCinematicBusy(false);
       return;
     }
-    activeCue.current = next;
     setCinematicBusy(true);
-    setCue(next);
-    playSound(next.sound);
-  }, [playSound]);
+    if (next.gapBeforeMs) {
+      betweenCues.current = true;
+      nextCueTimer.current = window.setTimeout(() => {
+        nextCueTimer.current = null;
+        betweenCues.current = false;
+        presentCue(next);
+      }, next.gapBeforeMs);
+      return;
+    }
+    presentCue(next);
+  }, [presentCue]);
 
   useLayoutEffect(() => {
     if (observedResetKey.current === resetKey) return;
@@ -92,6 +107,7 @@ export function useCinematicEffects(events: UiEvent[], resetKey: string, announc
     if (nextCueTimer.current !== null) window.clearTimeout(nextCueTimer.current);
     nextCueTimer.current = null;
     queue.current = [];
+    setDeferredEventSeqs(new Set());
     setCinematicBusy(false);
     setCue(null);
   }, [resetKey]);
@@ -117,6 +133,10 @@ export function useCinematicEffects(events: UiEvent[], resetKey: string, announc
     const freshCues = cinematicCuesBetween(events, seenSeq.current, maxSeq, resolveName);
     seenSeq.current = maxSeq;
     if (freshCues.length === 0) return;
+    const newlyDeferred = freshCues.filter((item) => item.revealEventAfter).map((item) => item.seq);
+    if (newlyDeferred.length > 0) {
+      setDeferredEventSeqs((current) => new Set([...current, ...newlyDeferred]));
+    }
     queue.current.push(...freshCues);
     setCinematicBusy(true);
     startNext();
@@ -125,6 +145,13 @@ export function useCinematicEffects(events: UiEvent[], resetKey: string, announc
   useEffect(() => {
     if (!cue) return;
     const timer = window.setTimeout(() => {
+      if (cue.revealEventAfter) {
+        setDeferredEventSeqs((current) => {
+          const next = new Set(current);
+          next.delete(cue.seq);
+          return next;
+        });
+      }
       activeCue.current = null;
       setCue(null);
       betweenCues.current = true;
@@ -155,5 +182,5 @@ export function useCinematicEffects(events: UiEvent[], resetKey: string, announc
     for (const element of Object.values(audio.current)) if (element) element.volume = volume;
   }, []);
 
-  return { cinematicCue: cue, cinematicBusy, sfxEnabled, setSfxEnabled, sfxVolume, setSfxVolume };
+  return { cinematicCue: cue, cinematicBusy, deferredEventSeqs, sfxEnabled, setSfxEnabled, sfxVolume, setSfxVolume };
 }

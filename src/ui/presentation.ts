@@ -32,6 +32,15 @@ export function featuredSpeechEvent(events: UiEvent[], speakingSeq: number | nul
   return speeches.at(-1) ?? null;
 }
 
+export function latestSpeechesForDay(events: UiEvent[], day: number): Map<string, string> {
+  const speeches = new Map<string, string>();
+  for (const event of events) {
+    if (event.day !== day || event.type !== 'discussion_speech') continue;
+    speeches.set(String(event.payload.seat), String(event.payload.speech));
+  }
+  return speeches;
+}
+
 export function focusPanelKind(featuredSpeech: UiEvent | null, hasCurrentDayVote: boolean, day: number, phase: string): 'speech' | 'vote' | null {
   const speechPhase = ['discussion', 'night_zero', 'wolf_chat'].includes(phase);
   if (featuredSpeech && featuredSpeech.day === day && (speechPhase || !hasCurrentDayVote)) return 'speech';
@@ -65,6 +74,12 @@ export function derivePresentedState(events: UiEvent[], matchStatus?: string): P
 
 export function presentationCursorAfterLoad(currentSeq: number, maxLoadedSeq: number, initialized: boolean): number {
   return initialized ? currentSeq : maxLoadedSeq;
+}
+
+export function eventsThroughCinematicBoundary(events: UiEvent[], deferredSeqs: ReadonlySet<number>): UiEvent[] {
+  if (deferredSeqs.size === 0) return events;
+  const firstDeferredSeq = Math.min(...deferredSeqs);
+  return events.filter((event) => event.seq < firstDeferredSeq);
 }
 
 export function publicSecretsReady(events: UiEvent[], matchStatus: string | undefined, maxLoadedSeq: number): boolean {

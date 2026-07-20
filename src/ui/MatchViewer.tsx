@@ -10,7 +10,7 @@ import { useAmbientBgm } from './useAmbientBgm';
 import { useMatchVoice } from './useMatchVoice';
 import { voiceForSeat } from '@/domain/voices';
 import { agentNameForSeat, personaForSeat } from '@/domain/agents';
-import { aiErrorDescription, derivePresentedState, featuredSpeechEvent, focusPanelKind, presentationCursorAfterLoad, presentationLimit, privateActionDescription, publicSecretsReady } from './presentation';
+import { aiErrorDescription, derivePresentedState, eventsThroughCinematicBoundary, featuredSpeechEvent, focusPanelKind, latestSpeechesForDay, presentationCursorAfterLoad, presentationLimit, privateActionDescription, publicSecretsReady } from './presentation';
 import { buildEpilogue, epilogueRoleLabel, fateLabel, type SpectatorDeathRecord } from './epilogue';
 import { SpectatorGuide } from './SpectatorGuide';
 import { CinematicOverlay } from './CinematicOverlay';
@@ -104,10 +104,11 @@ export function MatchViewer({ matchId, mode }: { matchId: string; mode: 'live' |
   const resolveCharacterName = useCallback((seat: SeatId) => seatName(seat, characters), [characters]);
   const voiceEvents = useMemo(() => view === 'gm' ? events : events.filter((event) => event.visibility !== 'private'), [events, view]);
   const visibleEvents = useMemo(() => events.filter((event) => mode === 'live' ? event.seq <= presentedSeq : event.seq <= cursor), [cursor, events, mode, presentedSeq]);
+  const { cinematicCue, cinematicBusy, deferredEventSeqs, sfxEnabled, setSfxEnabled, sfxVolume, setSfxVolume } = useCinematicEffects(visibleEvents, `${matchId}:${mode}:${view}`, announceInitialCues, resolveCharacterName);
+  const displayedEvents = useMemo(() => eventsThroughCinematicBoundary(visibleEvents, deferredEventSeqs), [deferredEventSeqs, visibleEvents]);
   const maxLoadedSeq = Math.max(0, ...events.map((event) => event.seq));
-  const { cinematicCue, cinematicBusy, sfxEnabled, setSfxEnabled, sfxVolume, setSfxVolume } = useCinematicEffects(visibleEvents, `${matchId}:${mode}:${view}`, announceInitialCues, resolveCharacterName);
-  const presentedStatus = mode === 'replay' && match?.status === 'finished' && !visibleEvents.some((event) => event.type === 'match_finished') ? 'running' : match?.status;
-  const presentedState = useMemo(() => derivePresentedState(visibleEvents, presentedStatus), [presentedStatus, visibleEvents]);
+  const presentedStatus = mode === 'replay' && match?.status === 'finished' && !displayedEvents.some((event) => event.type === 'match_finished') ? 'running' : match?.status;
+  const presentedState = useMemo(() => derivePresentedState(displayedEvents, presentedStatus), [displayedEvents, presentedStatus]);
   const audioMood = ['night_zero', 'wolf_chat', 'night_actions', 'medium'].includes(presentedState.phase) ? 'night' : 'day';
   const { bgmEnabled, setBgmEnabled, bgmVolume, setBgmVolume } = useAmbientBgm(audioMood);
   const revealSpeech = useCallback((seq: number) => setPresentedSeq((current) => Math.max(current, seq)), []);
@@ -128,10 +129,10 @@ export function MatchViewer({ matchId, mode }: { matchId: string; mode: 'live' |
   }, [matchId, publicSecretsUnlocked, view]);
 
   useEffect(() => {
-    if (view === 'public' && !publicSecretsUnlocked && publicSecretsReady(visibleEvents, match?.status, maxLoadedSeq)) {
+    if (view === 'public' && !publicSecretsUnlocked && publicSecretsReady(displayedEvents, match?.status, maxLoadedSeq)) {
       setPublicSecretsUnlocked(true);
     }
-  }, [match?.status, maxLoadedSeq, publicSecretsUnlocked, view, visibleEvents]);
+  }, [displayedEvents, match?.status, maxLoadedSeq, publicSecretsUnlocked, view]);
 
   useEffect(() => {
     if (mode !== 'live') return;
@@ -197,19 +198,18 @@ export function MatchViewer({ matchId, mode }: { matchId: string; mode: 'live' |
   const { phase, day } = presentedState;
   const isNight = ['night_zero', 'wolf_chat', 'night_actions', 'medium'].includes(phase);
   const deathRecords = new Map<string, SpectatorDeathRecord>();
-  for (const event of visibleEvents) {
+  for (const event of displayedEvents) {
     if (event.type === 'execution' && event.payload.seat) deathRecords.set(String(event.payload.seat), { cause: 'execution', day: event.day });
     if (event.type === 'dawn' && event.payload.victim) deathRecords.set(String(event.payload.victim), { cause: 'attack', day: event.day });
   }
   const roleMap = new Map<string, string>();
-  for (const event of visibleEvents) {
+  for (const event of displayedEvents) {
     const players = event.type === 'match_created' ? event.payload.players : event.type === 'match_finished' ? event.payload.roles : null;
     if (Array.isArray(players)) for (const item of players as Array<{ seat: string; role: string }>) roleMap.set(item.seat, item.role);
   }
-  const latestSpeech = new Map<string, string>();
-  for (const event of visibleEvents.filter((item) => item.type === 'discussion_speech')) latestSpeech.set(String(event.payload.seat), String(event.payload.speech));
+  const latestSpeech = latestSpeechesForDay(displayedEvents, day);
   let claimLedger: ClaimLedger = [];
-  for (const event of visibleEvents.filter((item) => item.type === 'discussion_speech')) {
+  for (const event of displayedEvents.filter((item) => item.type === 'discussion_speech')) {
     const payload = event.payload;
     if (typeof payload.seat !== 'string' || typeof payload.name !== 'string' ||
       (payload.stage !== 'opening' && payload.stage !== 'free')) continue;
@@ -221,14 +221,12 @@ export function MatchViewer({ matchId, mode }: { matchId: string; mode: 'live' |
       claim: (payload.claim ?? null) as SpeechClaim | null,
     });
   }
-  const finalEvent = [...visibleEvents].reverse().find((event) => event.type === 'match_finished');
-  const latestVote = [...visibleEvents].reverse().find((event) =>
+  const finalEvent = [...displayedEvents].reverse().find((event) => event.type === 'match_finished');
+  const latestVote = [...displayedEvents].reverse().find((event) =>
     event.type === 'vote_reveal' && (Boolean(finalEvent) || event.day === day));
   const latestVotes = voteEntries(latestVote);
   const latestVoteByVoter = new Map(latestVotes.map((vote) => [vote.voter, vote.target]));
-  const latestTally = (latestVote?.payload.tally ?? {}) as Record<string, number>;
-  const maxVoteCount = Math.max(1, ...Object.values(latestTally));
-  const featuredSpeech = finalEvent ? null : featuredSpeechEvent(visibleEvents, speakingSeq);
+  const featuredSpeech = finalEvent ? null : featuredSpeechEvent(displayedEvents, speakingSeq);
   const featuredSeatNumber = seatNumber(featuredSpeech?.payload.seat);
   const featuredSeat = featuredSeatNumber ? `seat-${featuredSeatNumber}` as `seat-${1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9}` : null;
   const featuredPersona = featuredSeat ? viewCharacter(featuredSeat, characters) : null;
@@ -240,7 +238,7 @@ export function MatchViewer({ matchId, mode }: { matchId: string; mode: 'live' |
   const canSeeSecrets = view === 'gm' || publicSecretsUnlocked;
   const survivorCount = 9 - deathRecords.size;
   const livingWerewolves = [...roleMap.entries()].filter(([seat, role]) => role === 'werewolf' && !deathRecords.has(seat)).length;
-  const timelineEvents = [...visibleEvents].reverse();
+  const timelineEvents = [...displayedEvents].reverse();
   const sceneTitle = finalEvent ? '試合終了' : day === 0 ? '役職確認の夜' : isNight ? `${day}日目の夜` : phase === 'vote' ? `${day}日目の投票` : phase === 'runoff' ? `${day}日目の決選投票` : phase === 'execution' ? `${day}日目の処刑` : `${day}日目の議論`;
   const sceneDescription = finalEvent ? '全配役と夜の記録を公開。試合の真相を答え合わせできます' : isNight ? '夜の処理中です。次の夜明けをお待ちください' : phase === 'vote' || phase === 'runoff' ? '全員の票が揃うまで、投票先は公開されません' : phase === 'execution' ? '開票結果により処刑者が決まります' : '発言と投票履歴から、人狼を推理してください';
 
@@ -295,18 +293,6 @@ export function MatchViewer({ matchId, mode }: { matchId: string; mode: 'live' |
               </article>;
             })}
           </div>
-          {focusPanel === 'vote' && latestVote && <section className="vote-panel">
-            <div><span className="section-kicker">VOTE RESULT</span><h2>{latestVote.day}日目の{latestVote.payload.round === 2 ? '決選投票' : '投票結果'}</h2></div>
-            <div className="vote-bars">{Object.entries(latestTally).sort((a, b) => b[1] - a[1]).map(([seat, count]) => {
-              const voters = latestVotes.filter((vote) => vote.target === seat);
-              return <div className="vote-bar" key={seat}>
-                <div className="vote-bar-head"><span>{seatName(seat, characters)}</span><strong>{count}票</strong></div>
-                <i><b style={{ width: `${Math.max(8, (count / maxVoteCount) * 100)}%` }} /></i>
-                <div className="voter-chips">{voters.map((vote) => <span key={vote.voter}>{seatName(vote.voter, characters)}</span>)}</div>
-                {canSeeSecrets && voters.some((vote) => vote.statedReason) && <details className="vote-reasons"><summary>投票理由 {voters.filter((vote) => vote.statedReason).length}件</summary>{voters.filter((vote) => vote.statedReason).map((vote) => <small key={vote.voter}>{seatName(vote.voter, characters)}「{vote.statedReason}」</small>)}</details>}
-              </div>;
-            })}</div>
-          </section>}
         </section>
         <aside className="timeline-panel">
           {claimLedger.length > 0 && <section className="claim-board" aria-labelledby="claim-board-title">
@@ -318,7 +304,7 @@ export function MatchViewer({ matchId, mode }: { matchId: string; mode: 'live' |
                 : <p>結果報告はまだありません</p>}
             </article>)}</div>
           </section>}
-          <div className="timeline-head"><div><span className="section-kicker">EVENT LOG</span><h2>時系列ログ</h2></div><span>{visibleEvents.length} events</span></div>
+          <div className="timeline-head"><div><span className="section-kicker">EVENT LOG</span><h2>時系列ログ</h2></div><span>{displayedEvents.length} events</span></div>
           <div className="timeline" aria-live="polite">{timelineEvents.map((event, index) => <div className="timeline-entry" key={event.seq}>{(index === 0 || timelineEvents[index - 1]?.day !== event.day) && <div className="timeline-day"><span>{event.day === 0 ? '第0夜' : `${event.day}日目`}</span></div>}<article className={`timeline-event ${event.type}`}><span className="seq">#{String(event.seq).padStart(3, '0')}</span><div><small>{eventTitle(event)}</small><p>{eventText(event, characters)}</p>{event.type === 'private_action' ? <em>内容非公開</em> : event.visibility === 'private' && <em>{view === 'gm' ? 'GM SECRET' : 'REVEALED SECRET'}</em>}</div></article></div>)}</div>
         </aside>
       </div>

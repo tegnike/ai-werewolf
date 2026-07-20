@@ -3,7 +3,8 @@ import {
   CINEMATIC_INTER_CUE_GAP_MS,
   CINEMATIC_LONG_DURATION_MS,
   CINEMATIC_SHORT_DURATION_MS,
-  CINEMATIC_VOTE_RESULT_GAP_MS,
+  CINEMATIC_VOTE_PRE_DELAY_MS,
+  CINEMATIC_VOTE_RESULT_DURATION_MS,
   cinematicCueForEvent,
   cinematicCuesBetween,
 } from '@/ui/cinematic';
@@ -33,8 +34,9 @@ describe('見せ場の画面演出', () => {
     expect(cinematicCueForEvent(event(20, 'dawn', { victim: 'seat-3' }))).toMatchObject({
       title: '宮下 さくら', subtitle: '襲撃の犠牲になりました', tone: 'attack', sound: 'attack',
     });
-    expect(cinematicCuesBetween([event(20, 'dawn', { victim: 'seat-3' })], 19, 20)
-      .map((cue) => cue.title)).toEqual(['宮下 さくら', '2日目']);
+    const cues = cinematicCuesBetween([event(20, 'dawn', { victim: 'seat-3' })], 19, 20);
+    expect(cues.map((cue) => cue.title)).toEqual(['宮下 さくら', '2日目']);
+    expect(cues.map((cue) => cue.revealEventAfter)).toEqual([true, undefined]);
   });
 
   it('犠牲者なしも結果を先に表示してから日替わり演出にする', () => {
@@ -45,27 +47,36 @@ describe('見せ場の画面演出', () => {
       .map((cue) => cue.title)).toEqual(['犠牲者なし', '2日目']);
   });
 
-  it('投票開始は演出せず、開票後に結果を読む時間を設けてから処刑を演出する', () => {
-    const cues = [
+  it('投票開始は演出せず、一拍置いて開票し、中央の投票結果を読んでから処刑を演出する', () => {
+    const events = [
       event(30, 'discussion_closed'),
-      event(31, 'vote_reveal', { round: 1 }),
+      event(31, 'vote_reveal', { round: 1, tally: { 'seat-7': 5, 'seat-3': 3, 'seat-1': 1 } }),
       event(32, 'execution', { seat: 'seat-7' }),
-    ].map(cinematicCueForEvent);
-    expect(cues.map((cue) => cue?.title)).toEqual([undefined, '開票', '真壁 陽太']);
-    expect(cues.map((cue) => cue?.sound)).toEqual([undefined, 'vote', 'execution']);
-    expect(cues.map((cue) => cue?.durationMs)).toEqual([
-      undefined,
+    ];
+    const cues = cinematicCuesBetween(events, 29, 32);
+    expect(cues.map((cue) => cue.title)).toEqual(['開票', '投票結果', '真壁 陽太']);
+    expect(cues.map((cue) => cue.sound)).toEqual(['vote', 'scene', 'execution']);
+    expect(cues.map((cue) => cue.durationMs)).toEqual([
       CINEMATIC_SHORT_DURATION_MS,
+      CINEMATIC_VOTE_RESULT_DURATION_MS,
       CINEMATIC_LONG_DURATION_MS,
     ]);
-    expect(cues[1]?.gapAfterMs).toBe(CINEMATIC_VOTE_RESULT_GAP_MS);
+    expect(cues[0].gapBeforeMs).toBe(CINEMATIC_VOTE_PRE_DELAY_MS);
+    expect(cues[1].voteResults).toEqual([
+      { seat: 'seat-7', name: '真壁 陽太', count: 5, leading: true },
+      { seat: 'seat-3', name: '宮下 さくら', count: 3, leading: false },
+      { seat: 'seat-1', name: '名取 澪', count: 1, leading: false },
+    ]);
+    expect(cues[1].revealEventAfter).toBe(true);
+    expect(cues[2].revealEventAfter).toBe(true);
   });
 
   it('カットインを長く保ち、連続時にも切替間隔を設ける', () => {
     expect(CINEMATIC_SHORT_DURATION_MS).toBe(2400);
     expect(CINEMATIC_LONG_DURATION_MS).toBe(3600);
     expect(CINEMATIC_INTER_CUE_GAP_MS).toBe(600);
-    expect(CINEMATIC_VOTE_RESULT_GAP_MS).toBe(5000);
+    expect(CINEMATIC_VOTE_PRE_DELAY_MS).toBe(1200);
+    expect(CINEMATIC_VOTE_RESULT_DURATION_MS).toBe(5000);
   });
 
   it('決選投票と処刑なしを明示する', () => {
@@ -75,6 +86,9 @@ describe('見せ場の画面演出', () => {
 
   it('指定seq間だけを順番どおり抽出して再接続時の重複を防ぐ', () => {
     const events = [event(20, 'dawn'), event(21, 'discussion_speech'), event(22, 'discussion_closed'), event(23, 'vote_reveal')];
-    expect(cinematicCuesBetween(events, 20, 23).map((cue) => cue.seq)).toEqual([23]);
+    expect(cinematicCuesBetween(events, 20, 23).map((cue) => ({ seq: cue.seq, title: cue.title }))).toEqual([
+      { seq: 23, title: '開票' },
+      { seq: 23, title: '投票結果' },
+    ]);
   });
 });

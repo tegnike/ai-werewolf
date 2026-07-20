@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { UiEvent } from '@/ui/types';
-import { aiErrorDescription, derivePresentedState, featuredSpeechEvent, focusPanelKind, presentationCursorAfterLoad, presentationLimit, privateActionDescription, publicSecretsReady } from '@/ui/presentation';
+import { aiErrorDescription, derivePresentedState, eventsThroughCinematicBoundary, featuredSpeechEvent, focusPanelKind, latestSpeechesForDay, presentationCursorAfterLoad, presentationLimit, privateActionDescription, publicSecretsReady } from '@/ui/presentation';
 
 const event = (seq: number, type: string): UiEvent => ({ matchId: 'test', seq, type, day: 1, phase: 'discussion', visibility: 'public', payload: {}, createdAt: '2026-07-16T00:00:00.000Z' });
 
@@ -34,6 +34,13 @@ describe('音声とログの同期', () => {
 
   it('一時停止中は到着済みイベントがあっても表示位置を進めない', () => {
     expect(presentationLimit(events, 11, true, false, null, true)).toBe(11);
+  });
+
+  it('演出待ちの最初のイベント以降を盤面へ先行表示しない', () => {
+    const sequence = [event(11, 'discussion_speech'), event(12, 'vote_reveal'), event(13, 'execution'), event(14, 'dawn')];
+    expect(eventsThroughCinematicBoundary(sequence, new Set([12, 13, 14])).map((item) => item.seq)).toEqual([11]);
+    expect(eventsThroughCinematicBoundary(sequence, new Set([13, 14])).map((item) => item.seq)).toEqual([11, 12]);
+    expect(eventsThroughCinematicBoundary(sequence, new Set()).map((item) => item.seq)).toEqual([11, 12, 13, 14]);
   });
 });
 
@@ -92,6 +99,15 @@ describe('注目発言の選択', () => {
 
   it('当日の開票前は投票フェーズへ先行しても前日の結果へ戻さない', () => {
     expect(focusPanelKind(secondSpeech, false, 1, 'vote')).toBe('speech');
+  });
+
+  it('カードには現在の日の最新発言だけを残す', () => {
+    const dayOneSpeech = { ...event(11, 'discussion_speech'), day: 1, payload: { seat: 'seat-1', speech: '前日の発言' } };
+    const firstDayTwoSpeech = { ...event(12, 'discussion_speech'), day: 2, payload: { seat: 'seat-2', speech: '今日の最初の発言' } };
+    const latestDayTwoSpeech = { ...event(13, 'discussion_speech'), day: 2, payload: { seat: 'seat-2', speech: '今日の最新発言' } };
+    const speeches = latestSpeechesForDay([dayOneSpeech, firstDayTwoSpeech, latestDayTwoSpeech], 2);
+    expect([...speeches.entries()]).toEqual([['seat-2', '今日の最新発言']]);
+    expect(latestSpeechesForDay([dayOneSpeech], 2).size).toBe(0);
   });
 });
 

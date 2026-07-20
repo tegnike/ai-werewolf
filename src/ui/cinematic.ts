@@ -8,7 +8,15 @@ export type CinematicSound = 'scene' | 'vote' | 'attack' | 'execution';
 export const CINEMATIC_SHORT_DURATION_MS = 2400;
 export const CINEMATIC_LONG_DURATION_MS = 3600;
 export const CINEMATIC_INTER_CUE_GAP_MS = 600;
-export const CINEMATIC_VOTE_RESULT_GAP_MS = 5000;
+export const CINEMATIC_VOTE_PRE_DELAY_MS = 1200;
+export const CINEMATIC_VOTE_RESULT_DURATION_MS = 5000;
+
+export interface CinematicVoteResult {
+  seat: string;
+  name: string;
+  count: number;
+  leading: boolean;
+}
 
 export interface CinematicCue {
   seq: number;
@@ -18,7 +26,10 @@ export interface CinematicCue {
   tone: CinematicTone;
   sound: CinematicSound;
   durationMs: number;
+  gapBeforeMs?: number;
   gapAfterMs?: number;
+  voteResults?: CinematicVoteResult[];
+  revealEventAfter?: boolean;
 }
 
 type PlayerNameResolver = (seat: SeatId) => string;
@@ -27,6 +38,16 @@ function playerName(value: unknown, resolveName: PlayerNameResolver = agentNameF
   const number = Number(String(value ?? '').split('-')[1]);
   if (!Number.isInteger(number) || number < 1 || number > 9) return '不明なプレイヤー';
   return resolveName(`seat-${number}` as SeatId);
+}
+
+function voteResults(event: UiEvent, resolveName?: PlayerNameResolver): CinematicVoteResult[] {
+  const tally = event.payload.tally;
+  if (!tally || typeof tally !== 'object' || Array.isArray(tally)) return [];
+  const rows = Object.entries(tally)
+    .filter((entry): entry is [string, number] => typeof entry[1] === 'number' && Number.isFinite(entry[1]))
+    .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]));
+  const highest = rows[0]?.[1] ?? 0;
+  return rows.map(([seat, count]) => ({ seat, name: playerName(seat, resolveName), count, leading: count === highest }));
 }
 
 function cinematicCuesForEvent(event: UiEvent, resolveName?: PlayerNameResolver): CinematicCue[] {
@@ -53,6 +74,7 @@ function cinematicCuesForEvent(event: UiEvent, resolveName?: PlayerNameResolver)
         tone: victim ? 'attack' : 'day',
         sound: victim ? 'attack' : 'scene',
         durationMs: CINEMATIC_LONG_DURATION_MS,
+        revealEventAfter: true,
       },
       {
         seq: event.seq,
@@ -68,16 +90,36 @@ function cinematicCuesForEvent(event: UiEvent, resolveName?: PlayerNameResolver)
 
   if (event.type === 'vote_reveal') {
     const runoff = event.payload.round === 2;
-    return [{
-      seq: event.seq,
-      eyebrow: `DAY ${event.day} / ${runoff ? 'RUNOFF' : 'VOTE'} RESULT`,
-      title: runoff ? '決選開票' : '開票',
-      subtitle: runoff ? '決選投票の結果を公開します' : '全員の投票先を公開します',
-      tone: 'vote',
-      sound: 'vote',
-      durationMs: CINEMATIC_SHORT_DURATION_MS,
-      gapAfterMs: CINEMATIC_VOTE_RESULT_GAP_MS,
-    }];
+    const results = voteResults(event, resolveName);
+    const leaders = results.filter((result) => result.leading);
+    const resultSubtitle = leaders.length === 1
+      ? `最多得票は${leaders[0].name}、${leaders[0].count}票です`
+      : leaders.length > 1
+        ? `最多得票${leaders[0].count}票で同数です`
+        : '投票結果が確定しました';
+    return [
+      {
+        seq: event.seq,
+        eyebrow: `DAY ${event.day} / ${runoff ? 'RUNOFF' : 'VOTE'}`,
+        title: runoff ? '決選開票' : '開票',
+        subtitle: runoff ? '決選投票の結果を公開します' : '全員の投票先を公開します',
+        tone: 'vote',
+        sound: 'vote',
+        durationMs: CINEMATIC_SHORT_DURATION_MS,
+        gapBeforeMs: CINEMATIC_VOTE_PRE_DELAY_MS,
+      },
+      {
+        seq: event.seq,
+        eyebrow: `DAY ${event.day} / ${runoff ? 'RUNOFF ' : ''}VOTE RESULT`,
+        title: runoff ? '決選投票結果' : '投票結果',
+        subtitle: resultSubtitle,
+        tone: 'vote',
+        sound: 'scene',
+        durationMs: CINEMATIC_VOTE_RESULT_DURATION_MS,
+        voteResults: results,
+        revealEventAfter: true,
+      },
+    ];
   }
 
   if (event.type === 'execution') {
@@ -90,14 +132,15 @@ function cinematicCuesForEvent(event: UiEvent, resolveName?: PlayerNameResolver)
       tone: executed ? 'execution' : 'vote',
       sound: executed ? 'execution' : 'scene',
       durationMs: CINEMATIC_LONG_DURATION_MS,
+      revealEventAfter: true,
     }];
   }
 
   return [];
 }
 
-export function cinematicCueForEvent(event: UiEvent): CinematicCue | null {
-  return cinematicCuesForEvent(event)[0] ?? null;
+export function cinematicCueForEvent(event: UiEvent, resolveName?: PlayerNameResolver): CinematicCue | null {
+  return cinematicCuesForEvent(event, resolveName)[0] ?? null;
 }
 
 export function cinematicCuesBetween(events: UiEvent[], afterSeq: number, throughSeq: number, resolveName?: PlayerNameResolver): CinematicCue[] {
