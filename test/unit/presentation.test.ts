@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { UiEvent } from '@/ui/types';
-import { aiErrorDescription, derivePresentedState, featuredSpeechEvent, focusPanelKind, presentationCursorAfterLoad, presentationLimit, privateActionDescription } from '@/ui/presentation';
+import { aiErrorDescription, derivePresentedState, featuredSpeechEvent, focusPanelKind, presentationCursorAfterLoad, presentationLimit, privateActionDescription, publicSecretsReady } from '@/ui/presentation';
 
 const event = (seq: number, type: string): UiEvent => ({ matchId: 'test', seq, type, day: 1, phase: 'discussion', visibility: 'public', payload: {}, createdAt: '2026-07-16T00:00:00.000Z' });
 
@@ -41,6 +41,21 @@ describe('公開視点の非公開イベント表示', () => {
   it('固定ラベルを実施ログとして表示する', () => {
     expect(privateActionDescription({ ...event(1, 'private_action'), payload: { label: '人狼確認' } }))
       .toBe('人狼確認が行われました。');
+  });
+
+  it('サーバー上で終了しても表示が最終イベントへ届くまでは秘密を開示しない', () => {
+    const midway = [event(1, 'private_action'), event(20, 'discussion_speech')];
+    expect(publicSecretsReady(midway, 'finished', 40)).toBe(false);
+  });
+
+  it('最終イベントの表示後に答え合わせを開示する', () => {
+    const finished = { ...event(40, 'match_finished'), phase: 'finished' };
+    expect(publicSecretsReady([event(20, 'discussion_speech'), finished], 'finished', 40)).toBe(true);
+  });
+
+  it('中断試合は保存済みの最終位置まで表示してから答え合わせを開示する', () => {
+    expect(publicSecretsReady([event(19, 'discussion_speech')], 'aborted', 20)).toBe(false);
+    expect(publicSecretsReady([event(20, 'discussion_speech')], 'aborted', 20)).toBe(true);
   });
 });
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { projectEvents } from '@/server/view';
+import { canRevealSecrets, projectEvents } from '@/server/view';
 import { runMock } from '../helpers/runMock';
 
 const forbiddenTypes = [
@@ -26,15 +26,28 @@ describe('公開viewの秘密情報分離', () => {
     expect(json).not.toContain('config_json');
   });
 
-  it('終了後の公開viewでは役職と非公開行動を答え合わせできる', async () => {
+  it('終了済みでも明示的な答え合わせ要求までは公開射影を維持する', async () => {
     const { events } = await runMock('reveal');
-    const projected = projectEvents(events, 'public', true);
+    const hidden = projectEvents(events, 'public', canRevealSecrets('public', 'finished', false));
+    expect(hidden.some((event) => event.type === 'private_action')).toBe(true);
+    expect(hidden.some((event) => event.type === 'match_created')).toBe(false);
+    expect(hidden.some((event) => event.type === 'werewolf_chat')).toBe(false);
+    expect(JSON.stringify(hidden)).not.toContain('statedReason');
+
+    const projected = projectEvents(events, 'public', canRevealSecrets('public', 'finished', true));
     expect(projected.some((event) => event.type === 'match_created')).toBe(true);
     expect(projected.some((event) => event.type === 'werewolf_chat')).toBe(true);
     expect(projected.some((event) => event.type === 'seer_result')).toBe(true);
     expect(projected.some((event) => event.type === 'night_resolved')).toBe(true);
     expect(JSON.stringify(projected)).toMatch(/"role"\s*:/);
     expect(JSON.stringify(projected)).toContain('statedReason');
+  });
+
+  it('進行中は答え合わせを要求されても開示せず、GM視点は常に開示する', () => {
+    expect(canRevealSecrets('public', 'running', true)).toBe(false);
+    expect(canRevealSecrets('public', 'finished', false)).toBe(false);
+    expect(canRevealSecrets('public', 'finished', true)).toBe(true);
+    expect(canRevealSecrets('gm', 'running', false)).toBe(true);
   });
 
   it('単独人狼の独り言modeを進行中の公開viewへ漏らさない', () => {

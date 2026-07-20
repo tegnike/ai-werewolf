@@ -1,4 +1,4 @@
-import type { MatchEvent, MatchRecord, ViewMode } from '@/domain/types';
+import type { MatchEvent, MatchRecord, MatchStatus, ViewMode } from '@/domain/types';
 
 export interface PublicEvent {
   matchId: string; seq: number; day: number; phase: string; type: string; payload: Record<string, unknown>; createdAt: string;
@@ -85,6 +85,10 @@ export function projectEvents(events: MatchEvent[], view: ViewMode, revealSecret
     matchId: event.matchId, seq: event.seq, day: event.day, phase: event.phase,
     type: event.type, payload: publicPayload(event), createdAt: event.createdAt,
   }));
+}
+
+export function canRevealSecrets(view: ViewMode, status: MatchStatus, requested: boolean): boolean {
+  return view === 'gm' || (requested && ['finished', 'aborted', 'aborted_budget'].includes(status));
 }
 
 export function projectMatch(match: MatchRecord, view: ViewMode) {

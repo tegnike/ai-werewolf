@@ -67,6 +67,13 @@ export function presentationCursorAfterLoad(currentSeq: number, maxLoadedSeq: nu
   return initialized ? currentSeq : maxLoadedSeq;
 }
 
+export function publicSecretsReady(events: UiEvent[], matchStatus: string | undefined, maxLoadedSeq: number): boolean {
+  if (!['finished', 'aborted', 'aborted_budget'].includes(matchStatus ?? '')) return false;
+  if (events.some((event) => event.type === 'match_finished')) return true;
+  const maxPresentedSeq = Math.max(0, ...events.map((event) => event.seq));
+  return maxLoadedSeq > 0 && maxPresentedSeq >= maxLoadedSeq;
+}
+
 export function presentationLimit(events: UiEvent[], currentSeq: number, voiceReady: boolean, voiceBusy: boolean, speakingSeq: number | null, paused = false): number {
   if (paused) return currentSeq;
   const maxSeq = Math.max(0, ...events.map((event) => event.seq));

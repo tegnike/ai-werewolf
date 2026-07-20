@@ -1,7 +1,7 @@
 import type { MatchEvent, ViewMode } from '@/domain/types';
 import { subscribe } from '@/server/bus';
 import { getRunnerManager } from '@/server/runner';
-import { projectEvents } from '@/server/view';
+import { canRevealSecrets, projectEvents } from '@/server/view';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -15,7 +15,7 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   const repo = getRunnerManager().repo;
   const match = repo.getMatch(id);
   if (!match) return new Response(JSON.stringify({ error: { code: 'NOT_FOUND', message: '試合が見つかりません。' } }), { status: 404 });
-  const revealSecrets = ['finished', 'aborted', 'aborted_budget'].includes(match.status);
+  const revealSecrets = canRevealSecrets(view, match.status, url.searchParams.get('reveal') === '1');
   const encoder = new TextEncoder();
   let unsubscribe = () => {};
   let ping: ReturnType<typeof setInterval>;

@@ -10,7 +10,7 @@ import { useAmbientBgm } from './useAmbientBgm';
 import { useMatchVoice } from './useMatchVoice';
 import { voiceForSeat } from '@/domain/voices';
 import { agentNameForSeat, personaForSeat } from '@/domain/agents';
-import { aiErrorDescription, derivePresentedState, featuredSpeechEvent, focusPanelKind, presentationCursorAfterLoad, presentationLimit, privateActionDescription } from './presentation';
+import { aiErrorDescription, derivePresentedState, featuredSpeechEvent, focusPanelKind, presentationCursorAfterLoad, presentationLimit, privateActionDescription, publicSecretsReady } from './presentation';
 import { buildEpilogue, epilogueRoleLabel, fateLabel, type SpectatorDeathRecord } from './epilogue';
 import { SpectatorGuide } from './SpectatorGuide';
 import { CinematicOverlay } from './CinematicOverlay';
@@ -82,12 +82,14 @@ export function MatchViewer({ matchId, mode }: { matchId: string; mode: 'live' |
   const [playing, setPlaying] = useState(false);
   const [error, setError] = useState('');
   const [presentedSeq, setPresentedSeq] = useState(0);
+  const [publicSecretsUnlocked, setPublicSecretsUnlocked] = useState(false);
   const [announceInitialCues] = useState(() => mode === 'live' && typeof window !== 'undefined' && window.sessionStorage.getItem('werewolf-new-match') === matchId);
   const presentationInitialized = useRef(false);
   const sourceRef = useRef<EventSource | null>(null);
   const terminal = match ? ['finished', 'aborted', 'aborted_budget'].includes(match.status) : false;
   const voiceEvents = useMemo(() => view === 'gm' ? events : events.filter((event) => event.visibility !== 'private'), [events, view]);
   const visibleEvents = useMemo(() => events.filter((event) => mode === 'live' ? event.seq <= presentedSeq : event.seq <= cursor), [cursor, events, mode, presentedSeq]);
+  const maxLoadedSeq = Math.max(0, ...events.map((event) => event.seq));
   const { cinematicCue, cinematicBusy, sfxEnabled, setSfxEnabled, sfxVolume, setSfxVolume } = useCinematicEffects(visibleEvents, `${matchId}:${mode}:${view}`, announceInitialCues);
   const presentedStatus = mode === 'replay' && match?.status === 'finished' && !visibleEvents.some((event) => event.type === 'match_finished') ? 'running' : match?.status;
   const presentedState = useMemo(() => derivePresentedState(visibleEvents, presentedStatus), [presentedStatus, visibleEvents]);
@@ -99,7 +101,8 @@ export function MatchViewer({ matchId, mode }: { matchId: string; mode: 'live' |
   const { voiceEnabled, setVoiceEnabled, voiceAvailable, speakingSeat, speakingSeq, voiceVolume, setVoiceVolume, voiceBusy } = useMatchVoice(voiceEvents, revealSpeech, presentationPaused);
 
   const load = useCallback(async () => {
-    const response = await fetch(`/api/match/${matchId}?view=${view}`, { cache: 'no-store' });
+    const reveal = view === 'public' && publicSecretsUnlocked ? '&reveal=1' : '';
+    const response = await fetch(`/api/match/${matchId}?view=${view}${reveal}`, { cache: 'no-store' });
     const data = await response.json() as { match?: UiMatch; events?: UiEvent[]; error?: { message: string } };
     if (!response.ok || !data.match || !data.events) { setError(data.error?.message ?? '試合を読み込めません。'); return; }
     const maxLoadedSeq = Math.max(0, ...data.events.map((event) => event.seq));
@@ -107,7 +110,13 @@ export function MatchViewer({ matchId, mode }: { matchId: string; mode: 'live' |
     const alreadyInitialized = presentationInitialized.current;
     presentationInitialized.current = true;
     setPresentedSeq((current) => presentationCursorAfterLoad(current, maxLoadedSeq, alreadyInitialized));
-  }, [matchId, view]);
+  }, [matchId, publicSecretsUnlocked, view]);
+
+  useEffect(() => {
+    if (view === 'public' && !publicSecretsUnlocked && publicSecretsReady(visibleEvents, match?.status, maxLoadedSeq)) {
+      setPublicSecretsUnlocked(true);
+    }
+  }, [match?.status, maxLoadedSeq, publicSecretsUnlocked, view, visibleEvents]);
 
   useEffect(() => {
     if (mode !== 'live') return;
@@ -150,6 +159,14 @@ export function MatchViewer({ matchId, mode }: { matchId: string; mode: 'live' |
     await load();
   }, [load, matchId]);
 
+  const changeView = useCallback((nextView: 'public' | 'gm') => {
+    if (nextView === view) return;
+    sourceRef.current?.close();
+    setEvents([]);
+    setPublicSecretsUnlocked(false);
+    setView(nextView);
+  }, [view]);
+
   useEffect(() => {
     const keyboard = (event: KeyboardEvent) => {
       if (event.code === 'Space' && mode === 'live' && match) { event.preventDefault(); void control(match.status === 'paused' ? 'resume' : 'pause'); }
@@ -161,7 +178,7 @@ export function MatchViewer({ matchId, mode }: { matchId: string; mode: 'live' |
     window.addEventListener('keydown', keyboard); return () => window.removeEventListener('keydown', keyboard);
   }, [control, cursor, events, match, mode]);
 
-  const maxSeq = Math.max(0, ...events.map((event) => event.seq));
+  const maxSeq = maxLoadedSeq;
   const { phase, day } = presentedState;
   const isNight = ['night_zero', 'wolf_chat', 'night_actions', 'medium'].includes(phase);
   const deathRecords = new Map<string, SpectatorDeathRecord>();
@@ -205,7 +222,7 @@ export function MatchViewer({ matchId, mode }: { matchId: string; mode: 'live' |
   const featuredIsPaused = Boolean(featuredSpeech && speakingSeq === featuredSpeech.seq && presentationPaused);
   const focusPanel = focusPanelKind(featuredSpeech, Boolean(latestVote), day, phase);
   const epilogue = finalEvent ? buildEpilogue(finalEvent.payload.roles, finalEvent.payload.winner, deathRecords) : [];
-  const canSeeSecrets = view === 'gm' || terminal;
+  const canSeeSecrets = view === 'gm' || publicSecretsUnlocked;
   const survivorCount = 9 - deathRecords.size;
   const livingWerewolves = [...roleMap.entries()].filter(([seat, role]) => role === 'werewolf' && !deathRecords.has(seat)).length;
   const timelineEvents = [...visibleEvents].reverse();
@@ -224,7 +241,7 @@ export function MatchViewer({ matchId, mode }: { matchId: string; mode: 'live' |
           {canSeeSecrets && roleMap.size > 0 && <span className="wolf-count">人狼残り {livingWerewolves}</span>}
           <em className={match.status}>{match.status === 'running' ? 'LIVE' : match.status.toUpperCase()}</em>
         </div>
-        <div className="header-actions"><AudioControls compact bgmEnabled={bgmEnabled} bgmVolume={bgmVolume} voiceEnabled={voiceEnabled} voiceVolume={voiceVolume} voiceAvailable={voiceAvailable} speakingSeat={presentationPaused ? null : speakingSeat} sfxEnabled={sfxEnabled} sfxVolume={sfxVolume} onBgmChange={setBgmEnabled} onBgmVolumeChange={setBgmVolume} onVoiceChange={setVoiceEnabled} onVoiceVolumeChange={setVoiceVolume} onSfxChange={setSfxEnabled} onSfxVolumeChange={setSfxVolume} /><div className="view-switch" aria-label="観戦視点"><button className={view === 'public' ? 'active' : ''} onClick={() => setView('public')}>公開視点</button><button className={view === 'gm' ? 'active' : ''} onClick={() => setView('gm')}>GM視点</button></div></div>
+        <div className="header-actions"><AudioControls compact bgmEnabled={bgmEnabled} bgmVolume={bgmVolume} voiceEnabled={voiceEnabled} voiceVolume={voiceVolume} voiceAvailable={voiceAvailable} speakingSeat={presentationPaused ? null : speakingSeat} sfxEnabled={sfxEnabled} sfxVolume={sfxVolume} onBgmChange={setBgmEnabled} onBgmVolumeChange={setBgmVolume} onVoiceChange={setVoiceEnabled} onVoiceVolumeChange={setVoiceVolume} onSfxChange={setSfxEnabled} onSfxVolumeChange={setSfxVolume} /><div className="view-switch" aria-label="観戦視点"><button className={view === 'public' ? 'active' : ''} onClick={() => changeView('public')}>公開視点</button><button className={view === 'gm' ? 'active' : ''} onClick={() => changeView('gm')}>GM視点</button></div></div>
       </header>
       <div className="viewer-grid">
         <section className={`board-panel ${finalEvent ? 'scrollable' : ''}`}>
