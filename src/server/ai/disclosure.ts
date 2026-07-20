@@ -125,9 +125,33 @@ function mentionsSeat(context: DecisionContext, speech: string, seat: NonNullabl
 }
 
 function validateDiscussionStructure(context: DecisionContext, decision: SpeechDecision): void {
+  if (decision.requestsReply && decision.addressedTo === null) {
+    decision.requestsReply = false;
+  }
   if (context.discussion?.version !== 'v3') return;
   const structure = decision.structure;
   if (!structure) throw new ClaimContractError('discussion_structure_missing', 'structureを省略せず、実際の発言内容を自己分類してください。');
+  // structureの付随メタデータだけが矛盾した場合は、台詞を捨ててAPIを
+  // 再試行せず、安全側へ正規化する。役職主張や秘密情報の契約はこの後も厳格に検証する。
+  if (decision.requestsReply && structure.questionTopic === null) {
+    decision.requestsReply = false;
+  }
+  if (structure.primaryAct === 'suspicion' && structure.suspicion === null) {
+    structure.primaryAct = 'other';
+  }
+  if (structure.primaryAct === 'vote_intent' && structure.voteIntent === null) {
+    structure.primaryAct = 'other';
+  }
+  if (decision.claim && structure.primaryAct !== 'role_claim') {
+    structure.primaryAct = 'role_claim';
+  }
+  if (decision.requestsReply && structure.questionTopic &&
+    context.discussion.closedQuestionTopics?.includes(structure.questionTopic)) {
+    throw new ClaimContractError(
+      'closed_question_topic_repeated',
+      `質問分類${structure.questionTopic}はすでに十分に尋ねられています。返答要求を繰り返さず、別の評価・反論・投票方針を話してください。`,
+    );
+  }
   if (context.day === 1 && context.discussion.stage === 'opening') {
     const firstPerson = personaForSeat(context.actor.seat).firstPerson;
     const fabricatedPublicAction = new RegExp(`${firstPerson}(?:が|は)[^。！？\\n]{0,32}(?:質問した|反応を求めた|疑った|指摘した|保留した|投票予定を示した|投票すると言った)`);
@@ -154,12 +178,14 @@ function validateDiscussionStructure(context: DecisionContext, decision: SpeechD
   if (structure.suspicion) {
     const { basis, evidenceDay } = structure.suspicion;
     if (typeof evidenceDay === 'number' && evidenceDay > context.day) {
-      throw new ClaimContractError('future_suspicion_evidence', '疑いのevidenceDayには今日以前の日だけを指定してください。');
+      structure.suspicion = null;
+      if (structure.primaryAct === 'suspicion') structure.primaryAct = 'other';
     }
-    if (basis === 'intuition' && evidenceDay !== null && evidenceDay !== undefined) {
+    if (structure.suspicion && basis === 'intuition' && evidenceDay !== null && evidenceDay !== undefined) {
       structure.suspicion.evidenceDay = null;
-    } else if (basis !== 'intuition' && evidenceDay === null) {
-      throw new ClaimContractError('suspicion_evidence_day_missing', '勘以外の公開情報を疑いの根拠にする場合は、その情報が出た日をevidenceDayへ指定してください。');
+    } else if (structure.suspicion && basis !== 'intuition' && evidenceDay === null) {
+      structure.suspicion = null;
+      if (structure.primaryAct === 'suspicion') structure.primaryAct = 'other';
     }
   }
   if (context.day === 1 && context.discussion?.turn === 1 && structure.suspicion) {
@@ -205,6 +231,9 @@ function validateDiscussionStructure(context: DecisionContext, decision: SpeechD
   if (structure.primaryAct === 'question' && !decision.requestsReply) {
     structure.primaryAct = 'other';
     structure.questionTopic = null;
+  }
+  if (structure.primaryAct === 'answer' && structure.questionTopic === null) {
+    structure.primaryAct = 'other';
   }
   if (structure.questionTopic && structure.primaryAct !== 'answer' && !decision.requestsReply) {
     structure.questionTopic = null;

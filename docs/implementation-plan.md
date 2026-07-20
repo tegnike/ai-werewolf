@@ -433,12 +433,11 @@ const TargetDecision = z.object({
 
 ### 4.7 リトライ
 
-- 1、2、4、8秒の指数バックオフを使い、失敗種別ごとに上限を分ける。
-- 接続失敗、タイムアウト、408、409、429、5xxは最大5回。
-- refusal、structured output、parse・Zod検証失敗は最大3回。
-- ローカルの発言・主張契約違反は具体的な修正指示を付けて最大2回。補正可能な付随メタデータ不一致はAPIを再試行しない。
+- 再試行可能な失敗は種類をまたいで合算し、1つの判断につきLLM呼び出しを最大3回とする。1回目と2回目の失敗後に1秒、2秒のバックオフを使い、3回目の失敗で試合を明示停止する。
+- 接続失敗、タイムアウト、408、409、429、5xx、refusal、structured output、parse・Zod検証失敗は再試行可能とする。再試行不能な400系は即時停止する。
+- ローカルの発言・主張契約違反は具体的な修正指示を次の呼び出しへ付ける。補正可能な付随メタデータ不一致はAPIを再試行しない。
 - 400、401、403、404は即 `paused_error`。
-- 種別ごとの上限到達も `paused_error`。
+- 再試行可能な失敗が3回に達した場合も `paused_error`。
 - 再開は同じ `gpt-5.6-luna` で同じ判断を再試行するだけ。
 
 ### 4.8 API呼び出し上限
@@ -788,7 +787,7 @@ interface MatchEvent<T extends string, P> {
 - 同seedのpayload列一致。
 - Runner再生成から復旧。
 - pause/resume、abort。
-- 失敗種別ごとの上限到達→paused_error→retry。
+- 再試行可能な失敗が合計3回に到達→paused_error→retry。
 - `in_flight`残存→ambiguous停止。
 - API上限。
 - Runner二重起動防止。

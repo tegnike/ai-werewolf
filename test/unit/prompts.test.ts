@@ -403,7 +403,7 @@ describe('実AI人格プロンプト', () => {
     expect(schema.safeParse({ speech: '一人で決める。', addressedTo: null, requestsReply: false }).success).toBe(true);
     expect(schema.safeParse({ speech: 'どう思う？', addressedTo: null, requestsReply: true }).success).toBe(false);
     expect(speechDecisionSchema(['seat-2'], false, true)
-      .safeParse({ speech: '誰か答えてください。', addressedTo: null, requestsReply: true }).success).toBe(false);
+      .safeParse({ speech: '誰か答えてください。', addressedTo: null, requestsReply: true }).success).toBe(true);
   });
 
   it('discussion v3 schemaで発言本文に対応する構造化貢献を必須にする', () => {
@@ -425,24 +425,24 @@ describe('実AI人格プロンプト', () => {
     expect(schema.safeParse({
       speech: 'どう思いますか？', addressedTo: 'seat-2', requestsReply: true,
       structure: { primaryAct: 'question', questionTopic: null, suspicion: null, voteIntent: null, boardAnalysis: false },
-    }).success).toBe(false);
+    }).success).toBe(true);
     expect(schema.safeParse({ speech: '発言します。', addressedTo: null, requestsReply: false }).success).toBe(false);
 
-    const closedTopicSchema = speechDecisionSchema(['seat-2'], false, true, ['seat-2'], ['inspection_reason']);
+    const closedTopicSchema = speechDecisionSchema(['seat-2'], false, true, ['seat-2']);
     expect(closedTopicSchema.safeParse({
       speech: '占い理由を答えてください。', addressedTo: 'seat-2', requestsReply: true,
       structure: { primaryAct: 'question', questionTopic: 'inspection_reason', suspicion: null, voteIntent: null, boardAnalysis: false },
-    }).success).toBe(false);
+    }).success).toBe(true);
     expect(closedTopicSchema.safeParse({
       speech: '占い理由には答えました。', addressedTo: null, requestsReply: false,
       structure: { primaryAct: 'answer', questionTopic: 'inspection_reason', suspicion: null, voteIntent: null, boardAnalysis: false },
     }).success).toBe(true);
 
-    const consensusSchema = speechDecisionSchema(['seat-2'], false, true, ['seat-1', 'seat-2'], [], ['seat-1']);
+    const consensusSchema = speechDecisionSchema(['seat-2'], false, true, ['seat-1', 'seat-2']);
     expect(consensusSchema.safeParse({
       speech: '澪さんに投票します。', addressedTo: null, requestsReply: false,
       structure: { primaryAct: 'vote_intent', questionTopic: null, suspicion: null, voteIntent: 'seat-1', boardAnalysis: false },
-    }).success).toBe(false);
+    }).success).toBe(true);
     expect(consensusSchema.safeParse({
       speech: 'ひなたさんに投票します。', addressedTo: null, requestsReply: false,
       structure: { primaryAct: 'vote_intent', questionTopic: null, suspicion: null, voteIntent: 'seat-2', boardAnalysis: false },

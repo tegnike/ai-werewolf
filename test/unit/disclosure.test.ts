@@ -304,27 +304,70 @@ describe('能力結果の公開', () => {
     })).toThrow('unspoken_target_behavior');
   });
 
-  it('疑いの未来日と、勘以外で根拠日がない応答を拒否する', () => {
+  it('疑いの未来日と、勘以外で根拠日がない付随メタデータを安全に破棄する', () => {
     const base = seerContext();
     const context: DecisionContext = {
       ...base,
       actor: { ...base.actor, role: 'villager' }, privateFacts: ['自分の役職: villager'],
       discussion: { version: 'v3', stage: 'opening', turn: 2, remainingUnspokenSeats: [] },
     };
-    expect(() => validateSpeechDisclosure(context, {
+    const futureEvidence: SpeechDecision = {
       speech: '澪さんの発言が気になります。', addressedTo: null, requestsReply: false,
       structure: {
         primaryAct: 'suspicion', questionTopic: null,
         suspicion: { targetSeat: 'seat-1', basis: 'speech_content', evidenceDay: 2 }, voteIntent: null, boardAnalysis: false,
       },
-    })).toThrow('future_suspicion_evidence');
-    expect(() => validateSpeechDisclosure(context, {
+    };
+    expect(() => validateSpeechDisclosure(context, futureEvidence)).not.toThrow();
+    expect(futureEvidence.structure).toMatchObject({ primaryAct: 'other', suspicion: null });
+
+    const missingEvidence: SpeechDecision = {
       speech: '澪さんの発言が気になります。', addressedTo: null, requestsReply: false,
       structure: {
         primaryAct: 'suspicion', questionTopic: null,
         suspicion: { targetSeat: 'seat-1', basis: 'speech_content', evidenceDay: null }, voteIntent: null, boardAnalysis: false,
       },
-    })).toThrow('suspicion_evidence_day_missing');
+    };
+    expect(() => validateSpeechDisclosure(context, missingEvidence)).not.toThrow();
+    expect(missingEvidence.structure).toMatchObject({ primaryAct: 'other', suspicion: null });
+  });
+
+  it('付随する質問・主目的の不一致を再試行せず安全に正規化する', () => {
+    const base = seerContext();
+    const context: DecisionContext = {
+      ...base,
+      actor: { ...base.actor, role: 'villager' }, privateFacts: ['自分の役職: villager'],
+      discussion: { version: 'v3', stage: 'free', turn: 10, remainingUnspokenSeats: [] },
+    };
+    const speechDecision: SpeechDecision = {
+      speech: '今日は発言を見比べます。', addressedTo: null, requestsReply: true,
+      structure: {
+        primaryAct: 'vote_intent', questionTopic: null, suspicion: null,
+        voteIntent: null, boardAnalysis: false,
+      },
+    };
+    expect(() => validateSpeechDisclosure(context, speechDecision)).not.toThrow();
+    expect(speechDecision).toMatchObject({ requestsReply: false });
+    expect(speechDecision.structure).toMatchObject({ primaryAct: 'other', questionTopic: null });
+  });
+
+  it('閉じた質問分類を使った新しい返答要求だけは具体的な契約違反として拒否する', () => {
+    const base = seerContext();
+    const context: DecisionContext = {
+      ...base,
+      actor: { ...base.actor, role: 'villager' }, privateFacts: ['自分の役職: villager'],
+      discussion: {
+        version: 'v3', stage: 'free', turn: 10, remainingUnspokenSeats: [],
+        closedQuestionTopics: ['vote_plan'],
+      },
+    };
+    expect(() => validateSpeechDisclosure(context, {
+      speech: '澪さん、投票予定をもう一度教えてください。', addressedTo: 'seat-1', requestsReply: true,
+      structure: {
+        primaryAct: 'question', questionTopic: 'vote_plan', suspicion: null,
+        voteIntent: null, boardAnalysis: false,
+      },
+    })).toThrow('closed_question_topic_repeated');
   });
 
   it('台詞にない投票予定・質問分類・盤面整理は再試行せず安全に破棄する', () => {

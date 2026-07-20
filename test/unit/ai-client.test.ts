@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { ClaimContractError } from '@/domain/claims';
-import { aiRetryPolicy, safeAIRequestReason } from '@/server/ai/client';
+import { MAX_AI_ATTEMPTS, aiRetryPolicy, safeAIRequestReason } from '@/server/ai/client';
 
 describe('safeAIRequestReason', () => {
   it('HTTPエラーから許可した短い診断情報だけを残す', () => {
@@ -21,10 +21,16 @@ describe('safeAIRequestReason', () => {
     expect(safeAIRequestReason(new ClaimContractError('forbidden_claim', 'repair safely'))).toBe('claim_contract:forbidden_claim');
   });
 
-  it('失敗種別ごとに再試行上限を分ける', () => {
-    expect(aiRetryPolicy(new ClaimContractError('bad_contract', 'repair'))).toEqual({ kind: 'contract', limit: 2 });
-    expect(aiRetryPolicy(new Error('Structured output was not parsed'))).toEqual({ kind: 'structured_output', limit: 3 });
-    expect(aiRetryPolicy({ status: 503 })).toEqual({ kind: 'transport', limit: 5 });
-    expect(aiRetryPolicy({ status: 400 })).toEqual({ kind: 'non_retryable', limit: 1 });
+  it('parse・Zod失敗は本文を保存せず構造化出力として分類する', () => {
+    expect(safeAIRequestReason(new Error('Structured output was not parsed'))).toBe('structured_output');
+    expect(safeAIRequestReason(new Error('Zod validation failed: private output'))).toBe('structured_output');
+  });
+
+  it('再試行可能な失敗を分類し、LLMコール総数を3回へ固定する', () => {
+    expect(MAX_AI_ATTEMPTS).toBe(3);
+    expect(aiRetryPolicy(new ClaimContractError('bad_contract', 'repair'))).toEqual({ kind: 'contract', retryable: true });
+    expect(aiRetryPolicy(new Error('Structured output was not parsed'))).toEqual({ kind: 'structured_output', retryable: true });
+    expect(aiRetryPolicy({ status: 503 })).toEqual({ kind: 'transport', retryable: true });
+    expect(aiRetryPolicy({ status: 400 })).toEqual({ kind: 'non_retryable', retryable: false });
   });
 });

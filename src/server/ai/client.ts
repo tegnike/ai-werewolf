@@ -8,6 +8,7 @@ import type { MatchRepo } from '@/server/repo';
 import { buildPrompts } from './prompts';
 import { speechDecisionSchema, speechIntentDecisionSchema, targetDecisionSchema } from './schemas';
 import { validateSpeechDisclosure } from './disclosure';
+import { logger } from '../log';
 
 export class AmbiguousAICallError extends Error { code = 'ambiguous_ai_call'; }
 export class ApiBudgetError extends Error { code = 'aborted_budget'; }
@@ -17,22 +18,23 @@ export class AIRequestError extends Error {
 }
 
 const retryableStatus = new Set([408, 409, 429, 500, 502, 503, 504]);
-const delays = [1_000, 2_000, 4_000, 8_000, 16_000];
+const delays = [1_000, 2_000];
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+export const MAX_AI_ATTEMPTS = 3;
 
 export type AIRetryClass = 'contract' | 'structured_output' | 'transport' | 'non_retryable';
 
-export function aiRetryPolicy(error: unknown): { kind: AIRetryClass; limit: number } {
-  if (error instanceof ClaimContractError) return { kind: 'contract', limit: 2 };
+export function aiRetryPolicy(error: unknown): { kind: AIRetryClass; retryable: boolean } {
+  if (error instanceof ClaimContractError) return { kind: 'contract', retryable: true };
   const status = typeof error === 'object' && error && 'status' in error ? Number(error.status) : 0;
   const description = String(error);
   if ((status >= 200 && status < 300) || /refusal|parse|validation|zod|structured output/i.test(description)) {
-    return { kind: 'structured_output', limit: 3 };
+    return { kind: 'structured_output', retryable: true };
   }
   if (status === 0 || retryableStatus.has(status) || /timeout|connection/i.test(description)) {
-    return { kind: 'transport', limit: 5 };
+    return { kind: 'transport', retryable: true };
   }
-  return { kind: 'non_retryable', limit: 1 };
+  return { kind: 'non_retryable', retryable: false };
 }
 
 function safeToken(value: unknown): string | null {
@@ -47,6 +49,9 @@ export function safeAIRequestReason(error: unknown): string {
   if (!error || typeof error !== 'object') return 'request_error';
   const candidate = error as { status?: unknown; code?: unknown; type?: unknown; param?: unknown };
   const status = Number(candidate.status);
+  if ((status >= 200 && status < 300) || /refusal|parse|validation|zod|structured output/i.test(String(error))) {
+    return 'structured_output';
+  }
   const parts = [
     Number.isInteger(status) && status >= 400 && status <= 599 ? `http_${status}` : null,
     safeToken(candidate.code),
@@ -85,8 +90,6 @@ export class RealAI implements DecisionProvider {
         context.discussion?.version === 'v3'
           ? context.players.filter((player) => player.alive && player.seat !== context.actor.seat).map((player) => player.seat)
           : undefined,
-        context.discussion?.closedQuestionTopics,
-        context.discussion?.consensusTarget ? [context.discussion.consensusTarget] : [],
       ),
       'speech_decision',
       (decision) => validateSpeechDisclosure(context, decision),
@@ -106,11 +109,8 @@ export class RealAI implements DecisionProvider {
     const { systemPrompt, decisionPrompt } = buildPrompts(context);
     let repairInstruction = '';
     const repairInstructions: string[] = [];
-    const failureCounts: Record<AIRetryClass, number> = {
-      contract: 0, structured_output: 0, transport: 0, non_retryable: 0,
-    };
 
-    for (let attempt = 0; attempt < 5; attempt += 1) {
+    for (let attempt = 0; attempt < MAX_AI_ATTEMPTS; attempt += 1) {
       if (attempt > 0) await sleep(delays[attempt - 1]);
       const currentDecisionPrompt = repairInstruction
         ? `${decisionPrompt}\n修正指示: ${repairInstruction}`
@@ -145,11 +145,18 @@ export class RealAI implements DecisionProvider {
         }
         this.repo.failAiCall(context.matchId, context.callKey, requestId);
         // Responses APIがHTTP成功後のstructured-output復元で失敗した場合、SDK errorに
-        // 2xx statusだけが残ることがある。失敗種別ごとの上限内で同じmodelを再試行する。
+        // 2xx statusだけが残ることがある。合計3回の上限内で同じmodelを再試行する。
         const policy = aiRetryPolicy(error);
-        failureCounts[policy.kind] += 1;
-        if (failureCounts[policy.kind] >= policy.limit || attempt === 4) {
-          throw new AIRequestError('AI判断を取得できませんでした。', context.phase, safeAIRequestReason(error));
+        const reason = safeAIRequestReason(error);
+        logger.warn({
+          matchId: context.matchId,
+          callKey: context.callKey,
+          attempt: attempt + 1,
+          retryKind: policy.kind,
+          reason,
+        }, 'AI decision attempt failed');
+        if (!policy.retryable || attempt === MAX_AI_ATTEMPTS - 1) {
+          throw new AIRequestError('AI判断を取得できませんでした。', context.phase, reason);
         }
       }
     }
