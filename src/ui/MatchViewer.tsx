@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import Image from 'next/image';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AgentAvatar } from './AgentAvatar';
+import { AgentAvatar, agentPortraitSrc } from './AgentAvatar';
 import { AudioControls } from './AudioControls';
 import type { UiEvent, UiMatch } from './types';
 import { useAmbientBgm } from './useAmbientBgm';
@@ -240,7 +240,7 @@ export function MatchViewer({ matchId, mode }: { matchId: string; mode: 'live' |
             </div>
           </section>}
           {focusPanel === 'speech' && featuredSpeech && featuredPersona && featuredSeat && <section className={`speaker-stage ${featuredIsSpeaking ? 'speaking' : ''} ${featuredIsPaused ? 'paused' : ''}`} aria-label="注目中の発言" aria-live="polite">
-            <div className="speaker-stage-portrait"><Image src={`/assets/agents/agent_${featuredSeatNumber}.png`} width={768} height={768} alt={`${featuredPersona.name}の立ち絵`} /></div>
+            <div className="speaker-stage-portrait"><Image src={agentPortraitSrc(featuredSeatNumber)} width={768} height={768} alt={`${featuredPersona.name}の立ち絵`} /></div>
             <div className="speaker-stage-copy">
               <div className="speaker-stage-status"><span>{featuredIsSpeaking ? 'NOW SPEAKING' : featuredIsPaused ? 'PAUSED' : 'LATEST SPEECH'}</span><em>SEAT {String(featuredSeatNumber).padStart(2, '0')}</em></div>
               <h2>{featuredPersona.name}<small>{featuredPersona.title}</small></h2>

@@ -8,16 +8,20 @@ describe('エージェント人格', () => {
     expect(new Set(AGENT_PERSONAS.map((persona) => persona.name)).size).toBe(9);
     expect(new Set(AGENT_PERSONAS.map((persona) => persona.title)).size).toBe(9);
     expect(new Set(AGENT_PERSONAS.map((persona) => persona.exampleLine)).size).toBe(9);
-    expect(AGENT_PERSONAS.every((persona) => ['私', 'あたし', '俺', 'わたし'].includes(persona.firstPerson))).toBe(true);
+    expect(AGENT_PERSONAS.every((persona) => ['私', 'うち', '俺', 'わし', 'わたし'].includes(persona.firstPerson))).toBe(true);
     expect(new Set(AGENT_PERSONAS.map((persona) => persona.performanceAnchor)).size).toBe(9);
     expect(new Set(AGENT_PERSONAS.map((persona) => persona.decisionHabit)).size).toBe(9);
     expect(new Set(AGENT_PERSONAS.map((persona) => persona.antiStyle)).size).toBe(9);
-    expect(personaForSeat('seat-2').firstPerson).toBe('あたし');
+    expect(personaForSeat('seat-2').name).toBe('天満 ひなた');
+    expect(personaForSeat('seat-2').firstPerson).toBe('うち');
+    expect(personaForSeat('seat-2').speechStyle).toContain('関西弁');
     expect(personaForSeat('seat-9').firstPerson).toBe('わたし');
     expect(personaForSeat('seat-6').name).toBe('黒田 剛');
     expect(personaForSeat('seat-6').title).toBe('愛想のない現実主義者');
     expect(personaForSeat('seat-6').firstPerson).toBe('俺');
-    expect(personaForSeat('seat-8').contradiction).toContain('子ども扱い');
+    expect(personaForSeat('seat-8').name).toBe('福本 源蔵');
+    expect(personaForSeat('seat-8').firstPerson).toBe('わし');
+    expect(personaForSeat('seat-8').title).toBe('お調子者のご隠居');
   });
 
   it('各人が他の8人を人格に沿った固有の呼称で呼ぶ', () => {
@@ -29,16 +33,17 @@ describe('エージェント人格', () => {
     }
     expect(addressTermFor('seat-1', 'seat-6')).toBe('剛さん');
     expect(addressTermFor('seat-4', 'seat-7')).toBe('真壁さん');
-    expect(addressTermFor('seat-5', 'seat-8')).toBe('征司');
+    expect(addressTermFor('seat-5', 'seat-8')).toBe('源蔵');
     expect(addressTermFor('seat-6', 'seat-3')).toBe('宮下');
-    expect(addressTermFor('seat-8', 'seat-7')).toBe('真壁くん');
-    expect(addressGuideForSeat('seat-2')).toContain('宮下 さくらは「さくらちゃん」');
+    expect(addressTermFor('seat-8', 'seat-7')).toBe('陽太');
+    expect(addressGuideForSeat('seat-2')).toContain('福本 源蔵は「源蔵じいちゃん」');
   });
 
   it('役職の名乗りも特殊一人称と語尾を平準化しない', () => {
-    expect(roleClaimSentenceForSeat('seat-2', '占い師')).toBe('あたし、占い師だよ');
+    expect(roleClaimSentenceForSeat('seat-2', '占い師')).toBe('うち、占い師やで');
     expect(roleClaimSentenceForSeat('seat-5', '占い師')).toBe('私が占い師よ');
     expect(roleClaimSentenceForSeat('seat-6', '霊媒師')).toBe('俺が霊媒師だ');
+    expect(roleClaimSentenceForSeat('seat-8', '霊媒師')).toBe('わしが霊媒師じゃ');
     expect(roleClaimSentenceForSeat('seat-9', '霊媒師')).toBe('わたしが霊媒師です');
   });
 });

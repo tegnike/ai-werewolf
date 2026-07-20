@@ -4,8 +4,8 @@ import { SANITIZED_VOTE_REASON, SEATS } from './constants';
 import type { SeatId } from './types';
 
 const ROLE_LABELS = ['占い師', '霊媒師'] as const;
-const FIRST_PERSON = '(?:私|わたし|僕|俺|自分)';
-const ROLE_ASSERTION = '(?:です|だ|である|を名乗|として)';
+const FIRST_PERSON = '(?:私|わたし|あたし|うち|僕|俺|わし|自分)';
+const ROLE_ASSERTION = '(?:です|だよ|だ|やで|じゃ|よ|である|を名乗|として)';
 const VERDICT = '(?:人狼では(?:ない|ありません|なかった|ありませんでした)|人狼(?!ではない|ではありません))';
 
 function escapePattern(value: string): string {

@@ -5,11 +5,11 @@ import { addressTermFor, agentNameForSeat, personaForSeat, roleClaimSentenceForS
 
 const resultLikeClaim = /(?:人狼では(?:ない|ありません)|人狼)(?:でした|だった|です|だよ|と出|判定|結果)/;
 const abbreviatedRoleClaim = /(?:^|[^A-Za-z])(?:CO|ＣＯ)(?=$|[^A-Za-z])/i;
-const firstPersonRoleClaim = /(?:私|わたし|あたし|僕|俺|自分)(?:は|が|、)?[^。！？\n]{0,12}(?:占い師|霊媒師)(?:です|だよ|だ|よ|である|を名乗|として)/;
+const firstPersonRoleClaim = /(?:私|わたし|あたし|うち|僕|俺|わし|自分)(?:は|が|、)?[^。！？\n]{0,12}(?:占い師|霊媒師)(?:です|だよ|だ|やで|じゃ|よ|である|を名乗|として)/;
 const confirmedPrivateResult = [
   /(?:人狼ではない|人狼|村人|白|黒)(?:だ|です|だった|でした|だと|であると)?[^。！？\n]{0,18}(?:確認でき|確認して|分かって|わかって|知っている|把握している)/,
   /(?:確認でき|確認して|分かって|わかって|知っている|把握している)[^。！？\n]{0,18}(?:人狼ではない|人狼|村人|白|黒)/,
-  /(?:私|わたし|あたし|僕|俺|自分)[^。！？\n]{0,30}(?:占った|占いました|霊媒した)[^。！？\n]{0,30}(?:人狼ではない|人狼|村人|白|黒)/,
+  /(?:私|わたし|あたし|うち|僕|俺|わし|自分)[^。！？\n]{0,30}(?:占った|占いました|霊媒した)[^。！？\n]{0,30}(?:人狼ではない|人狼|村人|白|黒)/,
 ];
 const withheldPrivateResult = [
   /(?:占い|霊媒|能力|判定|結果|正体)[^。！？\n]{0,24}(?:今は|まだ)[^。！？\n]{0,12}(?:言えない|言えません|話せない|話せません|明かせない|明かせません|伏せ)/,
@@ -32,7 +32,7 @@ function validateSelfReference(context: DecisionContext, speech: string): void {
     );
   }
   const expected = personaForSeat(context.actor.seat).firstPerson;
-  const unexpected = ['私', 'わたし', 'あたし', '僕', '俺', '自分']
+  const unexpected = ['私', 'わたし', 'あたし', 'うち', '僕', '俺', 'わし', '自分']
     .filter((candidate) => candidate !== expected)
     .map(escapePattern)
     .join('|');
@@ -139,7 +139,7 @@ function validateDiscussionStructure(context: DecisionContext, decision: SpeechD
     }
   }
   if (!context.discussion.priorVoteIntentTarget &&
-    /(?:私|わたし|あたし|俺)(?:は|も)[^。！？\n]{0,32}(?:投票予定|投票先|票を入れる相手)[^。！？\n]{0,16}(?:変えない|変えません|維持する|そのまま|のまま|続ける)/.test(decision.speech)) {
+    /(?:私|わたし|あたし|うち|俺|わし)(?:は|も)[^。！？\n]{0,32}(?:投票予定|投票先|票を入れる相手)[^。！？\n]{0,16}(?:変えない|変えません|維持する|そのまま|のまま|続ける)/.test(decision.speech)) {
     throw new ClaimContractError(
       'nonexistent_prior_vote_intent',
       'あなたは今日まだ投票予定を公表していません。初めて示す予定を「変えない」「維持する」「このまま」と過去から継続しているように話さず、新しい予定として述べてください。',
@@ -190,7 +190,7 @@ function validateDiscussionStructure(context: DecisionContext, decision: SpeechD
     const sentences = decision.speech.split(/[。！？\n]/).filter((sentence) =>
       sentence.includes(agentNameForSeat(consensusTarget)) || sentence.includes(addressTermFor(context.actor.seat, consensusTarget)));
     const repeatsConsensusDeclaration = sentences.some((sentence) =>
-      /(?:私|わたし|あたし|僕|俺|自分|今日は|今は).{0,36}(?:投票|票を入れ|に入れ|処刑する|吊る)|(?:投票|票を入れ|に入れ).{0,18}(?:予定|つもり)/.test(sentence));
+      /(?:私|わたし|あたし|うち|僕|俺|わし|自分|今日は|今は).{0,36}(?:投票|票を入れ|に入れ|処刑する|吊る)|(?:投票|票を入れ|に入れ).{0,18}(?:予定|つもり)/.test(sentence));
     if (repeatsConsensusDeclaration) {
       throw new ClaimContractError(
         'consensus_vote_declaration_repeated',

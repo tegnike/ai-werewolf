@@ -29,10 +29,11 @@ describe('実AI人格プロンプト', () => {
     };
 
     const { systemPrompt, decisionPrompt } = buildPrompts(context);
-    expect(systemPrompt).toContain('あなたは八木 こはる');
+    expect(systemPrompt).toContain('あなたは天満 ひなた');
     expect(systemPrompt).toContain('内面の矛盾と欠点');
     expect(systemPrompt).toContain('台詞の見本');
-    expect(systemPrompt).toContain('一人称は「あたし」');
+    expect(systemPrompt).toContain('一人称は「うち」');
+    expect(systemPrompt).toContain('明るい関西弁');
     expect(systemPrompt).toContain('この台詞の最終演技契約');
     expect(systemPrompt).toContain('声とリズム');
     expect(systemPrompt).toContain('公開情報の受け取り方');
@@ -50,7 +51,7 @@ describe('実AI人格プロンプト', () => {
     expect(systemPrompt).toContain('addressedToに相手を指定し、requestsReply=true');
     expect(systemPrompt).toContain('名取 澪から返答を求められて次の話者になりました');
     expect(decisionPrompt).toContain('名取 澪');
-    expect(decisionPrompt).toContain('八木 こはる');
+    expect(decisionPrompt).toContain('天満 ひなた');
   });
 
   it('その日の先頭話者に未発生の反応や根拠のない疑いを作らせない', () => {
@@ -86,7 +87,7 @@ describe('実AI人格プロンプト', () => {
       matchId: 'test', callKey: 'd1-speech-t8-seat-3', seed: 'discussion-v3-prompt', day: 1,
       phase: 'discussion', kind: 'speech', actor: players[2], players,
       legalTargets: players.filter((player) => player.seat !== players[2].seat).map((player) => player.seat),
-      publicHistory: ['神崎 レナ: 私は占い師です。征司さんは人狼ではありませんでした。'],
+      publicHistory: ['神崎 レナ: 私は占い師です。源蔵さんは人狼ではありませんでした。'],
       privateFacts: [], round: 1,
       discussion: {
         version: 'v3', stage: 'opening', turn: 8, spokenSeats: ['seat-5'],
@@ -150,7 +151,7 @@ describe('実AI人格プロンプト', () => {
     const wolf = { ...players[0], role: 'werewolf' as const };
     const wolfPrompt = buildPrompts({
       ...base, callKey: 'wolf', actor: wolf, players: players.map((player) => player.seat === wolf.seat ? wolf : player),
-      privateFacts: ['生存中の人狼仲間: 八木 こはる'],
+      privateFacts: ['生存中の人狼仲間: 天満 ひなた'],
     }).systemPrompt;
     expect(wolfPrompt).toContain('迷いを見せる');
     expect(wolfPrompt).toContain('人狼仲間と自然に距離を取る');
@@ -302,11 +303,11 @@ describe('実AI人格プロンプト', () => {
     const context: DecisionContext = {
       matchId: 'test', callKey: 'd1-seer-speech', seed: 'persona-prompt', day: 1, phase: 'discussion', kind: 'speech',
       actor: seer, players: players.map((player) => player.seat === seer.seat ? seer : player), legalTargets: [],
-      publicHistory: ['真壁 陽太: 占いCOです。', '青木 征司: 霊媒師COです。'],
-      privateFacts: ['自分の役職: seer', '青木 征司: 人狼'], round: 1,
+      publicHistory: ['真壁 陽太: 占いCOです。', '福本 源蔵: 霊媒師COです。'],
+      privateFacts: ['自分の役職: seer', '福本 源蔵: 人狼'], round: 1,
     };
     const prompts = buildPrompts(context);
-    expect(prompts.systemPrompt).toContain('必ず同じ発言内で「あたし、占い師だよ」');
+    expect(prompts.systemPrompt).toContain('必ず同じ発言内で「うち、占い師やで」');
     expect(prompts.systemPrompt).toContain('アルファベットの略語を使わず');
     expect(prompts.decisionPrompt).toContain('占い師だと名乗りました');
     expect(prompts.decisionPrompt).toContain('霊媒師だと名乗りました');
@@ -320,7 +321,7 @@ describe('実AI人格プロンプト', () => {
       matchId: 'test', callKey: 'd1-fake-seer', seed: 'claim-prompt', day: 1, phase: 'discussion', kind: 'speech',
       actor, players: players.map((player) => player.seat === actor.seat ? actor : player), legalTargets: [],
       publicHistory: [], privateFacts: ['自分の役職: madman'], discussion: { stage: 'opening', turn: 1 },
-      claimBoard: ['八木 こはるは占い師を名乗っています'],
+      claimBoard: ['天満 ひなたは占い師を名乗っています'],
       claimDirective: {
         mode: 'must', claimedRole: 'seer', counterTargetSeat: 'seat-2',
         results: [{ day: 0, targetSeat: 'seat-3', verdict: '人狼' }],
@@ -408,14 +409,14 @@ describe('実AI人格プロンプト', () => {
   it('discussion v3 schemaで発言本文に対応する構造化貢献を必須にする', () => {
     const schema = speechDecisionSchema(['seat-2'], false, true, ['seat-2']);
     expect(schema.safeParse({
-      speech: 'こはるさんの便乗が気になります。', addressedTo: null, requestsReply: false,
+      speech: 'ひなたさんの便乗が気になります。', addressedTo: null, requestsReply: false,
       structure: {
         primaryAct: 'suspicion', questionTopic: null,
         suspicion: { targetSeat: 'seat-2', basis: 'interaction', echoSourceSeat: null, evidenceDay: 1 }, voteIntent: null, boardAnalysis: false,
       },
     }).success).toBe(true);
     expect(schema.safeParse({
-      speech: 'こはるさんの便乗が気になります。', addressedTo: null, requestsReply: false,
+      speech: 'ひなたさんの便乗が気になります。', addressedTo: null, requestsReply: false,
       structure: {
         primaryAct: 'suspicion', questionTopic: null,
         suspicion: { targetSeat: 'seat-2', basis: 'interaction', echoSourceSeat: null }, voteIntent: null, boardAnalysis: false,
@@ -443,7 +444,7 @@ describe('実AI人格プロンプト', () => {
       structure: { primaryAct: 'vote_intent', questionTopic: null, suspicion: null, voteIntent: 'seat-1', boardAnalysis: false },
     }).success).toBe(false);
     expect(consensusSchema.safeParse({
-      speech: 'こはるさんに投票します。', addressedTo: null, requestsReply: false,
+      speech: 'ひなたさんに投票します。', addressedTo: null, requestsReply: false,
       structure: { primaryAct: 'vote_intent', questionTopic: null, suspicion: null, voteIntent: 'seat-2', boardAnalysis: false },
     }).success).toBe(true);
   });

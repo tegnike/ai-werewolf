@@ -12,6 +12,8 @@ describe('VOICEVOX話者割り当て', () => {
     expect(new Set(AGENT_VOICES.map((voice) => voice.speakerName)).size).toBe(9);
     expect(new Set(AGENT_VOICES.map((voice) => voice.speakerId)).size).toBe(9);
     expect(voiceForSeat('seat-1')?.speakerName).toBe('四国めたん');
+    expect(voiceForSeat('seat-2')).toMatchObject({ speakerId: 70, speakerName: '満別花丸', styleName: '元気', presentation: 'female' });
+    expect(voiceForSeat('seat-8')).toMatchObject({ speakerId: 42, speakerName: 'ちび式じい', presentation: 'male' });
     expect(voiceForSeat('seat-9')?.speakerName).toBe('冥鳴ひまり');
   });
 
@@ -46,9 +48,10 @@ describe('VOICEVOX話者割り当て', () => {
 
     expect(result.added).toHaveLength(AGENT_NAME_DICTIONARY.length);
     expect(requests.filter(({ method }) => method === 'POST')).toHaveLength(AGENT_NAME_DICTIONARY.length);
-    const yagi = requests.find(({ url }) => url.searchParams.get('surface') === '八木');
-    expect(yagi?.url.searchParams.get('pronunciation')).toBe('ヤギ');
-    expect(yagi?.url.searchParams.get('priority')).toBe('10');
+    const tenma = requests.find(({ url }) => url.searchParams.get('surface') === '天満');
+    expect(tenma?.url.searchParams.get('pronunciation')).toBe('テンマ');
+    const genzo = requests.find(({ url }) => url.searchParams.get('surface') === '源蔵');
+    expect(genzo?.url.searchParams.get('pronunciation')).toBe('ゲンゾー');
     const kuon = requests.find(({ url }) => url.searchParams.get('surface') === '久遠');
     expect(kuon?.url.searchParams.get('pronunciation')).toBe('クオン');
     expect(kuon?.url.searchParams.get('word_type')).toBe('PROPER_NOUN');
