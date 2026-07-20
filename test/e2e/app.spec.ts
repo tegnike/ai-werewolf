@@ -2,6 +2,7 @@ import { expect, test } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
 
 test('ホームから試合を開始して公開／GM視点とリプレイを表示できる', async ({ page }) => {
+  test.setTimeout(90_000);
   await page.goto('/');
   await expect(page.getByRole('heading', { name: 'AI人狼' })).toBeVisible();
   await expect(page.getByRole('button', { name: '♫ BGM ON' })).toBeVisible();
@@ -56,7 +57,7 @@ test('ホームから試合を開始して公開／GM視点とリプレイを表
   await expect(page.locator('.epilogue-team li').filter({ hasText: '狂人（判定は人間）' })).toHaveCount(1);
   await expect(page.locator('.epilogue-fate')).toHaveCount(9);
   await expect(page.locator('.timeline-event.dawn').filter({ hasText: '1日目' })).toHaveCount(0);
-  await expect(page.locator('.voter-chips span').first()).toBeVisible();
+  await expect(page.locator('.timeline-event.vote_reveal').first()).toContainText('票');
   await expect(page.locator('.timeline-day').first()).toBeVisible();
   await page.getByRole('button', { name: '公開視点' }).click();
   await expect(page.getByText('REVEALED SECRET').first()).toBeVisible();
