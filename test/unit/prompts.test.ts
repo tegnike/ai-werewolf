@@ -36,8 +36,11 @@ describe('実AI人格プロンプト', () => {
     expect(systemPrompt).toContain('明るい関西弁');
     expect(systemPrompt).toContain('この台詞の最終演技契約');
     expect(systemPrompt).toContain('声とリズム');
+    expect(systemPrompt).toContain('感情の引き金と立ち直り方');
     expect(systemPrompt).toContain('公開情報の受け取り方');
     expect(systemPrompt).toContain('禁止する平準化');
+    expect(systemPrompt).toContain('損な判断でも構いません');
+    expect(systemPrompt).not.toContain('ゲームの状況を優先してください');
     expect(systemPrompt).toContain('台詞直前の事実確認');
     expect(systemPrompt).toContain('この一覧以外の人を「まだ話していない」');
     expect(systemPrompt).toContain('自分自身を自分の名前');
@@ -269,7 +272,7 @@ describe('実AI人格プロンプト', () => {
       }],
     });
 
-    expect(prompts.systemPrompt).toContain('多数派へ合わせること自体を理由にせず');
+    expect(prompts.systemPrompt).toContain('投票理由で人数や多数派であること自体を証拠と呼ばず');
     expect(prompts.systemPrompt).toContain('複数人が繰り返した同じ指摘は一つの論点');
     expect(prompts.systemPrompt).toContain('言い間違いや説明の拙さ');
     expect(prompts.systemPrompt).toContain('投票理由で新しく役職を名乗ったり');

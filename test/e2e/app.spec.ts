@@ -25,7 +25,7 @@ test('ホームから試合を開始して公開／GM視点とリプレイを表
   await expect(page.getByRole('dialog', { name: '観戦ガイド' })).toBeHidden();
   await expect(page.getByText(/生存 \d\/9/)).toBeVisible();
   await expect(page.getByAltText('名取 澪の立ち絵')).toBeVisible();
-  await expect(page.getByText('世話焼きの心配性')).toBeVisible();
+  await expect(page.getByText('恩着せがましい世話焼き')).toBeVisible();
   await expect(page.locator('audio[data-bgm-player="true"]')).toHaveAttribute('src', '/assets/bgm_village.ogg');
   await expect(page.getByRole('button', { name: /VOICE ON/ })).toBeVisible();
   await expect(page.getByRole('button', { name: '◆ SE ON' })).toBeVisible();

@@ -17,11 +17,11 @@ describe('エージェント人格', () => {
     expect(personaForSeat('seat-2').speechStyle).toContain('関西弁');
     expect(personaForSeat('seat-9').firstPerson).toBe('わたし');
     expect(personaForSeat('seat-6').name).toBe('黒田 剛');
-    expect(personaForSeat('seat-6').title).toBe('愛想のない現実主義者');
+    expect(personaForSeat('seat-6').title).toBe('初見で決める頑固一徹');
     expect(personaForSeat('seat-6').firstPerson).toBe('俺');
     expect(personaForSeat('seat-8').name).toBe('福本 源蔵');
     expect(personaForSeat('seat-8').firstPerson).toBe('わし');
-    expect(personaForSeat('seat-8').title).toBe('お調子者のご隠居');
+    expect(personaForSeat('seat-8').title).toBe('見栄っ張りの自称大ベテラン');
   });
 
   it('各人が他の8人を人格に沿った固有の呼称で呼ぶ', () => {

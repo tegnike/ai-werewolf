@@ -27,4 +27,22 @@ describe('人格別の役職行動方針', () => {
       expect(roleBehaviorFor(seat, 'bodyguard')).toContain('連続護衛禁止');
     }
   });
+
+  it('人格と行動方針が偏りを自分で打ち消さない', () => {
+    const normalizers = [
+      'しすぎないよう', '固執せず', '固執しない', '引きずらず', 'こだわらず',
+      '決め打ちしない', '好き嫌いでは選ばず', '無条件には信じない', 'バランス',
+      '公平に比較', '冷静に比較',
+    ];
+    const texts = [
+      ...AGENT_PERSONAS.flatMap((persona) => [
+        persona.coreDrive, persona.contradiction, persona.socialBias,
+        persona.emotionalPattern, persona.decisionHabit,
+      ]),
+      ...AGENT_PERSONAS.flatMap(({ seat }) => ROLES.map((role) => roleBehaviorFor(seat, role))),
+    ];
+    for (const text of texts) {
+      for (const phrase of normalizers) expect(text).not.toContain(phrase);
+    }
+  });
 });
