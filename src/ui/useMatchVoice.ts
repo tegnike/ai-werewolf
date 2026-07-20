@@ -5,7 +5,7 @@ import type { UiEvent } from './types';
 
 interface SpeechItem { seq: number; seat: string; speech: string }
 
-export function useMatchVoice(events: UiEvent[], onSpeechStart: (seq: number) => void, paused = false) {
+export function useMatchVoice(matchId: string, events: UiEvent[], onSpeechStart: (seq: number) => void, paused = false) {
   const [enabled, setEnabledState] = useState(true);
   const enabledRef = useRef(true);
   const [speakingSeat, setSpeakingSeat] = useState<string | null>(null);
@@ -58,7 +58,7 @@ export function useMatchVoice(events: UiEvent[], onSpeechStart: (seq: number) =>
       const item = queue.current.shift();
       if (!item) break;
       try {
-        const response = await fetch('/api/voicevox', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ seat: item.seat, text: item.speech }) });
+        const response = await fetch('/api/voicevox', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ matchId, seat: item.seat, text: item.speech }) });
         if (!response.ok) { setAvailable(false); break; }
         if (!enabledRef.current) break;
         const url = URL.createObjectURL(await response.blob());
@@ -96,7 +96,7 @@ export function useMatchVoice(events: UiEvent[], onSpeechStart: (seq: number) =>
     setSpeakingSeat(null);
     setSpeakingSeq(null);
     if (queue.current.length > 0 && enabledRef.current && !pausedRef.current) void pump();
-  }, [available, markSpeechStarted]);
+  }, [available, markSpeechStarted, matchId]);
 
   useEffect(() => {
     pausedRef.current = paused;

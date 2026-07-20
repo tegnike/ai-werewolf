@@ -5,7 +5,7 @@ import Image from 'next/image';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AgentAvatar, agentPortraitSrc } from './AgentAvatar';
 import { AudioControls } from './AudioControls';
-import type { UiEvent, UiMatch } from './types';
+import type { UiCharacter, UiEvent, UiMatch } from './types';
 import { useAmbientBgm } from './useAmbientBgm';
 import { useMatchVoice } from './useMatchVoice';
 import { voiceForSeat } from '@/domain/voices';
@@ -25,9 +25,22 @@ const eventLabel: Record<string, string> = { match_created: '配役決定', dawn
 interface VoteEntry { voter: string; target: string; statedReason?: string }
 
 function seatNumber(seat: unknown): number { return Number(String(seat ?? '').split('-')[1]) || 0; }
-function seatName(seat: unknown): string {
+function seatName(seat: unknown, characters?: UiCharacter[]): string {
   const value = seatNumber(seat);
-  return value ? agentNameForSeat(`seat-${value}` as `seat-${1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9}`) : 'なし';
+  if (!value) return 'なし';
+  const seatId = `seat-${value}` as `seat-${1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9}`;
+  return characters?.find((character) => character.seat === seatId)?.name ?? agentNameForSeat(seatId);
+}
+function viewCharacter(seat: `seat-${1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9}`, characters?: UiCharacter[]): UiCharacter {
+  const configured = characters?.find((character) => character.seat === seat);
+  if (configured) return configured;
+  const index = seatNumber(seat);
+  const persona = personaForSeat(seat);
+  const voice = voiceForSeat(seat);
+  return {
+    seat, name: persona.name, title: persona.title, portraitSrc: agentPortraitSrc(index),
+    voice: voice ?? { seat, speakerId: 0, speakerName: '未設定', styleName: '未設定', presentation: 'androgynous' },
+  };
 }
 function voteEntries(event?: UiEvent): VoteEntry[] {
   if (!event || !Array.isArray(event.payload.votes)) return [];
@@ -38,33 +51,33 @@ function voteEntries(event?: UiEvent): VoteEntry[] {
     return [{ voter: item.voter, target: item.target, ...(typeof item.statedReason === 'string' ? { statedReason: item.statedReason } : {}) }];
   });
 }
-function voteResultText(event: UiEvent): string {
+function voteResultText(event: UiEvent, characters?: UiCharacter[]): string {
   const votes = voteEntries(event);
   const tally = (event.payload.tally ?? {}) as Record<string, number>;
   return Object.entries(tally)
     .sort((a, b) => b[1] - a[1])
-    .map(([target, count]) => `${seatName(target)} ← ${votes.filter((vote) => vote.target === target).map((vote) => seatName(vote.voter)).join('・') || 'なし'}（${count}票）`)
+    .map(([target, count]) => `${seatName(target, characters)} ← ${votes.filter((vote) => vote.target === target).map((vote) => seatName(vote.voter, characters)).join('・') || 'なし'}（${count}票）`)
     .join(' / ');
 }
-function eventText(event: UiEvent): string {
+function eventText(event: UiEvent, characters?: UiCharacter[]): string {
   const p = event.payload;
   const privateDescription = privateActionDescription(event);
   if (privateDescription) return privateDescription;
-  if (event.type === 'discussion_speech') return `${seatName(p.seat)}「${String(p.speech)}」`;
+  if (event.type === 'discussion_speech') return `${seatName(p.seat, characters)}「${String(p.speech)}」`;
   if (event.type === 'discussion_closed') return '議論を終えて投票へ進みます。';
-  if (event.type === 'dawn') return p.victim ? `${seatName(p.victim)}が犠牲になりました。` : '犠牲者はいません。';
-  if (event.type === 'execution') return p.seat ? `${seatName(p.seat)}が処刑されました。` : '同数のため処刑はありません。';
-  if (event.type === 'vote_reveal') return `${p.round === 2 ? '決選投票: ' : ''}${voteResultText(event)}`;
-  if (event.type === 'vote_cast') return `${seatName(p.voter)} → ${seatName(p.target)}${p.statedReason ? `「${String(p.statedReason)}」` : ''}`;
+  if (event.type === 'dawn') return p.victim ? `${seatName(p.victim, characters)}が犠牲になりました。` : '犠牲者はいません。';
+  if (event.type === 'execution') return p.seat ? `${seatName(p.seat, characters)}が処刑されました。` : '同数のため処刑はありません。';
+  if (event.type === 'vote_reveal') return `${p.round === 2 ? '決選投票: ' : ''}${voteResultText(event, characters)}`;
+  if (event.type === 'vote_cast') return `${seatName(p.voter, characters)} → ${seatName(p.target, characters)}${p.statedReason ? `「${String(p.statedReason)}」` : ''}`;
   if (event.type === 'match_finished') return `${p.winner === 'village' ? '村人陣営' : p.winner === 'werewolf' ? '人狼陣営' : '引き分け'}で決着`;
-  if (event.type === 'werewolf_chat') return `${seatName(p.seat)}「${String(p.speech)}」`;
-  if (event.type === 'werewolf_reveal') return `人狼は${Array.isArray(p.wolves) ? p.wolves.map((wolf) => seatName((wolf as Record<string, unknown>).seat)).join('・') : '未確認'}`;
-  if (event.type === 'seer_result') return `${seatName(p.seat)}が${seatName(p.targetSeat)}を占い「${String(p.result)}」`;
-  if (event.type === 'medium_result') return `${seatName(p.seat)}が${seatName(p.targetSeat)}を霊媒し「${String(p.result)}」`;
-  if (event.type === 'guard_choice') return `${seatName(p.seat)}が${seatName(p.targetSeat)}を護衛${p.statedReason ? `「${String(p.statedReason)}」` : ''}`;
-  if (event.type === 'attack_choice') return `${seatName(p.seat)}が${seatName(p.targetSeat)}を襲撃候補に選択${p.statedReason ? `「${String(p.statedReason)}」` : ''}`;
-  if (event.type === 'decision_note') return `襲撃の最終決定: ${seatName(p.seat)} → ${seatName(p.targetSeat)}${p.statedReason ? `「${String(p.statedReason)}」` : ''}`;
-  if (event.type === 'night_resolved') return p.guarded ? `護衛成功。${seatName(p.guardTarget)}への襲撃を防ぎました。` : `襲撃 ${seatName(p.attackTarget)} / 護衛 ${seatName(p.guardTarget)}`;
+  if (event.type === 'werewolf_chat') return `${seatName(p.seat, characters)}「${String(p.speech)}」`;
+  if (event.type === 'werewolf_reveal') return `人狼は${Array.isArray(p.wolves) ? p.wolves.map((wolf) => seatName((wolf as Record<string, unknown>).seat, characters)).join('・') : '未確認'}`;
+  if (event.type === 'seer_result') return `${seatName(p.seat, characters)}が${seatName(p.targetSeat, characters)}を占い「${String(p.result)}」`;
+  if (event.type === 'medium_result') return `${seatName(p.seat, characters)}が${seatName(p.targetSeat, characters)}を霊媒し「${String(p.result)}」`;
+  if (event.type === 'guard_choice') return `${seatName(p.seat, characters)}が${seatName(p.targetSeat, characters)}を護衛${p.statedReason ? `「${String(p.statedReason)}」` : ''}`;
+  if (event.type === 'attack_choice') return `${seatName(p.seat, characters)}が${seatName(p.targetSeat, characters)}を襲撃候補に選択${p.statedReason ? `「${String(p.statedReason)}」` : ''}`;
+  if (event.type === 'decision_note') return `襲撃の最終決定: ${seatName(p.seat, characters)} → ${seatName(p.targetSeat, characters)}${p.statedReason ? `「${String(p.statedReason)}」` : ''}`;
+  if (event.type === 'night_resolved') return p.guarded ? `護衛成功。${seatName(p.guardTarget, characters)}への襲撃を防ぎました。` : `襲撃 ${seatName(p.attackTarget, characters)} / 護衛 ${seatName(p.guardTarget, characters)}`;
   if (event.type === 'match_created') return '9人の配役と座席が決まりました。';
   return eventLabel[event.type] ?? event.type;
 }
@@ -87,10 +100,12 @@ export function MatchViewer({ matchId, mode }: { matchId: string; mode: 'live' |
   const presentationInitialized = useRef(false);
   const sourceRef = useRef<EventSource | null>(null);
   const terminal = match ? ['finished', 'aborted', 'aborted_budget'].includes(match.status) : false;
+  const characters = match?.characters;
+  const resolveCharacterName = useCallback((seat: SeatId) => seatName(seat, characters), [characters]);
   const voiceEvents = useMemo(() => view === 'gm' ? events : events.filter((event) => event.visibility !== 'private'), [events, view]);
   const visibleEvents = useMemo(() => events.filter((event) => mode === 'live' ? event.seq <= presentedSeq : event.seq <= cursor), [cursor, events, mode, presentedSeq]);
   const maxLoadedSeq = Math.max(0, ...events.map((event) => event.seq));
-  const { cinematicCue, cinematicBusy, sfxEnabled, setSfxEnabled, sfxVolume, setSfxVolume } = useCinematicEffects(visibleEvents, `${matchId}:${mode}:${view}`, announceInitialCues);
+  const { cinematicCue, cinematicBusy, sfxEnabled, setSfxEnabled, sfxVolume, setSfxVolume } = useCinematicEffects(visibleEvents, `${matchId}:${mode}:${view}`, announceInitialCues, resolveCharacterName);
   const presentedStatus = mode === 'replay' && match?.status === 'finished' && !visibleEvents.some((event) => event.type === 'match_finished') ? 'running' : match?.status;
   const presentedState = useMemo(() => derivePresentedState(visibleEvents, presentedStatus), [presentedStatus, visibleEvents]);
   const audioMood = ['night_zero', 'wolf_chat', 'night_actions', 'medium'].includes(presentedState.phase) ? 'night' : 'day';
@@ -98,7 +113,7 @@ export function MatchViewer({ matchId, mode }: { matchId: string; mode: 'live' |
   const revealSpeech = useCallback((seq: number) => setPresentedSeq((current) => Math.max(current, seq)), []);
   const paused = match?.status === 'paused';
   const presentationPaused = paused || cinematicBusy;
-  const { voiceEnabled, setVoiceEnabled, voiceAvailable, speakingSeat, speakingSeq, voiceVolume, setVoiceVolume, voiceBusy } = useMatchVoice(voiceEvents, revealSpeech, presentationPaused);
+  const { voiceEnabled, setVoiceEnabled, voiceAvailable, speakingSeat, speakingSeq, voiceVolume, setVoiceVolume, voiceBusy } = useMatchVoice(matchId, voiceEvents, revealSpeech, presentationPaused);
 
   const load = useCallback(async () => {
     const reveal = view === 'public' && publicSecretsUnlocked ? '&reveal=1' : '';
@@ -216,8 +231,8 @@ export function MatchViewer({ matchId, mode }: { matchId: string; mode: 'live' |
   const featuredSpeech = finalEvent ? null : featuredSpeechEvent(visibleEvents, speakingSeq);
   const featuredSeatNumber = seatNumber(featuredSpeech?.payload.seat);
   const featuredSeat = featuredSeatNumber ? `seat-${featuredSeatNumber}` as `seat-${1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9}` : null;
-  const featuredPersona = featuredSeat ? personaForSeat(featuredSeat) : null;
-  const featuredVoice = featuredSeat ? voiceForSeat(featuredSeat) : null;
+  const featuredPersona = featuredSeat ? viewCharacter(featuredSeat, characters) : null;
+  const featuredVoice = featuredPersona?.voice ?? null;
   const featuredIsSpeaking = Boolean(featuredSpeech && speakingSeq === featuredSpeech.seq && !presentationPaused);
   const featuredIsPaused = Boolean(featuredSpeech && speakingSeq === featuredSpeech.seq && presentationPaused);
   const focusPanel = focusPanelKind(featuredSpeech, Boolean(latestVote), day, phase);
@@ -257,7 +272,7 @@ export function MatchViewer({ matchId, mode }: { matchId: string; mode: 'live' |
             </div>
           </section>}
           {focusPanel === 'speech' && featuredSpeech && featuredPersona && featuredSeat && <section className={`speaker-stage ${featuredIsSpeaking ? 'speaking' : ''} ${featuredIsPaused ? 'paused' : ''}`} aria-label="注目中の発言" aria-live="polite">
-            <div className="speaker-stage-portrait"><Image src={agentPortraitSrc(featuredSeatNumber)} width={768} height={768} alt={`${featuredPersona.name}の立ち絵`} /></div>
+            <div className="speaker-stage-portrait"><Image src={featuredPersona.portraitSrc} width={768} height={768} alt={`${featuredPersona.name}の立ち絵`} unoptimized={featuredPersona.portraitSrc.startsWith('data:')} /></div>
             <div className="speaker-stage-copy">
               <div className="speaker-stage-status"><span>{featuredIsSpeaking ? 'NOW SPEAKING' : featuredIsPaused ? 'PAUSED' : 'LATEST SPEECH'}</span><em>SEAT {String(featuredSeatNumber).padStart(2, '0')}</em></div>
               <h2>{featuredPersona.name}<small>{featuredPersona.title}</small></h2>
@@ -268,15 +283,15 @@ export function MatchViewer({ matchId, mode }: { matchId: string; mode: 'live' |
           <div className="agent-board" aria-live="polite">
             {Array.from({ length: 9 }, (_, index) => {
               const number = index + 1; const seat = `seat-${number}`; const deathRecord = deathRecords.get(seat); const dead = Boolean(deathRecord); const role = roleMap.get(seat);
-              const voice = voiceForSeat(seat as `seat-${1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9}`);
-              const persona = personaForSeat(seat as `seat-${1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9}`);
+              const persona = viewCharacter(seat as `seat-${1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9}`, characters);
+              const voice = persona.voice;
               const votedFor = latestVoteByVoter.get(seat);
               const isSpeaking = speakingSeat === seat && !presentationPaused;
               return <article className={`agent-card ${dead ? 'dead' : ''} ${isSpeaking ? 'speaking' : ''}`} key={seat}>
-                <div className="agent-top"><AgentAvatar index={number} name={persona.name} dead={dead} /><div><span className="seat-label">SEAT {String(number).padStart(2, '0')}</span><h2>{persona.name}</h2><small className="persona-name">{persona.title}</small><small className="voice-name">VOICE: {voice?.speakerName}</small>{deathRecord && <small className="death-record">{fateLabel(deathRecord)}</small>}</div><span className={`life-badge ${dead ? 'dead' : ''}`}>{speakingSeat === seat ? presentationPaused ? '一時停止' : '発声中' : dead ? '死亡' : '生存'}</span></div>
+                <div className="agent-top"><AgentAvatar index={number} name={persona.name} dead={dead} src={persona.portraitSrc} /><div><span className="seat-label">SEAT {String(number).padStart(2, '0')}</span><h2>{persona.name}</h2><small className="persona-name">{persona.title}</small><small className="voice-name">VOICE: {voice?.speakerName}</small>{deathRecord && <small className="death-record">{fateLabel(deathRecord)}</small>}</div><span className={`life-badge ${dead ? 'dead' : ''}`}>{speakingSeat === seat ? presentationPaused ? '一時停止' : '発声中' : dead ? '死亡' : '生存'}</span></div>
                 {role && <div className={`role-badge ${role}`}>{roleLabel[role]}</div>}
                 <blockquote>{latestSpeech.get(seat) ?? (dead ? '発言を終了しました' : '次の発言を待っています…')}</blockquote>
-                {votedFor && <div className="card-vote"><span>{latestVote?.day}日目{latestVote?.payload.round === 2 ? '決選' : ''}投票</span><strong>→ {seatName(votedFor)}</strong></div>}
+                {votedFor && <div className="card-vote"><span>{latestVote?.day}日目{latestVote?.payload.round === 2 ? '決選' : ''}投票</span><strong>→ {seatName(votedFor, characters)}</strong></div>}
               </article>;
             })}
           </div>
@@ -285,10 +300,10 @@ export function MatchViewer({ matchId, mode }: { matchId: string; mode: 'live' |
             <div className="vote-bars">{Object.entries(latestTally).sort((a, b) => b[1] - a[1]).map(([seat, count]) => {
               const voters = latestVotes.filter((vote) => vote.target === seat);
               return <div className="vote-bar" key={seat}>
-                <div className="vote-bar-head"><span>{seatName(seat)}</span><strong>{count}票</strong></div>
+                <div className="vote-bar-head"><span>{seatName(seat, characters)}</span><strong>{count}票</strong></div>
                 <i><b style={{ width: `${Math.max(8, (count / maxVoteCount) * 100)}%` }} /></i>
-                <div className="voter-chips">{voters.map((vote) => <span key={vote.voter}>{seatName(vote.voter)}</span>)}</div>
-                {canSeeSecrets && voters.some((vote) => vote.statedReason) && <details className="vote-reasons"><summary>投票理由 {voters.filter((vote) => vote.statedReason).length}件</summary>{voters.filter((vote) => vote.statedReason).map((vote) => <small key={vote.voter}>{seatName(vote.voter)}「{vote.statedReason}」</small>)}</details>}
+                <div className="voter-chips">{voters.map((vote) => <span key={vote.voter}>{seatName(vote.voter, characters)}</span>)}</div>
+                {canSeeSecrets && voters.some((vote) => vote.statedReason) && <details className="vote-reasons"><summary>投票理由 {voters.filter((vote) => vote.statedReason).length}件</summary>{voters.filter((vote) => vote.statedReason).map((vote) => <small key={vote.voter}>{seatName(vote.voter, characters)}「{vote.statedReason}」</small>)}</details>}
               </div>;
             })}</div>
           </section>}
@@ -299,12 +314,12 @@ export function MatchViewer({ matchId, mode }: { matchId: string; mode: 'live' |
             <div className="claim-board-grid">{claimLedger.map((entry) => <article key={entry.seat}>
               <div><strong>{entry.name}</strong><span>{entry.claimedRole === 'seer' ? '占い師' : '霊媒師'}を名乗り中</span></div>
               {entry.results.length > 0
-                ? <ul>{entry.results.map((result) => <li key={`${entry.seat}-${result.day}`}><small>{result.day}日目</small><span>{seatName(result.targetSeat)}</span><em className={result.verdict === '人狼' ? 'black' : 'white'}>{result.verdict}</em></li>)}</ul>
+                ? <ul>{entry.results.map((result) => <li key={`${entry.seat}-${result.day}`}><small>{result.day}日目</small><span>{seatName(result.targetSeat, characters)}</span><em className={result.verdict === '人狼' ? 'black' : 'white'}>{result.verdict}</em></li>)}</ul>
                 : <p>結果報告はまだありません</p>}
             </article>)}</div>
           </section>}
           <div className="timeline-head"><div><span className="section-kicker">EVENT LOG</span><h2>時系列ログ</h2></div><span>{visibleEvents.length} events</span></div>
-          <div className="timeline" aria-live="polite">{timelineEvents.map((event, index) => <div className="timeline-entry" key={event.seq}>{(index === 0 || timelineEvents[index - 1]?.day !== event.day) && <div className="timeline-day"><span>{event.day === 0 ? '第0夜' : `${event.day}日目`}</span></div>}<article className={`timeline-event ${event.type}`}><span className="seq">#{String(event.seq).padStart(3, '0')}</span><div><small>{eventTitle(event)}</small><p>{eventText(event)}</p>{event.type === 'private_action' ? <em>内容非公開</em> : event.visibility === 'private' && <em>{view === 'gm' ? 'GM SECRET' : 'REVEALED SECRET'}</em>}</div></article></div>)}</div>
+          <div className="timeline" aria-live="polite">{timelineEvents.map((event, index) => <div className="timeline-entry" key={event.seq}>{(index === 0 || timelineEvents[index - 1]?.day !== event.day) && <div className="timeline-day"><span>{event.day === 0 ? '第0夜' : `${event.day}日目`}</span></div>}<article className={`timeline-event ${event.type}`}><span className="seq">#{String(event.seq).padStart(3, '0')}</span><div><small>{eventTitle(event)}</small><p>{eventText(event, characters)}</p>{event.type === 'private_action' ? <em>内容非公開</em> : event.visibility === 'private' && <em>{view === 'gm' ? 'GM SECRET' : 'REVEALED SECRET'}</em>}</div></article></div>)}</div>
         </aside>
       </div>
       <footer className="control-dock">

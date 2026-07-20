@@ -20,8 +20,8 @@ export async function getVoicevoxStatus(): Promise<VoicevoxStatus> {
   }
 }
 
-export async function synthesizeAgentSpeech(seat: SeatId, text: string): Promise<ArrayBuffer> {
-  const voice = voiceForSeat(seat);
+export async function synthesizeAgentSpeech(seat: SeatId, text: string, overrideVoice?: (typeof AGENT_VOICES)[number]): Promise<ArrayBuffer> {
+  const voice = overrideVoice ?? voiceForSeat(seat);
   if (!voice) throw new Error('INVALID_SEAT');
   const normalized = Array.from(text.trim()).slice(0, 200).join('');
   if (!normalized) throw new Error('EMPTY_TEXT');

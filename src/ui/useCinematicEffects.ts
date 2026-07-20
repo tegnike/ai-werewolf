@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { CINEMATIC_INTER_CUE_GAP_MS, cinematicCuesBetween, type CinematicCue, type CinematicSound } from './cinematic';
 import type { UiEvent } from './types';
+import type { SeatId } from '@/domain/types';
 
 const SOUND_SOURCE: Record<CinematicSound, string> = {
   scene: '/assets/sfx_scene_change.ogg',
@@ -26,7 +27,7 @@ function storedSfxVolume(): number {
   return Number.isFinite(value) && value >= 0 && value <= 1 ? value : DEFAULT_SFX_VOLUME;
 }
 
-export function useCinematicEffects(events: UiEvent[], resetKey: string, announceInitial = false) {
+export function useCinematicEffects(events: UiEvent[], resetKey: string, announceInitial = false, resolveName?: (seat: SeatId) => string) {
   const [cue, setCue] = useState<CinematicCue | null>(null);
   const [cinematicBusy, setCinematicBusy] = useState(false);
   const [sfxEnabled, setSfxEnabledState] = useState(true);
@@ -113,13 +114,13 @@ export function useCinematicEffects(events: UiEvent[], resetKey: string, announc
       setCue(null);
       return;
     }
-    const freshCues = cinematicCuesBetween(events, seenSeq.current, maxSeq);
+    const freshCues = cinematicCuesBetween(events, seenSeq.current, maxSeq, resolveName);
     seenSeq.current = maxSeq;
     if (freshCues.length === 0) return;
     queue.current.push(...freshCues);
     setCinematicBusy(true);
     startNext();
-  }, [events, startNext]);
+  }, [events, resolveName, startNext]);
 
   useEffect(() => {
     if (!cue) return;

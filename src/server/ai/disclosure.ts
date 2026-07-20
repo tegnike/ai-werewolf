@@ -1,7 +1,9 @@
 import { ROLE_LABEL } from '@/domain/constants';
 import { ClaimContractError, assertClaimWithinDirective } from '@/domain/claims';
 import type { DecisionContext, SpeechDecision } from '@/domain/types';
-import { addressTermFor, agentNameForSeat, personaForSeat, roleClaimSentenceForSeat } from '@/domain/agents';
+import {
+  characterAddressTerm, characterForSeat, characterNameForSeat, characterRoleClaimSentence,
+} from '@/domain/characters';
 
 const resultLikeClaim = /(?:人狼では(?:ない|ありません)|人狼)(?:でした|だった|です|だよ|と出|判定|結果)/;
 const abbreviatedRoleClaim = /(?:^|[^A-Za-z])(?:CO|ＣＯ)(?=$|[^A-Za-z])/i;
@@ -15,6 +17,11 @@ const withheldPrivateResult = [
   /(?:占い|霊媒|能力|判定|結果|正体)[^。！？\n]{0,24}(?:今は|まだ)[^。！？\n]{0,12}(?:言えない|言えません|話せない|話せません|明かせない|明かせません|伏せ)/,
   /(?:今は|まだ)[^。！？\n]{0,12}(?:言えない|言えません|話せない|話せません|明かせない|明かせません|伏せ)[^。！？\n]{0,24}(?:占い|霊媒|能力|判定|結果|正体)/,
 ];
+
+const nameForSeat = (context: DecisionContext, seat: Parameters<typeof characterNameForSeat>[1]): string =>
+  characterNameForSeat(context.characters, seat);
+const addressForSeat = (context: DecisionContext, seat: Parameters<typeof characterNameForSeat>[1]): string =>
+  characterAddressTerm(context.characters, context.actor.seat, seat);
 
 function escapePattern(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -31,7 +38,7 @@ function validateSelfReference(context: DecisionContext, speech: string): void {
       '自分自身を名前や敬称付きで呼ばず、指定された一人称で話してください。他の参加者への呼び方は変更しないでください。',
     );
   }
-  const expected = personaForSeat(context.actor.seat).firstPerson;
+  const expected = characterForSeat(context.characters, context.actor.seat).firstPerson;
   const unexpected = ['私', 'わたし', 'あたし', 'うち', '僕', '俺', 'わし', '自分']
     .filter((candidate) => candidate !== expected)
     .map(escapePattern)
@@ -84,9 +91,9 @@ function validateSpokenState(context: DecisionContext, speech: string): void {
   for (const player of context.players) {
     if (player.seat === context.actor.seat || remainingSeats.has(player.seat)) continue;
     const references = [
-      agentNameForSeat(player.seat),
-      ...agentNameForSeat(player.seat).split(/\s+/),
-      addressTermFor(context.actor.seat, player.seat),
+      nameForSeat(context, player.seat),
+      ...nameForSeat(context, player.seat).split(/\s+/),
+      addressForSeat(context, player.seat),
     ]
       .map(escapePattern).join('|');
     const reference = new RegExp(`(?:${references})`);
@@ -95,7 +102,7 @@ function validateSpokenState(context: DecisionContext, speech: string): void {
     if (offending) {
       throw new ClaimContractError(
         'spoken_player_treated_as_unspoken',
-        `${agentNameForSeat(player.seat)}は今日すでに発言しています。「未発言」「発言がない」「発言を聞けていない」と扱わず、内容を評価するなら実際の公開発言を指してください。`,
+        `${nameForSeat(context, player.seat)}は今日すでに発言しています。「未発言」「発言がない」「発言を聞けていない」と扱わず、内容を評価するなら実際の公開発言を指してください。`,
       );
     }
   }
@@ -121,7 +128,7 @@ function validateNaturalAlignmentTerms(speech: string): void {
 
 function mentionsSeat(context: DecisionContext, speech: string, seat: NonNullable<SpeechDecision['structure']>['voteIntent']): boolean {
   if (!seat) return true;
-  return speech.includes(agentNameForSeat(seat)) || speech.includes(addressTermFor(context.actor.seat, seat));
+  return speech.includes(nameForSeat(context, seat)) || speech.includes(addressForSeat(context, seat));
 }
 
 function validateDiscussionStructure(context: DecisionContext, decision: SpeechDecision): void {
@@ -153,7 +160,7 @@ function validateDiscussionStructure(context: DecisionContext, decision: SpeechD
     );
   }
   if (context.day === 1 && context.discussion.stage === 'opening') {
-    const firstPerson = personaForSeat(context.actor.seat).firstPerson;
+    const firstPerson = characterForSeat(context.characters, context.actor.seat).firstPerson;
     const fabricatedPublicAction = new RegExp(`${firstPerson}(?:が|は)[^。！？\\n]{0,32}(?:質問した|反応を求めた|疑った|指摘した|保留した|投票予定を示した|投票すると言った)`);
     if (fabricatedPublicAction.test(decision.speech)) {
       throw new ClaimContractError(
@@ -214,13 +221,13 @@ function validateDiscussionStructure(context: DecisionContext, decision: SpeechD
   const consensusTarget = context.discussion?.consensusTarget;
   if (consensusTarget && mentionsSeat(context, decision.speech, consensusTarget)) {
     const sentences = decision.speech.split(/[。！？\n]/).filter((sentence) =>
-      sentence.includes(agentNameForSeat(consensusTarget)) || sentence.includes(addressTermFor(context.actor.seat, consensusTarget)));
+      sentence.includes(nameForSeat(context, consensusTarget)) || sentence.includes(addressForSeat(context, consensusTarget)));
     const repeatsConsensusDeclaration = sentences.some((sentence) =>
       /(?:私|わたし|あたし|うち|僕|俺|わし|自分|今日は|今は).{0,36}(?:投票|票を入れ|に入れ|処刑する|吊る)|(?:投票|票を入れ|に入れ).{0,18}(?:予定|つもり)/.test(sentence));
     if (repeatsConsensusDeclaration) {
       throw new ClaimContractError(
         'consensus_vote_declaration_repeated',
-        `${agentNameForSeat(consensusTarget)}への投票予定はすでに3人以上が公表しています。この発言では同じ予定を追加宣言せず、voteIntent=nullにして、増えた公開情報、質問、反証、または未検討の人物を話してください。最終投票先は別途選べます。`,
+        `${nameForSeat(context, consensusTarget)}への投票予定はすでに3人以上が公表しています。この発言では同じ予定を追加宣言せず、voteIntent=nullにして、増えた公開情報、質問、反証、または未検討の人物を話してください。最終投票先は別途選べます。`,
       );
     }
   }
@@ -251,9 +258,9 @@ export function resultDisclosureGuidance(context: DecisionContext): string | nul
       return '今回は役職を名乗らず、claimはnullにして公開情報への通常の発言だけをしてください。自分の能力結果や確認済みの正体を本文にも出さず、「村人だと確認できている」「結果はあるが今は言えない」のような匂わせもしないでください。';
     }
     const roleLabel = directive.claimedRole === 'seer' ? '占い師' : '霊媒師';
-    const roleClaimSentence = roleClaimSentenceForSeat(context.actor.seat, roleLabel);
+    const roleClaimSentence = characterRoleClaimSentence(context.characters, context.actor.seat, roleLabel);
     const results = directive.results.map((result) =>
-      `${result.day}日目の${addressTermFor(context.actor.seat, result.targetSeat)}の結果は${result.verdict}`).join('、');
+      `${result.day}日目の${addressForSeat(context, result.targetSeat)}の結果は${result.verdict}`).join('、');
     const action = directive.mode === 'must'
       ? `今回は必ず「${roleClaimSentence}」と人物らしく名乗り`
       : `今回は「${roleClaimSentence}」と人物らしく名乗っても、まだ伏せても構いません。伏せる場合はclaimをnullにし、能力結果、確認済みの正体、結果を持っている事実を本文にも匂わせないでください。名乗る場合は`;
@@ -270,7 +277,7 @@ export function resultDisclosureGuidance(context: DecisionContext): string | nul
   if (publicRoleClaimExists(context, roleLabel)) {
     return `あなたはすでに自分が${roleLabel}だと明かしています。能力結果を話すときは、自分が知った結果と推理を区別してください。`;
   }
-  const roleClaimSentence = roleClaimSentenceForSeat(context.actor.seat, roleLabel as '占い師' | '霊媒師');
+  const roleClaimSentence = characterRoleClaimSentence(context.characters, context.actor.seat, roleLabel as '占い師' | '霊媒師');
   return `能力結果を初めて公開する場合は、結果だけを断定せず、必ず同じ発言内で「${roleClaimSentence}」と人物らしい自然な日本語で名乗ってから対象と結果を伝えてください。結果を伏せるなら役職を名乗る必要はありません。`;
 }
 
@@ -303,8 +310,8 @@ export function validateSpeechDisclosure(context: DecisionContext, decision: Spe
       throw new ClaimContractError('claimed_role_missing_from_speech', `本文でも${roleLabel}と明言してください。`);
     }
     for (const result of decision.claim.results) {
-      const name = agentNameForSeat(result.targetSeat);
-      const address = addressTermFor(context.actor.seat, result.targetSeat);
+      const name = nameForSeat(context, result.targetSeat);
+      const address = addressForSeat(context, result.targetSeat);
       const verdictPattern = result.verdict === '人狼'
         ? /人狼(?!ではない|ではありません|じゃない)/
         : /(?:人狼では(?:ない|ありません|なかった|ありませんでした)|人狼じゃ(?:ない|なかった))/;

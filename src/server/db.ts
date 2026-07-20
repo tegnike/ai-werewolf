@@ -11,9 +11,19 @@ export function getDatabase(): Database.Database {
   const db = new Database(databasePath);
   db.pragma('journal_mode = WAL');
   db.pragma('foreign_keys = ON');
-  const migration = fs.readFileSync(path.join(process.cwd(), 'migrations', '001_init.sql'), 'utf8');
-  db.exec(migration);
-  db.prepare('INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES(1, ?)').run(new Date().toISOString());
+  const migrationDirectory = path.join(process.cwd(), 'migrations');
+  const migrations = fs.readdirSync(migrationDirectory)
+    .filter((file) => /^\d+_.+\.sql$/.test(file))
+    .sort((left, right) => left.localeCompare(right, 'en'));
+  for (const file of migrations) {
+    const version = Number(file.split('_')[0]);
+    if (version !== 1) {
+      const applied = db.prepare('SELECT 1 FROM schema_migrations WHERE version=?').get(version);
+      if (applied) continue;
+    }
+    db.exec(fs.readFileSync(path.join(migrationDirectory, file), 'utf8'));
+    db.prepare('INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES(?, ?)').run(version, new Date().toISOString());
+  }
   globalDb.__werewolfDb = db;
   return db;
 }

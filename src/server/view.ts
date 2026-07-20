@@ -1,4 +1,5 @@
 import type { MatchEvent, MatchRecord, MatchStatus, ViewMode } from '@/domain/types';
+import { cloneDefaultCharacterRoster, publicCharacterRoster } from '@/domain/characters';
 
 export interface PublicEvent {
   matchId: string; seq: number; day: number; phase: string; type: string; payload: Record<string, unknown>; createdAt: string;
@@ -95,6 +96,7 @@ export function projectMatch(match: MatchRecord, view: ViewMode) {
   const common = {
     id: match.id, seed: match.seed, status: match.status, winner: match.winner, speed: match.speed,
     apiCalls: match.apiCalls, error: match.error, createdAt: match.createdAt, updatedAt: match.updatedAt, finishedAt: match.finishedAt,
+    characters: publicCharacterRoster(match.config.characters ?? cloneDefaultCharacterRoster()),
   };
   return view === 'gm' ? { ...common, ai: match.config.ai } : common;
 }

@@ -63,6 +63,7 @@ export function HomeScreen() {
             ))}
           </div></fieldset>
           <button className="primary-button" disabled={loading}>{loading ? '村を準備中…' : 'AI人狼を開始'} <span>→</span></button>
+          <Link className="character-settings-link" href="/characters"><span>⚙</span><strong>キャラクターを編集</strong><small>人格・口調・立ち絵・音声を設定</small></Link>
           {error && <p className="form-error" role="alert">{error}</p>}
           <p className="mock-note">現在の思考エンジン: <strong>{aiProvider === 'real' ? 'OpenAI gpt-5.6-luna（API利用料金が発生）' : '決定論的MockAI'}</strong></p>
         </form>

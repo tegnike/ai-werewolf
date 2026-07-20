@@ -21,13 +21,15 @@ export interface CinematicCue {
   gapAfterMs?: number;
 }
 
-function playerName(value: unknown): string {
+type PlayerNameResolver = (seat: SeatId) => string;
+
+function playerName(value: unknown, resolveName: PlayerNameResolver = agentNameForSeat): string {
   const number = Number(String(value ?? '').split('-')[1]);
   if (!Number.isInteger(number) || number < 1 || number > 9) return '不明なプレイヤー';
-  return agentNameForSeat(`seat-${number}` as SeatId);
+  return resolveName(`seat-${number}` as SeatId);
 }
 
-function cinematicCuesForEvent(event: UiEvent): CinematicCue[] {
+function cinematicCuesForEvent(event: UiEvent, resolveName?: PlayerNameResolver): CinematicCue[] {
   if (event.type === 'match_created' || (event.type === 'private_action' && event.payload.label === '配役決定')) {
     return [{
       seq: event.seq,
@@ -46,7 +48,7 @@ function cinematicCuesForEvent(event: UiEvent): CinematicCue[] {
       {
         seq: event.seq,
         eyebrow: 'NIGHT RESULT',
-        title: victim ? playerName(victim) : '犠牲者なし',
+        title: victim ? playerName(victim, resolveName) : '犠牲者なし',
         subtitle: victim ? '襲撃の犠牲になりました' : '昨夜は誰も襲撃されませんでした',
         tone: victim ? 'attack' : 'day',
         sound: victim ? 'attack' : 'scene',
@@ -83,7 +85,7 @@ function cinematicCuesForEvent(event: UiEvent): CinematicCue[] {
     return [{
       seq: event.seq,
       eyebrow: `DAY ${event.day} / EXECUTION`,
-      title: executed ? playerName(executed) : '処刑なし',
+      title: executed ? playerName(executed, resolveName) : '処刑なし',
       subtitle: executed ? '投票により処刑されました' : '決選投票でも同数となりました',
       tone: executed ? 'execution' : 'vote',
       sound: executed ? 'execution' : 'scene',
@@ -98,7 +100,7 @@ export function cinematicCueForEvent(event: UiEvent): CinematicCue | null {
   return cinematicCuesForEvent(event)[0] ?? null;
 }
 
-export function cinematicCuesBetween(events: UiEvent[], afterSeq: number, throughSeq: number): CinematicCue[] {
+export function cinematicCuesBetween(events: UiEvent[], afterSeq: number, throughSeq: number, resolveName?: PlayerNameResolver): CinematicCue[] {
   const dayOneBoundarySeq = events
     .filter((event) => event.day === 0 && (event.type === 'seer_result' ||
       (event.type === 'private_action' && event.payload.label === '占い結果の確認')))
@@ -121,6 +123,6 @@ export function cinematicCuesBetween(events: UiEvent[], afterSeq: number, throug
           durationMs: CINEMATIC_LONG_DURATION_MS,
         } satisfies CinematicCue];
       }
-      return cinematicCuesForEvent(event);
+      return cinematicCuesForEvent(event, resolveName);
     });
 }

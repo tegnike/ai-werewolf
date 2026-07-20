@@ -38,7 +38,7 @@ export interface MatchRecord {
   speed: number;
   apiCalls: number;
   error: { code: string; message: string; phase?: string; model?: string; reason?: string } | null;
-  config: { ai: 'mock' | 'real' };
+  config: { ai: 'mock' | 'real'; characters?: import('./characters').CharacterRoster };
   createdAt: string;
   updatedAt: string;
   finishedAt: string | null;
@@ -165,6 +165,8 @@ export interface DecisionContext {
   legalTargets: SeatId[];
   publicHistory: string[];
   privateFacts: string[];
+  /** 試合開始時に保存したキャラクター設定。旧試合は固定9人へフォールバックする。 */
+  characters?: import('./characters').CharacterRoster;
   round?: number;
   discussion?: DiscussionContext;
   wolfChat?: WolfChatContext;

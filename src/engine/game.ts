@@ -6,9 +6,10 @@ import {
 import type {
   DecisionContext, DecisionProvider, DiscussionContext, GameState, MatchEvent, Player, RunHooks, SeatId, SpeechIntentDecision, Winner,
 } from '@/domain/types';
+import { characterNameForSeat, type CharacterRoster } from '@/domain/characters';
 import { sanitizePublicVoteReason } from '@/domain/public-reason';
 import { legalAttackTargets, legalGuardTargets, legalSeerTargets, legalVoteTargets } from './legal';
-import { normalizeSpeech, seatName } from './narration';
+import { normalizeSpeech } from './narration';
 import { stableIndex, stableShuffle } from './prng';
 import { setupPlayers } from './setup';
 import { createInitialState } from './state';
@@ -141,9 +142,12 @@ export async function runGame(
     claimsVersion?: 'v1' | 'v2';
     discussionVersion?: 'legacy' | 'v2' | 'v3';
     nightZeroMode?: 'ai' | 'uniform';
+    characters?: CharacterRoster;
   } = {},
 ): Promise<SimulationResult> {
-  const players = setupPlayers(seed);
+  const characters = options.characters;
+  const players = setupPlayers(seed, characters);
+  const seatName = (seat: SeatId | null): string => seat ? characterNameForSeat(characters, seat) : 'なし';
   const claimsEnabled = options.claimsVersion === 'v1' || options.claimsVersion === 'v2';
   const claimsVersion = options.claimsVersion;
   const discussionVersion = options.discussionVersion ?? 'v3';
@@ -202,7 +206,7 @@ export async function runGame(
   ): DecisionContext => {
     const saturatedPoint = discussionVersion === 'v3' ? saturatedPointFor(discussionBoard) : undefined;
     const base: DecisionContext = {
-      matchId, seed, day, phase, kind, callKey, actor,
+      matchId, seed, day, phase, kind, callKey, actor, characters,
       players: state.players.map((player) => ({ ...player })), legalTargets,
       publicHistory: [...publicHistory], privateFacts: privateFactsFor(actor, state, histories), round,
       ...(discussionVersion === 'v3' ? { candidateEvidence: candidateEvidenceLedger(discussionBoard, claimLedger) } : {}),
@@ -742,7 +746,7 @@ export async function runGame(
     for (const actor of alive) {
       const decision = await ai.target(context(actor, day, 'vote', 'vote', `d${day}-vote-${actor.seat}`, legalVoteTargets(state, actor.seat)));
       const reason = nightZeroMode === 'uniform' && claimsEnabled
-        ? sanitizePublicVoteReason(decision.statedReason, actor.seat, claimLedger)
+        ? sanitizePublicVoteReason(decision.statedReason, actor.seat, claimLedger, characters)
         : { statedReason: decision.statedReason, reasonSanitized: false };
       const vote = {
         voter: actor.seat, target: decision.targetSeat, statedReason: reason.statedReason,
@@ -764,7 +768,7 @@ export async function runGame(
         if (legal.length === 0) continue;
         const decision = await ai.target(context(actor, day, 'runoff', 'runoff_vote', `d${day}-runoff-${actor.seat}`, legal));
         const reason = nightZeroMode === 'uniform' && claimsEnabled
-          ? sanitizePublicVoteReason(decision.statedReason, actor.seat, claimLedger)
+          ? sanitizePublicVoteReason(decision.statedReason, actor.seat, claimLedger, characters)
           : { statedReason: decision.statedReason, reasonSanitized: false };
         const vote = {
           voter: actor.seat, target: decision.targetSeat, statedReason: reason.statedReason,

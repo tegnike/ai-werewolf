@@ -3,7 +3,7 @@ import type { SeatId } from './types';
 export interface AgentPersona {
   seat: SeatId;
   name: string;
-  firstPerson: '私' | 'うち' | '俺' | 'わし' | 'わたし';
+  firstPerson: string;
   title: string;
   coreDrive: string;
   contradiction: string;

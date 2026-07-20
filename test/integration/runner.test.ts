@@ -37,6 +37,19 @@ async function waitForEventCount(repo: MatchRepo, id: string, minimum: number) {
 }
 
 describe('MatchRunner', () => {
+  it('編集済みキャラを試合開始時にスナップショット保存する', async () => {
+    const manager = new MatchRunnerManager();
+    const original = manager.repo.characterRoster()[0];
+    manager.repo.saveCharacter({ ...original, name: '月城 ニケ' });
+    const match = manager.create({ seed: 'character-snapshot', speed: 0, ai: 'mock' });
+    expect(match.config.characters?.[0].name).toBe('月城 ニケ');
+    manager.repo.saveCharacter({ ...original, name: '月城 ニケ改' });
+    await waitFor(manager.repo, match.id, 'finished');
+    expect(manager.repo.getMatch(match.id)?.config.characters?.[0].name).toBe('月城 ニケ');
+    const created = manager.repo.events(match.id).find((event) => event.type === 'match_created');
+    expect((created?.payload.players as Array<{ name: string }>)[0].name).toBe('月城 ニケ');
+  });
+
   it('MockAIでDBへ一度だけイベントを保存して完走する', async () => {
     const manager = new MatchRunnerManager();
     const match = manager.create({ seed: 'integration', speed: 0, ai: 'mock' });

@@ -140,7 +140,7 @@ export class MatchRunner {
             : 'legacy';
       const nightZeroMode = this.existing.length === 0 || rules?.nightZero === 'uniform' ? 'uniform' : 'ai';
       const result = await runGame(this.matchId, match.seed, ai, hooks, {
-        includeDayOneDawn, claimsVersion, discussionVersion, nightZeroMode,
+        includeDayOneDawn, claimsVersion, discussionVersion, nightZeroMode, characters: match.config.characters,
       });
       this.repo.updateStatus(this.matchId, 'finished', result.winner);
     } catch (error) {
@@ -171,7 +171,8 @@ export class MatchRunnerManager {
     const now = new Date().toISOString();
     const record: MatchRecord = {
       id: randomUUID(), seed: input.seed?.trim() || randomBytes(8).toString('hex'), status: 'running', winner: null,
-      speed: input.speed ?? 1500, apiCalls: 0, error: null, config: { ai }, createdAt: now, updatedAt: now, finishedAt: null,
+      speed: input.speed ?? 1500, apiCalls: 0, error: null,
+      config: { ai, characters: this.repo.characterRoster() }, createdAt: now, updatedAt: now, finishedAt: null,
     };
     this.repo.createMatch(record);
     this.start(record.id);

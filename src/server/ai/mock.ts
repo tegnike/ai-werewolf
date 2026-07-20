@@ -1,4 +1,6 @@
-import { addressBookForSeat, addressTermFor, roleClaimSentenceForSeat } from '@/domain/agents';
+import {
+  characterAddressTerm, characterForSeat, characterRoleClaimSentence, DEFAULT_CHARACTER_ROSTER,
+} from '@/domain/characters';
 import type { DecisionContext, DecisionProvider, SeatId, SpeechDecision, SpeechIntentDecision, SpeechMotivation, TargetDecision } from '@/domain/types';
 import { stableIndex } from '@/engine/prng';
 
@@ -106,15 +108,19 @@ function suspicionLine(seat: SeatId, target: string): string {
 
 export class MockAI implements DecisionProvider {
   async speech(context: DecisionContext): Promise<SpeechDecision> {
+    const profile = characterForSeat(context.characters, context.actor.seat);
+    const defaultProfile = characterForSeat(DEFAULT_CHARACTER_ROSTER, context.actor.seat);
+    const customized = profile.name !== defaultProfile.name || profile.exampleLine !== defaultProfile.exampleLine || profile.firstPerson !== defaultProfile.firstPerson;
+    const address = (seat: SeatId) => characterAddressTerm(context.characters, context.actor.seat, seat);
     if (context.kind === 'speech' && context.claimDirective) {
       const directive = context.claimDirective;
       if (directive.mode !== 'forbidden' && directive.claimedRole) {
         const roleLabel = directive.claimedRole === 'seer' ? '占い師' : '霊媒師';
         const resultSpeech = directive.results.map((result) => {
           const verdict = result.verdict === '人狼' ? '人狼でした' : '人狼ではありませんでした';
-          return `${result.day}日目の${addressTermFor(context.actor.seat, result.targetSeat)}は${verdict}`;
+          return `${result.day}日目の${address(result.targetSeat)}は${verdict}`;
         }).join('。');
-        const roleClaim = roleClaimSentenceForSeat(context.actor.seat, roleLabel);
+        const roleClaim = characterRoleClaimSentence(context.characters, context.actor.seat, roleLabel);
         const speech = `${roleClaim}。${resultSpeech || '今は伝えられる結果はありません。'}`;
         const addressedTo = directive.counterTargetSeat && context.legalTargets.includes(directive.counterTargetSeat)
           ? directive.counterTargetSeat
@@ -130,13 +136,13 @@ export class MockAI implements DecisionProvider {
         };
       }
     }
-    const candidates = observations[context.actor.seat] ?? ['公開情報をもう一度確認します。'];
+    const candidates = customized ? [profile.exampleLine] : observations[context.actor.seat] ?? ['公開情報をもう一度確認します。'];
     const index = stableIndex(context.seed, context.callKey, candidates.length);
     const prefix = context.wolfChat?.mode === 'monologue'
       ? '……もう相談相手はいない。次の襲撃を自分で決めるなら、'
       : context.kind === 'wolf_speech' ? '襲撃方針として、' : '';
     const speech = `${prefix}${candidates[index]}`;
-    const addressedTo = Object.entries(addressBookForSeat(context.actor.seat))
+    const addressedTo = Object.entries(profile.addressBook)
       .find(([seat, term]) => context.legalTargets.includes(seat as SeatId) && speech.includes(term ?? ''))?.[0] as SeatId | undefined;
     const structureTarget = context.players.filter((player) => player.alive && player.seat !== context.actor.seat)[
       stableIndex(context.seed, `${context.callKey}-structure-target`, context.players.filter((player) => player.alive && player.seat !== context.actor.seat).length)
@@ -153,11 +159,11 @@ export class MockAI implements DecisionProvider {
     const finalSpeech = scarce
       ? scarceLines[context.actor.seat]
       : shouldDeclareVote
-      ? voteLine(context.actor.seat, addressTermFor(context.actor.seat, structureTarget!))
+      ? customized ? `${profile.firstPerson}は${address(structureTarget!)}へ投票します。` : voteLine(context.actor.seat, address(structureTarget!))
       : shouldAnalyzeBoard
         ? boardLine(context.actor.seat)
         : v3 && structureTarget
-          ? suspicionLine(context.actor.seat, addressTermFor(context.actor.seat, structureTarget))
+          ? customized ? `${profile.firstPerson}は${address(structureTarget)}が気になります。` : suspicionLine(context.actor.seat, address(structureTarget))
           : speech;
     const decision: SpeechDecision = {
       speech: finalSpeech.slice(0, 200),

@@ -1,7 +1,8 @@
 import { ROLE_LABEL } from '@/domain/constants';
 import type { DecisionContext } from '@/domain/types';
-import { addressGuideForSeat, agentNameForSeat, personaForSeat } from '@/domain/agents';
-import { roleBehaviorFor } from '@/domain/role-behaviors';
+import {
+  characterAddressGuide, characterForSeat, characterNameForSeat, characterRoleBehavior,
+} from '@/domain/characters';
 import { resultDisclosureGuidance } from './disclosure';
 
 const SUSPICION_BASIS_LABELS = {
@@ -17,7 +18,8 @@ const SUSPICION_BASIS_LABELS = {
 } as const;
 
 export function buildPrompts(context: DecisionContext): { systemPrompt: string; decisionPrompt: string } {
-  const persona = personaForSeat(context.actor.seat);
+  const persona = characterForSeat(context.characters, context.actor.seat);
+  const nameForSeat = (seat: Parameters<typeof characterNameForSeat>[1]) => characterNameForSeat(context.characters, seat);
   const isSpeech = context.kind === 'speech' || context.kind === 'wolf_speech';
   const isSpeechIntent = context.kind === 'speech_intent';
   const discussionV3 = context.discussion?.version === 'v3';
@@ -26,13 +28,13 @@ export function buildPrompts(context: DecisionContext): { systemPrompt: string; 
     ...(context.candidateEvidence ?? []).map((entry) => entry.targetSeat),
     ...context.legalTargets,
   ].filter((seat, index, seats) => context.legalTargets.includes(seat) && seats.indexOf(seat) === index).slice(0, 2);
-  const comparisonNames = comparisonSeats.map((seat) => agentNameForSeat(seat));
+  const comparisonNames = comparisonSeats.map((seat) => nameForSeat(seat));
   const disclosureGuidance = resultDisclosureGuidance(context);
   const promptedByName = context.discussion?.promptedBySeat
-    ? agentNameForSeat(context.discussion.promptedBySeat)
+    ? nameForSeat(context.discussion.promptedBySeat)
     : null;
   const waitingForFreeReplyNames = (context.discussion?.waitingForFreeReplySeats ?? [])
-    .map((seat) => agentNameForSeat(seat));
+    .map((seat) => nameForSeat(seat));
   const publicBlackClaims = (context.candidateEvidence ?? []).flatMap((entry) =>
     context.players.find((player) => player.seat === entry.targetSeat)?.alive === false
       ? []
@@ -45,22 +47,22 @@ export function buildPrompts(context: DecisionContext): { systemPrompt: string; 
       context.players.find((player) => player.seat === claim.targetSeat)?.role === 'werewolf')
     : undefined;
   const publicCommitmentNames = (context.discussion?.publicCommitments ?? []).map((entry) => ({
-    name: agentNameForSeat(entry.seat),
-    suspicionName: entry.suspicionTargetSeat ? agentNameForSeat(entry.suspicionTargetSeat) : null,
+    name: nameForSeat(entry.seat),
+    suspicionName: entry.suspicionTargetSeat ? nameForSeat(entry.suspicionTargetSeat) : null,
     suspicionBasis: entry.suspicionBasis,
-    voteIntentName: entry.voteIntentTargetSeat ? agentNameForSeat(entry.voteIntentTargetSeat) : null,
+    voteIntentName: entry.voteIntentTargetSeat ? nameForSeat(entry.voteIntentTargetSeat) : null,
     answeredTopics: entry.answeredTopics,
     defended: entry.defended,
     changedSuspicion: entry.changedSuspicion,
   }));
   const blackResultGuidance = discussionV3 && publicBlackClaims.length > 0 ? [
     `占い師を名乗る人物から「人狼」という結果を出された人がいます（${publicBlackClaims.map((claim) =>
-      `${agentNameForSeat(claim.claimantSeat)}→${agentNameForSeat(claim.targetSeat)}`).join('、')}）。これは公開された役職主張であり、対象の本当の役職が確定したわけではありません。同じ結果へ便乗するだけで対象を一日中追い詰めず、占い師候補の信用・対象本人の説明・他候補の公開材料を比較してください。`,
+      `${nameForSeat(claim.claimantSeat)}→${nameForSeat(claim.targetSeat)}`).join('、')}）。これは公開された役職主張であり、対象の本当の役職が確定したわけではありません。同じ結果へ便乗するだけで対象を一日中追い詰めず、占い師候補の信用・対象本人の説明・他候補の公開材料を比較してください。`,
     ...(blackenedSelf ? [
       'あなた自身が「人狼」という結果を出されています。受け身で同じ否定を繰り返さず、結果を出した占い師候補の不自然な点へ具体的に反論し、自分と比較すべき別候補を公開根拠つきで一人示してください。',
     ] : []),
     ...(blackenedWolfAlly ? [
-      `人狼仲間の${agentNameForSeat(blackenedWolfAlly.targetSeat)}が「人狼」という結果を出されています。仲間が処刑候補に固定されないよう、露骨に正体を知っている庇い方は避けながら、結果を出した占い師候補の信用を崩す、別候補を公開根拠つきで示す、処刑方針を組み替える、のいずれかを自分の発言の中心にしてください。仲間とだけ応酬せず、村全体の判断を別方向へ動かしてください。`,
+      `人狼仲間の${nameForSeat(blackenedWolfAlly.targetSeat)}が「人狼」という結果を出されています。仲間が処刑候補に固定されないよう、露骨に正体を知っている庇い方は避けながら、結果を出した占い師候補の信用を崩す、別候補を公開根拠つきで示す、処刑方針を組み替える、のいずれかを自分の発言の中心にしてください。仲間とだけ応酬せず、村全体の判断を別方向へ動かしてください。`,
     ] : []),
     ...(context.actor.role === 'madman' ? [
       `あなたは狂人ですが、人狼が誰かは知りません。この「人狼」という結果の真偽を知ったふりはせず、傍観や多数派への便乗もせず、${context.claimDirective?.mode !== 'forbidden' ? '認可された対抗の役職主張、' : ''}占い師候補への具体的な疑義、または別の処刑候補の提示によって、村の結論が一人へ固定されるのを積極的に崩してください。`,
@@ -133,7 +135,7 @@ export function buildPrompts(context: DecisionContext): { systemPrompt: string; 
             ? [`あなたが発言を希望した動機は ${context.discussion.motivation} です。最新の公開情報に合わなければ、無理に当初の話題へ固執せず調整してください。`]
             : []),
           ...(context.discussion.intendedTarget
-            ? [`発言希望時に話を向けようとした相手は${agentNameForSeat(context.discussion.intendedTarget)}です。現在も必要な場合だけ、その相手へ話してください。`]
+            ? [`発言希望時に話を向けようとした相手は${nameForSeat(context.discussion.intendedTarget)}です。現在も必要な場合だけ、その相手へ話してください。`]
             : []),
         ]
       : []);
@@ -167,7 +169,7 @@ export function buildPrompts(context: DecisionContext): { systemPrompt: string; 
     ] : []),
     ...(context.discussion?.remainingUnspokenSeats ? [
       `今日まだ一度も発言していない人は${context.discussion.remainingUnspokenSeats.length > 0
-        ? context.discussion.remainingUnspokenSeats.map(agentNameForSeat).join('、')
+        ? context.discussion.remainingUnspokenSeats.map(nameForSeat).join('、')
         : 'いません'}。この一覧にいない人を「未発言」「発言がない」「発言を聞けていない」と扱わないでください。内容が薄いと評価する場合は、実際の発言内容を指してください。`,
     ] : []),
     ...(context.discussion?.closedQuestionTopics?.length
@@ -178,15 +180,15 @@ export function buildPrompts(context: DecisionContext): { systemPrompt: string; 
       'あなた自身への投票予定が3人に達したため、これは投票前に保証された最後の反論枠です。直近までに向けられた疑いのうち重要なものへ具体的に答え、誤解があれば訂正し、自分を処刑しない場合に比較すべき候補と公開根拠を示してください。役職や同じ主張を繰り返すだけで終えないでください。',
     ] : []),
     ...(context.discussion?.consensusTarget ? [
-      `${agentNameForSeat(context.discussion.consensusTarget)}への投票予定はすでに3人以上から公表されています。この発言では、あなた自身がまだ宣言していなくても同じ相手への投票予定を本文で追加宣言せず、voteIntentにも設定しないでください。最終の非公開投票先は拘束されません。増えた公開情報、被疑者への質問、反証、または未検討の人物を話してください。`,
+      `${nameForSeat(context.discussion.consensusTarget)}への投票予定はすでに3人以上から公表されています。この発言では、あなた自身がまだ宣言していなくても同じ相手への投票予定を本文で追加宣言せず、voteIntentにも設定しないでください。最終の非公開投票先は拘束されません。増えた公開情報、被疑者への質問、反証、または未検討の人物を話してください。`,
     ] : [
       '同じ相手へ投票予定を重ねる場合は、先行者の人数ではなく、自分が重く見た公開情報と変更条件を述べてください。',
     ]),
     ...(context.discussion?.priorVoteIntentTarget
-      ? [`あなたはすでに${agentNameForSeat(context.discussion.priorVoteIntentTarget)}への投票予定を公表しています。変更しない予定を本文で繰り返さず、voteIntentにも再設定しないでください。`]
+      ? [`あなたはすでに${nameForSeat(context.discussion.priorVoteIntentTarget)}への投票予定を公表しています。変更しない予定を本文で繰り返さず、voteIntentにも再設定しないでください。`]
       : ['あなたは今日まだ投票予定を公表していません。今回初めて予定を示すなら、「変えない」「維持する」「このまま」のように過去から継続している言い方をせず、新しい予定として述べてください。']),
     ...(context.discussion?.saturatedPoint ? [
-      `${agentNameForSeat(context.discussion.saturatedPoint.targetSeat)}への「${SUSPICION_BASIS_LABELS[context.discussion.saturatedPoint.basis]}」という同じ種類の疑いは、すでに${context.discussion.saturatedPoint.speakers}人から公開されています。賛同するなら短く述べて構いませんが、同じ指摘を繰り返すだけでは公開材料は増えません。まだ検討されていない人物、2番手候補、本人の応答、別の公開根拠のいずれかとの比較を優先してください。同じ相手を新しい根拠で疑うことは妨げません。`,
+      `${nameForSeat(context.discussion.saturatedPoint.targetSeat)}への「${SUSPICION_BASIS_LABELS[context.discussion.saturatedPoint.basis]}」という同じ種類の疑いは、すでに${context.discussion.saturatedPoint.speakers}人から公開されています。賛同するなら短く述べて構いませんが、同じ指摘を繰り返すだけでは公開材料は増えません。まだ検討されていない人物、2番手候補、本人の応答、別の公開根拠のいずれかとの比較を優先してください。同じ相手を新しい根拠で疑うことは妨げません。`,
     ] : []),
     '一般的な9人人狼では、占い師候補が二人とも「人狼ではない」という結果だけを伝えている場合、直ちに占い師候補だけを処刑範囲にせず、役職を名乗っていない人から候補を探す進行も比較してください。「人狼」という結果があるなら、その結果を出された本人の反応と占い師候補を比較し、霊媒師候補が二人なら両方を順に処刑する進行を検討してください。盤面を見ず「役職候補からしかない」と決めつけないでください。',
     '別々の相手へ「人狼ではない」という結果を出した占い師候補同士は、結果が矛盾・対立・食い違っているわけではありません。結果の対立と言えるのは、同じ相手へ「人狼」と「人狼ではない」という反対の結果を出した場合です。対抗して同じ役職を名乗ったことと、結果そのものの矛盾を区別してください。',
@@ -201,7 +203,7 @@ export function buildPrompts(context: DecisionContext): { systemPrompt: string; 
   const systemPrompt = [
     'あなたは一般的な9人人狼へ参加している一人の人間として振る舞います。AIアシスタントのように話してはいけません。',
     `あなたは${context.actor.name}、役職は${ROLE_LABEL[context.actor.role]}です。`,
-    `この人格が${ROLE_LABEL[context.actor.role]}になったときの行動方針: ${roleBehaviorFor(context.actor.seat, context.actor.role)}`,
+    `この人格が${ROLE_LABEL[context.actor.role]}になったときの行動方針: ${characterRoleBehavior(context.characters, context.actor.seat, context.actor.role)}`,
     ...(context.claimDirective ? [
       '判断材料にしてよいのは、与えられた公開情報と自分だけの非公開情報だけです。',
       '自分が実際に知らない情報を判断の根拠にしてはいけません。ただし、下の役職主張の指示に従って役職を名乗り、認可された結果を伝えることは、このゲームで認められた戦術です。',
@@ -213,7 +215,7 @@ export function buildPrompts(context: DecisionContext): { systemPrompt: string; 
     ...(!isSpeechIntent ? [
       `一人称は「${persona.firstPerson}」です。自分自身を自分の名前や「さん」「ちゃん」などの敬称付きで呼ばないでください。`,
       `話し方: ${persona.speechStyle}`,
-      `他の参加者の呼び方: ${addressGuideForSeat(context.actor.seat)}`,
+      `他の参加者の呼び方: ${characterAddressGuide(context.characters, context.actor.seat)}`,
       `台詞の見本: 「${persona.exampleLine}」 見本の内容はコピーせず、息づかいと距離感だけを参考にしてください。`,
       `発言量: ${persona.lengthGuide}`,
       `演技の核: ${persona.performanceAnchor}`,
@@ -263,7 +265,7 @@ export function buildPrompts(context: DecisionContext): { systemPrompt: string; 
       `指定の一人称「${persona.firstPerson}」、文の長さ、敬体・常体、感情の出し方を崩さないでください。キャラクターらしさのために、存在しない発言・反応・投票・能力情報は作らないでください。`,
       ...(context.discussion?.remainingUnspokenSeats ? [
         `【台詞直前の事実確認】今日まだ一度も発言していない人は${context.discussion.remainingUnspokenSeats.length > 0
-          ? context.discussion.remainingUnspokenSeats.map(agentNameForSeat).join('、')
+          ? context.discussion.remainingUnspokenSeats.map(nameForSeat).join('、')
           : 'いません'}。この一覧以外の人を「まだ話していない」「発言を聞けていない」と絶対に言わないでください。`,
       ] : []),
     ] : []),

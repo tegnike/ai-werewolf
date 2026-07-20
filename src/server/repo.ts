@@ -1,6 +1,9 @@
 import type Database from 'better-sqlite3';
 import { MAX_API_CALLS } from '@/domain/constants';
 import type { MatchEvent, MatchRecord, MatchStatus, Winner } from '@/domain/types';
+import {
+  characterProfileSchema, cloneDefaultCharacterRoster, type CharacterProfile, type CharacterRoster,
+} from '@/domain/characters';
 import { getDatabase } from './db';
 
 interface MatchRow {
@@ -47,6 +50,36 @@ export class MatchRepo {
   getMatch(id: string): MatchRecord | null {
     const row = this.db.prepare('SELECT * FROM matches WHERE id = ?').get(id) as MatchRow | undefined;
     return row ? mapMatch(row) : null;
+  }
+
+  characterRoster(): CharacterRoster {
+    const roster = cloneDefaultCharacterRoster();
+    const rows = this.db.prepare('SELECT seat, config_json FROM character_presets').all() as Array<{ seat: string; config_json: string }>;
+    for (const row of rows) {
+      const parsed = characterProfileSchema.safeParse(JSON.parse(row.config_json));
+      if (!parsed.success) continue;
+      const index = roster.findIndex((profile) => profile.seat === parsed.data.seat);
+      if (index >= 0) roster[index] = parsed.data;
+    }
+    return roster;
+  }
+
+  saveCharacter(profile: CharacterProfile): CharacterProfile {
+    const parsed = characterProfileSchema.parse(profile);
+    const roster = this.characterRoster();
+    const duplicate = roster.some((item) => item.seat !== parsed.seat && item.name === parsed.name);
+    if (duplicate) throw new Error('CHARACTER_NAME_DUPLICATE');
+    this.db.prepare(`INSERT INTO character_presets(seat,config_json,updated_at) VALUES(?,?,?)
+      ON CONFLICT(seat) DO UPDATE SET config_json=excluded.config_json, updated_at=excluded.updated_at`)
+      .run(parsed.seat, JSON.stringify(parsed), new Date().toISOString());
+    return parsed;
+  }
+
+  resetCharacter(seat: string): CharacterProfile {
+    const profile = cloneDefaultCharacterRoster().find((item) => item.seat === seat);
+    if (!profile) throw new Error('CHARACTER_NOT_FOUND');
+    this.db.prepare('DELETE FROM character_presets WHERE seat=?').run(seat);
+    return profile;
   }
 
   updateStatus(id: string, status: MatchStatus, winner: Winner | null = null, error: MatchRecord['error'] = null): void {
