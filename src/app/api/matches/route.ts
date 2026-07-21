@@ -7,7 +7,8 @@ export const dynamic = 'force-dynamic';
 
 export async function GET() {
   const matches = getRunnerManager().repo.listMatches().map((match) => projectMatch(match, 'public'));
-  return NextResponse.json({ matches, aiProvider: process.env.AI_PROVIDER === 'real' ? 'real' : 'mock' });
+  const aiProvider = process.env.AI_PROVIDER === 'real' ? 'real' : 'mock';
+  return NextResponse.json({ matches, aiProvider });
 }
 
 export async function POST(request: Request) {
@@ -18,8 +19,16 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: { code: 'INVALID_SPEED', message: '速度が不正です。' } }, { status: 400 });
     }
     const ai = process.env.AI_PROVIDER === 'real' ? 'real' : 'mock';
-    const match = getRunnerManager().create({ seed: body.seed, speed: body.speed, ai });
-    return NextResponse.json({ id: match.id, seed: match.seed, ai }, { status: 201 });
+    const match = getRunnerManager().create({
+      seed: body.seed,
+      speed: body.speed,
+      ai,
+    });
+    return NextResponse.json({
+      id: match.id,
+      seed: match.seed,
+      ai,
+    }, { status: 201 });
   } catch (error) {
     const code = error instanceof Error ? error.message : 'CREATE_FAILED';
     const realAiUnavailable = code === 'REAL_AI_NOT_ALLOWED' || code === 'REAL_AI_NOT_CONFIGURED';

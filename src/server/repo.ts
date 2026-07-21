@@ -1,8 +1,9 @@
 import type Database from 'better-sqlite3';
-import { MAX_API_CALLS } from '@/domain/constants';
-import type { MatchEvent, MatchRecord, MatchStatus, Winner } from '@/domain/types';
+import { MAX_API_CALLS, SEATS } from '@/domain/constants';
+import type { MatchEvent, MatchRecord, MatchStatus, SeatId, Winner } from '@/domain/types';
 import {
-  characterProfileSchema, cloneDefaultCharacterRoster, type CharacterProfile, type CharacterRoster,
+  characterProfileSchema, cloneDefaultCharacterRoster, withoutReplacedCharacterDefaultAddresses,
+  type CharacterProfile, type CharacterRoster,
 } from '@/domain/characters';
 import { getDatabase } from './db';
 
@@ -20,10 +21,17 @@ export interface AiCallRecord {
 }
 
 function mapMatch(row: MatchRow): MatchRecord {
+  const config = JSON.parse(row.config_json) as MatchRecord['config'];
+  if (Array.isArray(config.characters)) {
+    const normalized = config.characters.map((character) => characterProfileSchema.safeParse(character));
+    if (normalized.every((result) => result.success)) {
+      config.characters = normalized.map((result) => result.data);
+    }
+  }
   return {
     id: row.id, seed: row.seed, status: row.status, winner: row.winner, speed: row.speed,
     apiCalls: row.api_calls, error: row.error_json ? JSON.parse(row.error_json) : null,
-    config: JSON.parse(row.config_json), createdAt: row.created_at, updatedAt: row.updated_at, finishedAt: row.finished_at,
+    config, createdAt: row.created_at, updatedAt: row.updated_at, finishedAt: row.finished_at,
   };
 }
 function mapEvent(row: EventRow): MatchEvent {
@@ -61,7 +69,13 @@ export class MatchRepo {
       const index = roster.findIndex((profile) => profile.seat === parsed.data.seat);
       if (index >= 0) roster[index] = parsed.data;
     }
-    return roster;
+    return withoutReplacedCharacterDefaultAddresses(roster);
+  }
+
+  customizedCharacterSeats(): SeatId[] {
+    return (this.db.prepare('SELECT seat FROM character_presets ORDER BY seat').all() as Array<{ seat: string }>)
+      .map((row) => row.seat)
+      .filter((seat): seat is SeatId => SEATS.includes(seat as SeatId));
   }
 
   saveCharacter(profile: CharacterProfile): CharacterProfile {
@@ -127,7 +141,7 @@ export class MatchRepo {
       this.db.prepare('UPDATE matches SET api_calls=api_calls+1, updated_at=? WHERE id=?').run(now, matchId);
       this.db.prepare(`INSERT INTO ai_calls(match_id,call_key,request_hash,status,response_json,attempts,request_id,created_at,updated_at)
         VALUES(?,?,?,'in_flight',NULL,1,NULL,?,?)
-        ON CONFLICT(match_id,call_key) DO UPDATE SET status='in_flight', attempts=attempts+1, updated_at=excluded.updated_at`)
+        ON CONFLICT(match_id,call_key) DO UPDATE SET request_hash=excluded.request_hash, status='in_flight', attempts=attempts+1, updated_at=excluded.updated_at`)
         .run(matchId, callKey, requestHash, now, now);
       return match.apiCalls + 1;
     })();

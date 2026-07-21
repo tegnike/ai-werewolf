@@ -1,11 +1,18 @@
 import OpenAI from 'openai';
+import type { GoogleGenAI } from '@google/genai';
 import { zodTextFormat } from 'openai/helpers/zod';
 import { createHash } from 'node:crypto';
-import { MODEL } from '@/domain/constants';
+import { z } from 'zod';
 import { ClaimContractError } from '@/domain/claims';
-import type { DecisionContext, DecisionProvider, SpeechDecision, SpeechIntentDecision, TargetDecision } from '@/domain/types';
+import type {
+  DecisionContext, DecisionProvider, GeminiThinkingBudget, LlmProvider, OpenAiReasoningEffort,
+  SpeechDecision, SpeechIntentDecision, TargetDecision,
+} from '@/domain/types';
 import type { MatchRepo } from '@/server/repo';
 import { buildPrompts } from './prompts';
+import {
+  apiKeyForProvider, DEFAULT_GEMINI_THINKING_BUDGET, DEFAULT_OPENAI_REASONING_EFFORT, modelForProvider,
+} from './provider';
 import { speechDecisionSchema, speechIntentDecisionSchema, targetDecisionSchema } from './schemas';
 import { validateSpeechDisclosure } from './disclosure';
 import { logger } from '../log';
@@ -21,6 +28,14 @@ const retryableStatus = new Set([408, 409, 429, 500, 502, 503, 504]);
 const delays = [1_000, 2_000];
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 export const MAX_AI_ATTEMPTS = 3;
+
+export function openAiReasoningConfig(effort: OpenAiReasoningEffort): { effort: OpenAiReasoningEffort } {
+  return { effort };
+}
+
+export function geminiThinkingConfig(thinkingBudget: GeminiThinkingBudget): { thinkingBudget: GeminiThinkingBudget } {
+  return { thinkingBudget };
+}
 
 export type AIRetryClass = 'contract' | 'structured_output' | 'transport' | 'non_retryable';
 
@@ -73,11 +88,25 @@ function parsedOutput<T>(response: OpenAI.Responses.Response): T {
 }
 
 export class RealAI implements DecisionProvider {
-  private readonly client: OpenAI;
-  constructor(private readonly repo: MatchRepo) {
+  private readonly openai: OpenAI | null;
+  private gemini: GoogleGenAI | null;
+  private readonly apiKey: string;
+  readonly model: string;
+
+  constructor(
+    private readonly repo: MatchRepo,
+    readonly provider: LlmProvider = 'openai',
+    model?: string,
+    private readonly openaiReasoningEffort: OpenAiReasoningEffort = DEFAULT_OPENAI_REASONING_EFFORT,
+    private readonly geminiThinkingBudget: GeminiThinkingBudget = DEFAULT_GEMINI_THINKING_BUDGET,
+  ) {
     if (process.env.ALLOW_REAL_AI !== '1') throw new Error('Real AI requires ALLOW_REAL_AI=1');
-    if (!process.env.OPENAI_API_KEY) throw new Error('OPENAI_API_KEY is required');
-    this.client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY, maxRetries: 0, timeout: 60_000 });
+    const apiKey = apiKeyForProvider(provider);
+    if (!apiKey) throw new Error(`${provider === 'gemini' ? 'GEMINI' : 'OPENAI'}_API_KEY is required`);
+    this.apiKey = apiKey;
+    this.model = model?.trim() || modelForProvider(provider);
+    this.openai = provider === 'openai' ? new OpenAI({ apiKey, maxRetries: 0, timeout: 60_000 }) : null;
+    this.gemini = null;
   }
 
   speech(context: DecisionContext): Promise<SpeechDecision> {
@@ -102,7 +131,44 @@ export class RealAI implements DecisionProvider {
     return this.request(context, targetDecisionSchema(context.legalTargets), 'target_decision');
   }
 
-  private async request<T>(context: DecisionContext, schema: Parameters<typeof zodTextFormat>[0], schemaName: string, validate?: (decision: T) => void): Promise<T> {
+  private async generate<T>(
+    systemPrompt: string,
+    decisionPrompt: string,
+    schema: z.ZodType<T>,
+    schemaName: string,
+  ): Promise<{ parsed: T; requestId: string | null }> {
+    if (this.provider === 'gemini') {
+      if (!this.gemini) {
+        const { GoogleGenAI } = await import('@google/genai');
+        this.gemini = new GoogleGenAI({
+          apiKey: this.apiKey,
+          httpOptions: { timeout: 60_000, retryOptions: { attempts: 1 } },
+        });
+      }
+      const response = await this.gemini.models.generateContent({
+        model: this.model,
+        contents: decisionPrompt,
+        config: {
+          systemInstruction: systemPrompt,
+          thinkingConfig: geminiThinkingConfig(this.geminiThinkingBudget),
+          responseMimeType: 'application/json',
+          responseJsonSchema: z.toJSONSchema(schema),
+        },
+      });
+      if (!response.text) throw new Error('Structured output was not parsed');
+      return { parsed: schema.parse(JSON.parse(response.text)), requestId: response.responseId ?? null };
+    }
+    if (!this.openai) throw new Error('OpenAI client is not configured');
+    const response = await this.openai.responses.parse({
+      model: this.model,
+      reasoning: openAiReasoningConfig(this.openaiReasoningEffort),
+      input: [{ role: 'system', content: systemPrompt }, { role: 'user', content: decisionPrompt }],
+      text: { format: zodTextFormat(schema, schemaName) },
+    });
+    return { parsed: parsedOutput<T>(response), requestId: response.id };
+  }
+
+  private async request<T>(context: DecisionContext, schema: z.ZodType<T>, schemaName: string, validate?: (decision: T) => void): Promise<T> {
     const cached = this.repo.getAiCall(context.matchId, context.callKey);
     if (cached?.status === 'ok') return cached.response as T;
     if (cached?.status === 'in_flight') throw new AmbiguousAICallError('前回のAPI呼び出し結果が不明です。明示的な再試行が必要です。');
@@ -115,7 +181,9 @@ export class RealAI implements DecisionProvider {
       const currentDecisionPrompt = repairInstruction
         ? `${decisionPrompt}\n修正指示: ${repairInstruction}`
         : decisionPrompt;
-      const requestHash = createHash('sha256').update(`${MODEL}\n${systemPrompt}\n${currentDecisionPrompt}`).digest('hex');
+      const requestHash = createHash('sha256')
+        .update(`${this.provider}\n${this.model}\n${this.openaiReasoningEffort}\n${this.geminiThinkingBudget}\n${systemPrompt}\n${currentDecisionPrompt}`)
+        .digest('hex');
       try {
         this.repo.beginAiAttempt(context.matchId, context.callKey, requestHash);
       } catch (error) {
@@ -124,14 +192,9 @@ export class RealAI implements DecisionProvider {
       }
       let requestId: string | null = null;
       try {
-        const response = await this.client.responses.parse({
-          model: MODEL,
-          reasoning: { effort: 'low' },
-          input: [{ role: 'system', content: systemPrompt }, { role: 'user', content: currentDecisionPrompt }],
-          text: { format: zodTextFormat(schema, schemaName) },
-        });
-        requestId = response.id;
-        const parsed = parsedOutput<T>(response);
+        const generated = await this.generate(systemPrompt, currentDecisionPrompt, schema, schemaName);
+        requestId = generated.requestId;
+        const parsed = generated.parsed;
         validate?.(parsed);
         this.repo.completeAiCall(context.matchId, context.callKey, parsed, requestId);
         return parsed;

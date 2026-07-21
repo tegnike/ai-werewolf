@@ -2,8 +2,12 @@ import { randomUUID } from 'node:crypto';
 import { claimLedgerFromEvents } from '../src/domain/claims';
 import type { MatchEvent, MatchRecord, SeatId, SpeechStructure } from '../src/domain/types';
 import { discussionMaterialPhase, emptyDiscussionBoard, foldDiscussionBoard } from '../src/engine/discussion-board';
+import { assignCharacterSeats } from '../src/engine/character-seating';
 import { MatchRepo } from '../src/server/repo';
 import { MatchRunnerManager } from '../src/server/runner';
+import {
+  configuredLlmProvider, DEFAULT_GEMINI_THINKING_BUDGET, DEFAULT_OPENAI_REASONING_EFFORT, hasApiKey, modelForProvider,
+} from '../src/server/ai/provider';
 
 function arg(name: string, fallback: string): string {
   const index = process.argv.indexOf(name);
@@ -15,6 +19,12 @@ async function main() {
   const ai = arg('--ai', 'mock') as 'mock' | 'real';
   const seedBase = Number(arg('--seed-base', '1000'));
   if (ai === 'real' && process.env.ALLOW_REAL_AI !== '1') throw new Error('Real AI requires --ai real and ALLOW_REAL_AI=1');
+  const llmProvider = configuredLlmProvider();
+  if (ai === 'real' && !hasApiKey(llmProvider)) {
+    throw new Error(`Real AI requires ${llmProvider === 'gemini' ? 'GEMINI_API_KEY' : 'OPENAI_API_KEY'}`);
+  }
+  const llmModel = modelForProvider(llmProvider);
+  const ttsProvider = process.env.TTS_PROVIDER === 'aivisspeech' ? 'aivisspeech' : 'voicevox';
   const repo = new MatchRepo();
   const manager = new MatchRunnerManager(repo);
   const claimMetrics = {
@@ -44,7 +54,15 @@ async function main() {
     const now = new Date().toISOString();
     const record: MatchRecord = {
       id: randomUUID(), seed: String(seedBase + index), status: 'running', winner: null, speed: 0, apiCalls: 0,
-      error: null, config: { ai }, createdAt: now, updatedAt: now, finishedAt: null,
+      error: null,
+      config: {
+        ai, llmProvider, llmModel,
+        openaiReasoningEffort: DEFAULT_OPENAI_REASONING_EFFORT,
+        geminiThinkingBudget: DEFAULT_GEMINI_THINKING_BUDGET,
+        ttsProvider,
+        characters: assignCharacterSeats(repo.characterRoster(), String(seedBase + index)),
+      },
+      createdAt: now, updatedAt: now, finishedAt: null,
     };
     repo.createMatch(record);
     manager.start(record.id);

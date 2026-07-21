@@ -30,13 +30,14 @@ function loadRuntimeEnvironment() {
 
 const environmentSource = loadRuntimeEnvironment();
 const provider = process.env.AI_PROVIDER === 'real' ? 'real' : 'mock';
+const hasAnyApiKey = Boolean(process.env.OPENAI_API_KEY || process.env.GEMINI_API_KEY);
 
-if (provider === 'real' && (process.env.ALLOW_REAL_AI !== '1' || !process.env.OPENAI_API_KEY)) {
-  console.error('[dev] Real AI configuration is incomplete: ALLOW_REAL_AI=1 and OPENAI_API_KEY are required.');
+if (provider === 'real' && (process.env.ALLOW_REAL_AI !== '1' || !hasAnyApiKey)) {
+  console.error('[dev] Real AI configuration is incomplete: ALLOW_REAL_AI=1 and at least one of OPENAI_API_KEY / GEMINI_API_KEY are required.');
   process.exit(1);
 }
 
-console.log(`[dev] AI provider: ${provider} (${environmentSource})`);
+console.log(`[dev] AI provider: ${provider}${provider === 'real' ? ' / per-character LLM' : ''} (${environmentSource})`);
 
 const nextBin = resolve(projectRoot, 'node_modules/next/dist/bin/next');
 const child = spawn(process.execPath, [nextBin, 'dev', ...process.argv.slice(2)], {

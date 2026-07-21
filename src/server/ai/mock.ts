@@ -109,8 +109,12 @@ function suspicionLine(seat: SeatId, target: string): string {
 export class MockAI implements DecisionProvider {
   async speech(context: DecisionContext): Promise<SpeechDecision> {
     const profile = characterForSeat(context.characters, context.actor.seat);
-    const defaultProfile = characterForSeat(DEFAULT_CHARACTER_ROSTER, context.actor.seat);
-    const customized = profile.name !== defaultProfile.name || profile.exampleLine !== defaultProfile.exampleLine || profile.firstPerson !== defaultProfile.firstPerson;
+    const defaultProfile = DEFAULT_CHARACTER_ROSTER.find((candidate) => candidate.name === profile.name);
+    const customized = !defaultProfile || profile.exampleLine !== defaultProfile.exampleLine || profile.firstPerson !== defaultProfile.firstPerson;
+    const rosterCustomized = Boolean(context.characters?.some(
+      (character) => !DEFAULT_CHARACTER_ROSTER.some((candidate) => candidate.name === character.name),
+    ));
+    const personaSeat = defaultProfile?.seat ?? context.actor.seat;
     const address = (seat: SeatId) => characterAddressTerm(context.characters, context.actor.seat, seat);
     if (context.kind === 'speech' && context.claimDirective) {
       const directive = context.claimDirective;
@@ -136,7 +140,11 @@ export class MockAI implements DecisionProvider {
         };
       }
     }
-    const candidates = customized ? [profile.exampleLine] : observations[context.actor.seat] ?? ['公開情報をもう一度確認します。'];
+    const candidates = customized
+      ? [profile.exampleLine]
+      : rosterCustomized
+        ? [`${profile.firstPerson}は、公開された発言と投票を見て判断します。気になる点は本人に確認します。`]
+        : observations[personaSeat] ?? ['公開情報をもう一度確認します。'];
     const index = stableIndex(context.seed, context.callKey, candidates.length);
     const prefix = context.wolfChat?.mode === 'monologue'
       ? '……もう相談相手はいない。次の襲撃を自分で決めるなら、'
@@ -157,13 +165,13 @@ export class MockAI implements DecisionProvider {
       stableIndex(context.seed, `${context.callKey}-suspicion-basis`, mockSuspicionBases.length)
     ];
     const finalSpeech = scarce
-      ? scarceLines[context.actor.seat]
+      ? scarceLines[personaSeat]
       : shouldDeclareVote
-      ? customized ? `${profile.firstPerson}は${address(structureTarget!)}へ投票します。` : voteLine(context.actor.seat, address(structureTarget!))
+      ? customized ? `${profile.firstPerson}は${address(structureTarget!)}へ投票します。` : voteLine(personaSeat, address(structureTarget!))
       : shouldAnalyzeBoard
-        ? boardLine(context.actor.seat)
+        ? boardLine(personaSeat)
         : v3 && structureTarget
-          ? customized ? `${profile.firstPerson}は${address(structureTarget)}が気になります。` : suspicionLine(context.actor.seat, address(structureTarget))
+          ? customized ? `${profile.firstPerson}は${address(structureTarget)}が気になります。` : suspicionLine(personaSeat, address(structureTarget))
           : speech;
     const decision: SpeechDecision = {
       speech: finalSpeech.slice(0, 200),

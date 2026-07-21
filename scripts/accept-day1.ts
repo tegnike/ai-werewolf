@@ -1,7 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
-import { MODEL } from '../src/domain/constants';
 import { claimLedgerFromEvents } from '../src/domain/claims';
 import type { MatchEvent, MatchRecord, SeatId, SpeechStructure } from '../src/domain/types';
 import { decideClaimPolicies } from '../src/engine/claim-policy';
@@ -10,6 +9,9 @@ import { setupPlayers } from '../src/engine/setup';
 import { closeDatabaseForTests } from '../src/server/db';
 import { MatchRepo } from '../src/server/repo';
 import { MatchRunnerManager } from '../src/server/runner';
+import {
+  configuredLlmProvider, DEFAULT_GEMINI_THINKING_BUDGET, DEFAULT_OPENAI_REASONING_EFFORT, hasApiKey, modelForProvider,
+} from '../src/server/ai/provider';
 import { projectEvents } from '../src/server/view';
 
 interface SeedCase { seed: string; scenario: string }
@@ -45,7 +47,8 @@ function loadRuntimeEnvironment(projectRoot: string): string {
 function requireRealAI(): void {
   if (arg('--ai') !== 'real') throw new Error('Day-one replay requires the explicit --ai real flag');
   if (process.env.ALLOW_REAL_AI !== '1') throw new Error('Day-one replay requires ALLOW_REAL_AI=1');
-  if (!process.env.OPENAI_API_KEY) throw new Error('Day-one replay requires OPENAI_API_KEY');
+  const provider = configuredLlmProvider();
+  if (!hasApiKey(provider)) throw new Error(`Day-one replay requires ${provider === 'gemini' ? 'GEMINI_API_KEY' : 'OPENAI_API_KEY'}`);
 }
 
 function defaultSeedCases(): SeedCase[] {
@@ -150,7 +153,7 @@ async function runCase(
   runnerError: MatchRecord['error'];
   events: ReturnType<typeof resultEvents>;
 }> {
-  const match = manager.create({ seed: seedCase.seed, speed: 1500, ai: 'real' });
+  const match = manager.create({ seed: seedCase.seed, speed: 1500, ai: 'real', llmProvider: configuredLlmProvider() });
   let reachedDayOneExecution = false;
   let runnerError: MatchRecord['error'] = null;
   let abortRequested = false;
@@ -211,7 +214,9 @@ async function main(): Promise<void> {
     artifactType: 'day-one-replay-result',
     generatedAt: generatedAt.toISOString(),
     runtime: {
-      ai: 'real', model: MODEL, reasoningEffort: 'low', environmentSource,
+      ai: 'real', llmProvider: configuredLlmProvider(), model: modelForProvider(configuredLlmProvider()), environmentSource,
+      openaiReasoningEffort: DEFAULT_OPENAI_REASONING_EFFORT,
+      geminiThinkingBudget: DEFAULT_GEMINI_THINKING_BUDGET,
       discussionVersion: 'v3', claimsVersion: 'v2', stopAfter: 'day-one execution',
       nightZeroMode: 'uniform',
     },

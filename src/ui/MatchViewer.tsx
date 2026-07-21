@@ -39,7 +39,8 @@ function viewCharacter(seat: `seat-${1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9}`, charac
   const voice = voiceForSeat(seat);
   return {
     seat, name: persona.name, title: persona.title, portraitSrc: agentPortraitSrc(index),
-    voice: voice ?? { seat, speakerId: 0, speakerName: '未設定', styleName: '未設定', presentation: 'androgynous' },
+    llm: { provider: 'openai', reasoningEffort: 'low' },
+    tts: { provider: 'voicevox', voice: voice ?? { seat, speakerId: 0, speakerName: '未設定', styleName: '未設定', presentation: 'androgynous' } },
   };
 }
 function voteEntries(event?: UiEvent): VoteEntry[] {
@@ -230,7 +231,7 @@ export function MatchViewer({ matchId, mode }: { matchId: string; mode: 'live' |
   const featuredSeatNumber = seatNumber(featuredSpeech?.payload.seat);
   const featuredSeat = featuredSeatNumber ? `seat-${featuredSeatNumber}` as `seat-${1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9}` : null;
   const featuredPersona = featuredSeat ? viewCharacter(featuredSeat, characters) : null;
-  const featuredVoice = featuredPersona?.voice ?? null;
+  const featuredVoice = featuredPersona?.tts.voice ?? null;
   const featuredIsSpeaking = Boolean(featuredSpeech && speakingSeq === featuredSpeech.seq && !presentationPaused);
   const featuredIsPaused = Boolean(featuredSpeech && speakingSeq === featuredSpeech.seq && presentationPaused);
   const focusPanel = focusPanelKind(featuredSpeech, Boolean(latestVote), day, phase);
@@ -282,7 +283,7 @@ export function MatchViewer({ matchId, mode }: { matchId: string; mode: 'live' |
             {Array.from({ length: 9 }, (_, index) => {
               const number = index + 1; const seat = `seat-${number}`; const deathRecord = deathRecords.get(seat); const dead = Boolean(deathRecord); const role = roleMap.get(seat);
               const persona = viewCharacter(seat as `seat-${1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9}`, characters);
-              const voice = persona.voice;
+              const voice = persona.tts.voice;
               const votedFor = latestVoteByVoter.get(seat);
               const isSpeaking = speakingSeat === seat && !presentationPaused;
               return <article className={`agent-card ${dead ? 'dead' : ''} ${isSpeaking ? 'speaking' : ''}`} key={seat}>

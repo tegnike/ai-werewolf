@@ -2,9 +2,11 @@
 
 import Image from 'next/image';
 import Link from 'next/link';
-import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from 'react';
-import type { CharacterProfile } from '@/domain/characters';
-import type { Role, SeatId } from '@/domain/types';
+import { ChangeEvent, DragEvent as ReactDragEvent, FormEvent, useEffect, useMemo, useRef, useState } from 'react';
+import type { CharacterAddressStyle, CharacterProfile } from '@/domain/characters';
+import { formatCharacterPresetErrors, parseCharacterPresetJson } from '@/domain/character-preset-validation';
+import { GEMINI_THINKING_BUDGET_PRESETS, OPENAI_REASONING_EFFORTS } from '@/domain/types';
+import type { GeminiThinkingBudget, LlmProvider, OpenAiReasoningEffort, Role, SeatId, TtsProvider } from '@/domain/types';
 
 const roles: Array<{ key: Role; label: string }> = [
   { key: 'villager', label: '村人' },
@@ -15,25 +17,40 @@ const roles: Array<{ key: Role; label: string }> = [
   { key: 'madman', label: '狂人' },
 ];
 
+const addressStyles: Array<{ value: CharacterAddressStyle; label: string }> = [
+  { value: 'full_name_san', label: '表示名＋さん（例: 天満 ひなたさん）' },
+  { value: 'family_name_san', label: '名字＋さん（例: 天満さん）' },
+  { value: 'given_name_san', label: '下の名前＋さん（例: ひなたさん）' },
+  { value: 'full_name', label: '表示名をそのまま（例: 天満 ひなた）' },
+  { value: 'family_name', label: '名字を呼び捨て（例: 天満）' },
+  { value: 'given_name', label: '下の名前を呼び捨て（例: ひなた）' },
+  { value: 'given_name_chan', label: '下の名前＋ちゃん（例: ひなたちゃん）' },
+  { value: 'given_name_kun', label: '下の名前＋くん（例: ひなたくん）' },
+];
+
 const clone = <T,>(value: T): T => structuredClone(value);
 
 export function CharacterEditor() {
   const [characters, setCharacters] = useState<CharacterProfile[]>([]);
+  const [llmModels, setLlmModels] = useState<Record<LlmProvider, string>>({ openai: 'gpt-5.6-luna', gemini: 'gemini-2.5-pro' });
   const [selectedSeat, setSelectedSeat] = useState<SeatId>('seat-1');
   const [draft, setDraft] = useState<CharacterProfile | null>(null);
   const [saved, setSaved] = useState<CharacterProfile | null>(null);
   const [status, setStatus] = useState('');
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
+  const [portraitDragActive, setPortraitDragActive] = useState(false);
+  const [presetDragActive, setPresetDragActive] = useState(false);
   const importRef = useRef<HTMLInputElement>(null);
   const dirty = useMemo(() => Boolean(draft && saved && JSON.stringify(draft) !== JSON.stringify(saved)), [draft, saved]);
 
   useEffect(() => {
     void fetch('/api/characters', { cache: 'no-store' })
       .then(async (response) => {
-        const data = await response.json() as { characters?: CharacterProfile[]; error?: { message?: string } };
+        const data = await response.json() as { characters?: CharacterProfile[]; customizedSeats?: SeatId[]; llmModels?: Record<LlmProvider, string>; error?: { message?: string } };
         if (!response.ok || !data.characters) throw new Error(data.error?.message ?? '読み込めませんでした。');
         setCharacters(data.characters);
+        if (data.llmModels) setLlmModels(data.llmModels);
         const first = data.characters[0];
         if (first) { setSelectedSeat(first.seat); setDraft(clone(first)); setSaved(clone(first)); }
       })
@@ -86,34 +103,85 @@ export function CharacterEditor() {
     } finally { setSaving(false); }
   };
 
+  const applyPortraitFile = (file: File) => {
+    if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type)) { setError('PNG・JPEG・WebP画像を選んでください。'); return; }
+    if (file.size > 2 * 1024 * 1024) { setError('立ち絵は2MB以下にしてください。'); return; }
+    setError('');
+    const reader = new FileReader();
+    reader.onload = () => { if (typeof reader.result === 'string') update('portraitSrc', reader.result); };
+    reader.onerror = () => setError('立ち絵を読み込めませんでした。');
+    reader.readAsDataURL(file);
+  };
+
   const loadPortrait = (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     event.target.value = '';
-    if (!file) return;
-    if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type)) { setError('PNG・JPEG・WebP画像を選んでください。'); return; }
-    if (file.size > 2 * 1024 * 1024) { setError('立ち絵は2MB以下にしてください。'); return; }
-    const reader = new FileReader();
-    reader.onload = () => { if (typeof reader.result === 'string') update('portraitSrc', reader.result); };
-    reader.readAsDataURL(file);
+    if (file) applyPortraitFile(file);
+  };
+
+  const dropPortrait = (event: ReactDragEvent<HTMLElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setPortraitDragActive(false);
+    const file = event.dataTransfer.files[0];
+    if (file) applyPortraitFile(file);
   };
 
   const exportPreset = () => {
     if (!draft) return;
-    const url = URL.createObjectURL(new Blob([JSON.stringify(draft, null, 2)], { type: 'application/json' }));
+    const portable = {
+      ...draft,
+      seat: '',
+      addressBook: {},
+      tts: { ...draft.tts, voice: { ...draft.tts.voice, seat: '' } },
+    };
+    const url = URL.createObjectURL(new Blob([JSON.stringify(portable, null, 2)], { type: 'application/json' }));
     const anchor = document.createElement('a');
     anchor.href = url; anchor.download = `${draft.name.replaceAll(/\s+/g, '-')}.character.json`; anchor.click();
     URL.revokeObjectURL(url);
   };
 
+  const applyPresetFile = (file: File) => {
+    if (!draft) return;
+    if (file.type !== 'application/json' && !file.name.toLowerCase().endsWith('.json')) {
+      setStatus('');
+      setError('JSONファイルを選んでください。');
+      return;
+    }
+    void file.text().then((text) => {
+      const targetSeat = draft.seat;
+      const result = parseCharacterPresetJson(text, { targetSeat, existingCharacters: characters });
+      if (!result.success) {
+        setStatus('');
+        setError(`JSONプリセットに${result.errors.length}件の問題があります。\n${formatCharacterPresetErrors(result.errors)}`);
+        return;
+      }
+      const targetSaved = characters.find((character) => character.seat === targetSeat);
+      if (!targetSaved) throw new Error('取り込み先の保存枠が見つかりません。');
+      setSaved(clone(targetSaved));
+      setDraft(result.character);
+      setStatus(result.seatWasUnassigned
+        ? `席未指定のプリセットを選択中のSLOT ${targetSeat.split('-')[1]}へ取り込みました。試合での席は開始時に決まります。内容を確認して保存してください。`
+        : 'プリセットを読み込みました。内容を確認して保存してください。');
+      setError('');
+    }).catch((cause) => {
+      setStatus('');
+      setError(`JSONプリセットを読み込めませんでした: ${cause instanceof Error ? cause.message : '不明なエラー'}`);
+    });
+  };
+
   const importPreset = (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     event.target.value = '';
-    if (!file || !draft) return;
-    void file.text().then((text) => {
-      const imported = JSON.parse(text) as CharacterProfile;
-      setDraft({ ...imported, seat: draft.seat, voice: { ...imported.voice, seat: draft.seat } });
-      setStatus('プリセットを読み込みました。内容を確認して保存してください。'); setError('');
-    }).catch(() => setError('JSONプリセットを読み込めませんでした。'));
+    if (file) applyPresetFile(file);
+  };
+
+  const dropPreset = (event: ReactDragEvent<HTMLElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setPresetDragActive(false);
+    const file = event.dataTransfer.files[0];
+    if (file) applyPresetFile(file);
   };
 
   if (!draft) return <main className="character-editor-loading">{error || 'キャラクター設定を読み込み中…'}</main>;
@@ -121,7 +189,7 @@ export function CharacterEditor() {
   return (
     <main className="character-editor-shell">
       <header className="character-editor-header">
-        <div><Link href="/" className="mini-logo"><span>AI</span>人狼</Link><span className="section-kicker">CHARACTER STUDIO</span><h1>キャラクター編集</h1><p>ここでの変更は次の新規試合から反映され、過去の試合とリプレイは変わりません。</p></div>
+        <div><Link href="/" className="mini-logo"><span>AI</span>人狼</Link><span className="section-kicker">CHARACTER STUDIO</span><h1>キャラクター編集</h1><p>SLOTは編集用の保存枠です。実際の席は試合開始時に決まり、過去の試合とリプレイは変わりません。</p></div>
         <Link href="/" className="editor-back">× 閉じる</Link>
       </header>
 
@@ -129,14 +197,20 @@ export function CharacterEditor() {
         <nav className="character-roster" aria-label="編集するキャラクター">
           {characters.map((character, index) => <button className={character.seat === selectedSeat ? 'active' : ''} key={character.seat} onClick={() => choose(character.seat)}>
             <Image src={character.portraitSrc} width={52} height={52} alt="" unoptimized={character.portraitSrc.startsWith('data:')} />
-            <span><small>SEAT {String(index + 1).padStart(2, '0')}</small><strong>{character.name}</strong><em>{character.title}</em></span>
+            <span><small>SLOT {String(index + 1).padStart(2, '0')}</small><strong>{character.name}</strong><em>{character.title}</em></span>
           </button>)}
         </nav>
 
         <form className="character-form" onSubmit={save}>
-          <section className="character-preview">
+          <section
+            className={`character-preview portrait-drop-zone${portraitDragActive ? ' drag-active' : ''}`}
+            onDragEnter={(event) => { event.preventDefault(); setPortraitDragActive(true); }}
+            onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = 'copy'; setPortraitDragActive(true); }}
+            onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setPortraitDragActive(false); }}
+            onDrop={dropPortrait}
+          >
             <Image src={draft.portraitSrc} width={220} height={220} alt={`${draft.name}の立ち絵`} unoptimized={draft.portraitSrc.startsWith('data:')} />
-            <div><span>SEAT {draft.seat.split('-')[1]}</span><h2>{draft.name}</h2><p>{draft.title}</p><label className="portrait-upload">立ち絵を選択<input type="file" accept="image/png,image/jpeg,image/webp" onChange={loadPortrait} /></label><small>PNG・JPEG・WebP / 2MBまで</small></div>
+            <div><span>SLOT {draft.seat.split('-')[1]}</span><h2>{draft.name}</h2><p>{draft.title}</p><label className="portrait-upload">立ち絵を選択<input type="file" accept="image/png,image/jpeg,image/webp" onChange={loadPortrait} /></label><small>PNG・JPEG・WebP / 2MBまで / このエリアへドロップ可</small></div>
           </section>
 
           <section className="editor-section"><div className="editor-section-head"><span>01</span><div><h2>基本情報</h2><p>画面表示とキャラクターの自己認識に使います。</p></div></div><div className="editor-fields two-column">
@@ -162,11 +236,18 @@ export function CharacterEditor() {
             <label>演技の核<textarea value={draft.performanceAnchor} onChange={(event) => update('performanceAnchor', event.target.value)} /></label>
           </div></section>
 
-          <section className="editor-section"><div className="editor-section-head"><span>04</span><div><h2>立ち絵と音声</h2><p>VOICEVOXの話者IDと表示名を設定します。</p></div></div><div className="editor-fields two-column">
-            <label>VOICEVOX話者ID<input type="number" min="0" value={draft.voice.speakerId} onChange={(event) => update('voice', { ...draft.voice, speakerId: Number(event.target.value) })} /></label>
-            <label>話者名<input value={draft.voice.speakerName} onChange={(event) => update('voice', { ...draft.voice, speakerName: event.target.value })} /></label>
-            <label>スタイル名<input value={draft.voice.styleName} onChange={(event) => update('voice', { ...draft.voice, styleName: event.target.value })} /></label>
-            <label>声の表現<select value={draft.voice.presentation} onChange={(event) => update('voice', { ...draft.voice, presentation: event.target.value as CharacterProfile['voice']['presentation'] })}><option value="female">女性的</option><option value="male">男性的</option><option value="androgynous">中性的</option></select></label>
+          <section className="editor-section"><div className="editor-section-head"><span>04</span><div><h2>AIと音声</h2><p>このキャラクターが使用するLLM・推論設定・TTSと、それぞれの話者を設定します。</p></div></div><div className="editor-fields two-column">
+            <h3 className="voice-provider-heading">キャラクター実行設定</h3>
+            <label>言語モデル<select aria-label="キャラクターの言語モデル" value={draft.llm.provider} onChange={(event) => update('llm', event.target.value === 'gemini' ? { provider: 'gemini', thinkingBudget: -1 } : { provider: 'openai', reasoningEffort: 'low' })}><option value="openai">OpenAI — {llmModels.openai}</option><option value="gemini">Gemini — {llmModels.gemini}</option></select></label>
+            <label>音声エンジン<select aria-label="キャラクターの音声エンジン" value={draft.tts.provider} onChange={(event) => update('tts', { provider: event.target.value as TtsProvider, voice: draft.tts.voice } as CharacterProfile['tts'])}><option value="voicevox">VOICEVOX</option><option value="aivisspeech">AivisSpeech</option></select></label>
+            {draft.llm.provider === 'openai' ? <label className="full-width">OpenAI推論レベル<select aria-label="キャラクターのOpenAI推論レベル" value={draft.llm.reasoningEffort} onChange={(event) => update('llm', { provider: 'openai', reasoningEffort: event.target.value as OpenAiReasoningEffort })}>{OPENAI_REASONING_EFFORTS.map((effort) => <option key={effort} value={effort}>{effort}</option>)}</select></label> : <label className="full-width">Gemini思考トークン予算<select aria-label="キャラクターのGemini思考トークン予算" value={draft.llm.thinkingBudget} onChange={(event) => update('llm', { provider: 'gemini', thinkingBudget: Number(event.target.value) as GeminiThinkingBudget })}>{GEMINI_THINKING_BUDGET_PRESETS.map((budget) => <option key={budget} value={budget}>{budget === -1 ? '自動（モデル既定）' : `${budget.toLocaleString('ja-JP')} tokens`}</option>)}</select></label>}
+            <small className="full-width execution-settings-note">LLMとTTSは試合全体ではなく、このキャラクター専用です。APIキーはサーバー側のOpenAI・Gemini共通設定を使用し、JSONへは含めません。</small>
+            <h3 className="voice-provider-heading">{draft.tts.provider === 'voicevox' ? 'VOICEVOX' : 'AivisSpeech'}</h3>
+            <label>{draft.tts.provider === 'voicevox' ? '話者ID' : 'スタイルID'}<input type="number" min="0" value={draft.tts.voice.speakerId} onChange={(event) => update('tts', { ...draft.tts, voice: { ...draft.tts.voice, speakerId: Number(event.target.value) } })} /></label>
+            <label>話者名<input value={draft.tts.voice.speakerName} onChange={(event) => update('tts', { ...draft.tts, voice: { ...draft.tts.voice, speakerName: event.target.value } })} /></label>
+            <label>スタイル名<input value={draft.tts.voice.styleName} onChange={(event) => update('tts', { ...draft.tts, voice: { ...draft.tts.voice, styleName: event.target.value } })} /></label>
+            <label>声の表現<select value={draft.tts.voice.presentation} onChange={(event) => update('tts', { ...draft.tts, voice: { ...draft.tts.voice, presentation: event.target.value as CharacterProfile['tts']['voice']['presentation'] } })}><option value="female">女性的</option><option value="male">男性的</option><option value="androgynous">中性的</option></select></label>
+            {draft.tts.provider === 'aivisspeech' && <small className="full-width">AivisSpeechのスタイルIDは、起動中のEngineの <code>/speakers</code> またはSwagger UIで確認できます。</small>}
             <label className="full-width">ビジュアル設定<textarea value={draft.visualBrief} onChange={(event) => update('visualBrief', event.target.value)} /><small>将来の立ち絵再生成用メモです。</small></label>
           </div></section>
 
@@ -174,13 +255,22 @@ export function CharacterEditor() {
             {roles.map((role) => <label key={role.key}>{role.label}<textarea value={draft.roleBehaviors[role.key]} onChange={(event) => update('roleBehaviors', { ...draft.roleBehaviors, [role.key]: event.target.value })} /></label>)}
           </div></details>
 
-          <details className="editor-advanced"><summary><span>06</span><div><strong>他の8人への呼び方</strong><small>名前、苗字、さん・ちゃん付け、呼び捨てを個別設定</small></div></summary><div className="editor-fields two-column">
+          <details className="editor-advanced"><summary><span>06</span><div><strong>他の8人への呼び方</strong><small>大まかな既定ルールを選び、必要な相手だけ個別設定</small></div></summary><div className="editor-fields two-column">
+            <label className="full-width">個別設定がない相手の呼び方<select aria-label="個別設定がない相手の呼び方" value={draft.defaultAddressStyle} onChange={(event) => update('defaultAddressStyle', event.target.value as CharacterAddressStyle)}>{addressStyles.map((style) => <option key={style.value} value={style.value}>{style.label}</option>)}</select><small>下の個別呼称が設定されている相手には、そちらを優先します。</small></label>
             {characters.filter((character) => character.seat !== draft.seat).map((character) => <label key={character.seat}>{character.name}<input value={draft.addressBook[character.seat] ?? ''} onChange={(event) => update('addressBook', { ...draft.addressBook, [character.seat]: event.target.value })} /></label>)}
           </div></details>
 
           {(status || error) && <div className={`editor-message ${error ? 'error' : 'success'}`} role="status">{error || status}</div>}
           <footer className="editor-actions">
-            <div><button type="button" onClick={exportPreset}>JSON書き出し</button><button type="button" onClick={() => importRef.current?.click()}>JSON読み込み</button><input ref={importRef} hidden type="file" accept="application/json,.json" onChange={importPreset} /><button type="button" className="reset" onClick={() => void reset()}>初期設定に戻す</button></div>
+            <div><button type="button" onClick={exportPreset}>JSON書き出し</button><button
+              type="button"
+              className={`preset-drop-zone${presetDragActive ? ' drag-active' : ''}`}
+              onClick={() => importRef.current?.click()}
+              onDragEnter={(event) => { event.preventDefault(); setPresetDragActive(true); }}
+              onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = 'copy'; setPresetDragActive(true); }}
+              onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setPresetDragActive(false); }}
+              onDrop={dropPreset}
+            ><strong>JSON読み込み</strong><small>クリックまたはドロップ</small></button><input ref={importRef} hidden type="file" accept="application/json,.json" onChange={importPreset} /><button type="button" className="reset" onClick={() => void reset()}>初期設定に戻す</button></div>
             <button className="save" type="submit" disabled={saving || !dirty}>{saving ? '保存中…' : dirty ? '変更を保存' : '保存済み'}</button>
           </footer>
         </form>

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AGENT_VOICES, voiceForSeat } from '@/domain/voices';
-import { synthesizeAgentSpeech, VOICEVOX_SPEED_SCALE } from '@/server/voicevox';
+import { synthesizeAgentSpeech, synthesizeTtsSpeech, TTS_SPEED_SCALE } from '@/server/voicevox';
 import { AGENT_NAME_DICTIONARY, syncAgentNameDictionary } from '@/server/voicevox-user-dictionary';
 
 afterEach(() => vi.unstubAllGlobals());
@@ -30,8 +30,28 @@ describe('VOICEVOX話者割り当て', () => {
 
     await synthesizeAgentSpeech('seat-1', '話速の確認です。');
 
-    expect(VOICEVOX_SPEED_SCALE).toBe(1.1);
+    expect(TTS_SPEED_SCALE).toBe(1.1);
     expect(synthesisBody).toMatchObject({ speedScale: 1.1 });
+  });
+
+  it('AivisSpeechでも話速を1.1倍にし、それ以外の互換Engine固有値を維持する', async () => {
+    const audioQuery = { speedScale: 0.95, volumeScale: 0.8, customField: 'aivis' };
+    let synthesisBody: Record<string, unknown> | null = null;
+    const fetchMock = vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
+      if (init?.body) {
+        synthesisBody = JSON.parse(String(init.body)) as Record<string, unknown>;
+        return new Response(new Uint8Array([1, 2, 3]), { status: 200 });
+      }
+      return Response.json(audioQuery);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await synthesizeTtsSpeech('aivisspeech', 'seat-1', 'AivisSpeechの確認です。', {
+      ...AGENT_VOICES[0], speakerId: 888753760, speakerName: 'Anneli',
+    });
+
+    expect(synthesisBody).toEqual({ ...audioQuery, speedScale: 1.1 });
+    expect(String(fetchMock.mock.calls[0][0])).toContain('127.0.0.1:10101/audio_query');
   });
 
   it('漢字名の読みをVOICEVOXユーザー辞書へ追加する', async () => {

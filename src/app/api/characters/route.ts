@@ -1,19 +1,25 @@
 import { NextResponse } from 'next/server';
 import { ZodError } from 'zod';
-import { characterProfileSchema } from '@/domain/characters';
+import { strictCharacterProfileSchema } from '@/domain/characters';
 import { getRunnerManager } from '@/server/runner';
+import { modelForProvider } from '@/server/ai/provider';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 export async function GET() {
-  return NextResponse.json({ characters: getRunnerManager().repo.characterRoster() });
+  const repo = getRunnerManager().repo;
+  return NextResponse.json({
+    characters: repo.characterRoster(),
+    customizedSeats: repo.customizedCharacterSeats(),
+    llmModels: { openai: modelForProvider('openai'), gemini: modelForProvider('gemini') },
+  });
 }
 
 export async function PUT(request: Request) {
   try {
     const body = await request.json() as { character?: unknown };
-    const character = characterProfileSchema.parse(body.character);
+    const character = strictCharacterProfileSchema.parse(body.character);
     return NextResponse.json({ character: getRunnerManager().repo.saveCharacter(character) });
   } catch (error) {
     const duplicate = error instanceof Error && error.message === 'CHARACTER_NAME_DUPLICATE';

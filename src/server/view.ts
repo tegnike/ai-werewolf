@@ -96,7 +96,17 @@ export function projectMatch(match: MatchRecord, view: ViewMode) {
   const common = {
     id: match.id, seed: match.seed, status: match.status, winner: match.winner, speed: match.speed,
     apiCalls: match.apiCalls, error: match.error, createdAt: match.createdAt, updatedAt: match.updatedAt, finishedAt: match.finishedAt,
+    ...(match.config.ttsProvider ? { ttsProvider: match.config.ttsProvider } : {}),
     characters: publicCharacterRoster(match.config.characters ?? cloneDefaultCharacterRoster()),
   };
-  return view === 'gm' ? { ...common, ai: match.config.ai } : common;
+  return view === 'gm' ? {
+    ...common,
+    ai: match.config.ai,
+    ...(match.config.llmProvider ? {
+      llmProvider: match.config.llmProvider,
+      llmModel: match.config.llmModel,
+      openaiReasoningEffort: match.config.openaiReasoningEffort ?? 'low',
+      geminiThinkingBudget: match.config.geminiThinkingBudget ?? -1,
+    } : {}),
+  } : common;
 }

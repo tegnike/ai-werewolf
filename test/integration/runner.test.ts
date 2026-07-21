@@ -7,6 +7,7 @@ import { MatchRepo } from '@/server/repo';
 import { MatchRunnerManager } from '@/server/runner';
 import { runGame } from '@/engine/game';
 import { MockAI } from '@/server/ai/mock';
+import { characterAddressTerm } from '@/domain/characters';
 import type { MatchEvent, MatchRecord } from '@/domain/types';
 
 let directory = '';
@@ -17,6 +18,10 @@ afterEach(() => {
   delete process.env.DATABASE_PATH;
   delete process.env.ALLOW_REAL_AI;
   delete process.env.OPENAI_API_KEY;
+  delete process.env.GEMINI_API_KEY;
+  delete process.env.LLM_PROVIDER;
+  delete process.env.GEMINI_MODEL;
+  delete process.env.TTS_PROVIDER;
 });
 
 async function waitFor(repo: MatchRepo, id: string, status: string) {
@@ -42,12 +47,96 @@ describe('MatchRunner', () => {
     const original = manager.repo.characterRoster()[0];
     manager.repo.saveCharacter({ ...original, name: '月城 ニケ' });
     const match = manager.create({ seed: 'character-snapshot', speed: 0, ai: 'mock' });
-    expect(match.config.characters?.[0].name).toBe('月城 ニケ');
+    expect(match.config.characters?.some((character) => character.name === '月城 ニケ')).toBe(true);
     manager.repo.saveCharacter({ ...original, name: '月城 ニケ改' });
     await waitFor(manager.repo, match.id, 'finished');
-    expect(manager.repo.getMatch(match.id)?.config.characters?.[0].name).toBe('月城 ニケ');
+    expect(manager.repo.getMatch(match.id)?.config.characters?.some((character) => character.name === '月城 ニケ')).toBe(true);
     const created = manager.repo.events(match.id).find((event) => event.type === 'match_created');
-    expect((created?.payload.players as Array<{ name: string }>)[0].name).toBe('月城 ニケ');
+    expect((created?.payload.players as Array<{ name: string }>).some((player) => player.name === '月城 ニケ')).toBe(true);
+  });
+
+  it('別キャラクターへ置き換えた保存枠を旧キャラ名で呼ばない', () => {
+    const manager = new MatchRunnerManager();
+    const original = manager.repo.characterRoster()[1];
+    manager.repo.saveCharacter({ ...original, name: 'AIニケちゃん', addressBook: {} });
+
+    const roster = manager.repo.characterRoster();
+    const nike = roster.find((character) => character.name === 'AIニケちゃん');
+    const makabe = roster.find((character) => character.name === '真壁 陽太');
+    expect(nike).toBeDefined();
+    expect(makabe?.addressBook[nike!.seat]).toBeUndefined();
+    expect(characterAddressTerm(roster, makabe!.seat, nike!.seat)).toBe('AIニケちゃん');
+  });
+
+  it('カスタムキャラクターの保存枠を取得できる', () => {
+    const repo = new MatchRepo();
+    expect(repo.customizedCharacterSeats()).toEqual([]);
+    const original = repo.characterRoster()[3];
+    repo.saveCharacter({ ...original, name: '共有キャラクター' });
+    expect(repo.customizedCharacterSeats()).toEqual(['seat-4']);
+    repo.resetCharacter('seat-4');
+    expect(repo.customizedCharacterSeats()).toEqual([]);
+  });
+
+  it('旧試合スナップショットのフラットな実行設定を排他的形式へ読み替える', () => {
+    const repo = new MatchRepo();
+    const legacyCharacters = repo.characterRoster().map((character) => {
+      const profile = Object.fromEntries(
+        Object.entries(character).filter(([key]) => key !== 'llm' && key !== 'tts'),
+      );
+      return {
+        ...profile,
+        llmProvider: character.llm.provider,
+        openaiReasoningEffort: character.llm.provider === 'openai' ? character.llm.reasoningEffort : 'low',
+        geminiThinkingBudget: character.llm.provider === 'gemini' ? character.llm.thinkingBudget : -1,
+        ttsProvider: character.tts.provider,
+        voice: character.tts.voice,
+      };
+    });
+    const now = new Date().toISOString();
+    repo.createMatch({
+      id: 'legacy-character-snapshot', seed: 'legacy', status: 'finished', winner: 'village', speed: 0,
+      apiCalls: 0, error: null,
+      config: { ai: 'mock', characters: legacyCharacters as unknown as NonNullable<MatchRecord['config']['characters']> },
+      createdAt: now, updatedAt: now, finishedAt: now,
+    });
+
+    const restored = repo.getMatch('legacy-character-snapshot')?.config.characters;
+    expect(restored?.[0]).toMatchObject({
+      llm: { provider: 'openai', reasoningEffort: 'low' },
+      tts: { provider: 'voicevox', voice: { seat: 'seat-1' } },
+    });
+    expect(restored?.[0]).not.toHaveProperty('llmProvider');
+    expect(restored?.[0]).not.toHaveProperty('voice');
+  });
+
+  it('選択したLLM・モデル・TTSを試合へスナップショット保存する', async () => {
+    process.env.GEMINI_MODEL = 'gemini-test-model';
+    const manager = new MatchRunnerManager();
+    const original = manager.repo.characterRoster()[0];
+    manager.repo.saveCharacter({
+      ...original, name: 'Geminiキャラクター',
+      llm: { provider: 'gemini', thinkingBudget: 8_192 },
+      tts: { provider: 'aivisspeech', voice: { ...original.tts.voice, speakerId: 888753760 } },
+    });
+    const match = manager.create({ seed: 'provider-snapshot', speed: 0, ai: 'mock' });
+    const configured = match.config.characters?.find((character) => character.name === 'Geminiキャラクター');
+    expect(configured).toMatchObject({
+      llm: { provider: 'gemini', thinkingBudget: 8_192 },
+      tts: { provider: 'aivisspeech', voice: { speakerId: 888753760 } },
+    });
+    expect(match.config.characterLlmModels?.[configured!.seat]).toBe('gemini-test-model');
+    await waitFor(manager.repo, match.id, 'finished');
+    const saved = manager.repo.getMatch(match.id)?.config.characters?.find((character) => character.name === 'Geminiキャラクター');
+    expect(saved).toEqual(configured);
+  });
+
+  it('不正な推論設定では試合を作成しない', () => {
+    const manager = new MatchRunnerManager();
+    expect(() => manager.create({
+      seed: 'invalid-reasoning', speed: 0, ai: 'mock', geminiThinkingBudget: 32_769,
+    })).toThrow('INVALID_REASONING_CONFIG');
+    expect(manager.repo.listMatches()).toHaveLength(0);
   });
 
   it('MockAIでDBへ一度だけイベントを保存して完走する', async () => {
@@ -164,6 +253,28 @@ describe('MatchRunner', () => {
     delete process.env.OPENAI_API_KEY;
     const manager = new MatchRunnerManager();
     expect(() => manager.create({ seed: 'missing-key', speed: 0, ai: 'real' })).toThrow('REAL_AI_NOT_CONFIGURED');
+    expect(manager.repo.listMatches()).toHaveLength(0);
+  });
+
+  it('Gemini選択時はGemini APIキーだけを起動条件として検査する', () => {
+    process.env.ALLOW_REAL_AI = '1';
+    process.env.OPENAI_API_KEY = 'openai-test-key';
+    delete process.env.GEMINI_API_KEY;
+    const manager = new MatchRunnerManager();
+    expect(() => manager.create({
+      seed: 'missing-gemini-key', speed: 0, ai: 'real', llmProvider: 'gemini',
+    })).toThrow('REAL_AI_NOT_CONFIGURED');
+    expect(manager.repo.listMatches()).toHaveLength(0);
+  });
+
+  it('キャラクターごとに必要なすべてのLLM APIキーを起動条件として検査する', () => {
+    process.env.ALLOW_REAL_AI = '1';
+    process.env.OPENAI_API_KEY = 'openai-test-key';
+    delete process.env.GEMINI_API_KEY;
+    const manager = new MatchRunnerManager();
+    const original = manager.repo.characterRoster()[0];
+    manager.repo.saveCharacter({ ...original, name: 'Gemini担当', llm: { provider: 'gemini', thinkingBudget: -1 } });
+    expect(() => manager.create({ seed: 'mixed-provider-keys', speed: 0, ai: 'real' })).toThrow('REAL_AI_NOT_CONFIGURED');
     expect(manager.repo.listMatches()).toHaveLength(0);
   });
 

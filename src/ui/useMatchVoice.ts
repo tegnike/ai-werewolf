@@ -32,8 +32,8 @@ export function useMatchVoice(matchId: string, events: UiEvent[], onSpeechStart:
     const initialVolume = Number.isFinite(storedVolume) && storedVolume >= 0 && storedVolume <= 1 ? storedVolume : 0.9;
     volumeRef.current = initialVolume;
     setVolumeState(initialVolume);
-    void fetch('/api/voicevox', { cache: 'no-store' }).then((response) => response.json()).then((data: { available: boolean }) => setAvailable(data.available)).catch(() => setAvailable(false));
-  }, []);
+    void fetch(`/api/tts?matchId=${encodeURIComponent(matchId)}`, { cache: 'no-store' }).then((response) => response.json()).then((data: { available: boolean }) => setAvailable(data.available)).catch(() => setAvailable(false));
+  }, [matchId]);
 
   const stopVoice = useCallback(() => {
     queue.current = [];
@@ -58,8 +58,9 @@ export function useMatchVoice(matchId: string, events: UiEvent[], onSpeechStart:
       const item = queue.current.shift();
       if (!item) break;
       try {
-        const response = await fetch('/api/voicevox', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ matchId, seat: item.seat, text: item.speech }) });
-        if (!response.ok) { setAvailable(false); break; }
+        const response = await fetch('/api/tts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ matchId, seat: item.seat, text: item.speech }) });
+        // キャラクターごとにTTSが異なるため、1話者のEngine失敗で他の話者まで無効化しない。
+        if (!response.ok) continue;
         if (!enabledRef.current) break;
         const url = URL.createObjectURL(await response.blob());
         const audio = new Audio(url);
@@ -89,7 +90,7 @@ export function useMatchVoice(matchId: string, events: UiEvent[], onSpeechStart:
         currentAudio.current = null;
         currentItem.current = null;
         finishCurrentAudio.current = null;
-      } catch { setAvailable(false); break; }
+      } catch { continue; }
     }
     pumping.current = false;
     setBusy(false);

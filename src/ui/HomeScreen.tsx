@@ -16,24 +16,40 @@ export function HomeScreen() {
   const [seed, setSeed] = useState('');
   const [speed, setSpeed] = useState(1500);
   const [loading, setLoading] = useState(false);
+  const [settingsReady, setSettingsReady] = useState(false);
   const [error, setError] = useState('');
   const [aiProvider, setAiProvider] = useState<'mock' | 'real'>('mock');
   const { bgmEnabled, setBgmEnabled, bgmVolume, setBgmVolume } = useAmbientBgm('night');
 
   const refresh = async () => {
-    const response = await fetch('/api/matches', { cache: 'no-store' });
-    const data = await response.json() as { matches: UiMatch[]; aiProvider?: 'mock' | 'real' };
-    setMatches(data.matches);
-    setAiProvider(data.aiProvider ?? 'mock');
+    try {
+      const response = await fetch('/api/matches', { cache: 'no-store' });
+      if (!response.ok) throw new Error('試合設定を読み込めませんでした。');
+      const data = await response.json() as {
+        matches: UiMatch[];
+        aiProvider?: 'mock' | 'real';
+      };
+      setMatches(data.matches);
+      setAiProvider(data.aiProvider ?? 'mock');
+      setSettingsReady(true);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : '試合設定を読み込めませんでした。');
+    }
   };
   useEffect(() => { void refresh(); }, []);
 
   const start = async (event: FormEvent) => {
     event.preventDefault(); setLoading(true); setError('');
     try {
-      const response = await fetch('/api/matches', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ seed, speed }) });
+      const response = await fetch('/api/matches', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ seed, speed }),
+      });
       const data = await response.json() as { id?: string; error?: { message: string } };
       if (!response.ok || !data.id) throw new Error(data.error?.message ?? '開始できませんでした。');
+      const matchResponse = await fetch(`/api/match/${data.id}?view=public`, { cache: 'no-store' });
+      if (!matchResponse.ok) throw new Error('作成した試合を読み込めませんでした。');
       window.sessionStorage.setItem('werewolf-new-match', data.id);
       window.location.href = `/match/${data.id}`;
     } catch (cause) { setError(cause instanceof Error ? cause.message : '開始できませんでした。'); setLoading(false); }
@@ -51,7 +67,7 @@ export function HomeScreen() {
         <div className="hero-art" aria-hidden="true"><div className="moon" /><div className="table-ring">{Array.from({ length: 9 }, (_, i) => <i key={i} style={{ '--i': i } as React.CSSProperties} />)}</div></div>
       </section>
 
-      <div className="home-audio-row"><span className={`provider-pill ${aiProvider}`}>{aiProvider === 'real' ? '● OPENAI REAL AI' : '○ MOCK AI'}</span><AudioControls compact bgmEnabled={bgmEnabled} bgmVolume={bgmVolume} onBgmChange={setBgmEnabled} onBgmVolumeChange={setBgmVolume} /></div>
+      <div className="home-audio-row"><span className={`provider-pill ${aiProvider}`}>{aiProvider === 'real' ? '● CHARACTER REAL AI' : '○ MOCK AI'}</span><AudioControls compact bgmEnabled={bgmEnabled} bgmVolume={bgmVolume} onBgmChange={setBgmEnabled} onBgmVolumeChange={setBgmVolume} /></div>
 
       <section className="launch-grid">
         <form className="start-card" onSubmit={start}>
@@ -62,10 +78,10 @@ export function HomeScreen() {
               <label className={speed === item.value ? 'selected' : ''} key={item.value}><input type="radio" name="speed" value={item.value} checked={speed === item.value} onChange={() => setSpeed(item.value)} /><strong>{item.label}</strong><span>{item.note}</span></label>
             ))}
           </div></fieldset>
-          <button className="primary-button" disabled={loading}>{loading ? '村を準備中…' : 'AI人狼を開始'} <span>→</span></button>
-          <Link className="character-settings-link" href="/characters"><span>⚙</span><strong>キャラクターを編集</strong><small>人格・口調・立ち絵・音声を設定</small></Link>
+          <button className="primary-button" disabled={loading || !settingsReady}>{loading ? '村を準備中…' : settingsReady ? 'AI人狼を開始' : '設定を読み込み中…'} <span>→</span></button>
+          <Link className="character-settings-link" href="/characters"><span>⚙</span><strong>キャラクターを編集</strong><small>人格・立ち絵・LLM・推論・TTSを個別設定</small></Link>
           {error && <p className="form-error" role="alert">{error}</p>}
-          <p className="mock-note">現在の思考エンジン: <strong>{aiProvider === 'real' ? 'OpenAI gpt-5.6-luna（API利用料金が発生）' : '決定論的MockAI'}</strong></p>
+          <p className="mock-note">LLM・推論レベル・TTSは、9人それぞれの保存済みキャラクター設定を使用します。変更は「キャラクターを編集」から行えます。{aiProvider === 'real' && ' 実AIのAPI利用料金が発生します。'}</p>
         </form>
 
         <section className="history-card">

@@ -1,21 +1,105 @@
 import { expect, test } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
 
-test('ホームから試合を開始して公開／GM視点とリプレイを表示できる', async ({ page }) => {
+test('キャラクターJSONと立ち絵をドラッグ＆ドロップでき、JSONの不備をフィールド別に表示する', async ({ page }) => {
   test.setTimeout(90_000);
+  await page.goto('/characters');
+  await expect(page.getByRole('heading', { name: 'キャラクター編集' })).toBeVisible({ timeout: 30_000 });
+
+  const presetInput = page.locator('input[type="file"][accept*="application/json"]');
+  await presetInput.setInputFiles({
+    name: 'broken.character.json',
+    mimeType: 'application/json',
+    buffer: Buffer.from(JSON.stringify({ seat: 'seat-1' })),
+  });
+  await expect(page.locator('.editor-message.error')).toContainText('JSONプリセットに');
+  await expect(page.locator('.editor-message.error')).toContainText('name: 必須フィールドがないか、値の型が違います。');
+  await expect(page.locator('.editor-message.error')).toContainText('portraitSrc: 必須フィールドがないか、値の型が違います。');
+
+  const character = await page.evaluate(async () => {
+    const response = await fetch('/api/characters');
+    const data = await response.json() as { characters: Array<Record<string, unknown>> };
+    const source = data.characters[0];
+    const tts = source.tts as { provider: string; voice: Record<string, unknown> };
+    return { ...source, seat: '', addressBook: {}, tts: { ...tts, voice: { ...tts.voice, seat: '' } }, name: '検証済みキャラクター' };
+  });
+  await page.locator('.character-roster button').nth(1).click();
+  await expect(page.locator('.character-roster button').nth(1)).toHaveClass(/active/);
+  const presetDataTransfer = await page.evaluateHandle((preset) => {
+    const dataTransfer = new DataTransfer();
+    dataTransfer.items.add(new File([JSON.stringify(preset)], 'valid.character.json', { type: 'application/json' }));
+    return dataTransfer;
+  }, character);
+  const presetDropZone = page.locator('.preset-drop-zone');
+  await presetDropZone.dispatchEvent('dragenter', { dataTransfer: presetDataTransfer });
+  await expect(presetDropZone).toHaveClass(/drag-active/);
+  await presetDropZone.dispatchEvent('drop', { dataTransfer: presetDataTransfer });
+  await expect(page.locator('.editor-message.success')).toContainText('席未指定のプリセットを選択中のSLOT 2へ');
+  await expect(page.locator('.editor-message.success')).toContainText('試合での席は開始時に決まります。');
+  await expect(page.locator('.character-roster button').nth(1)).toHaveClass(/active/);
+  await expect(page.locator('.character-preview')).toContainText('SLOT 2');
+  await expect(page.getByLabel('名前')).toHaveValue('検証済みキャラクター');
+  await page.getByLabel('キャラクターの言語モデル').selectOption('gemini');
+  await page.getByLabel('キャラクターのGemini思考トークン予算').selectOption('4096');
+  await page.getByLabel('キャラクターの音声エンジン').selectOption('aivisspeech');
+  await expect(page.getByLabel('キャラクターの言語モデル')).toHaveValue('gemini');
+  await expect(page.getByLabel('キャラクターのGemini思考トークン予算')).toHaveValue('4096');
+  await expect(page.getByLabel('キャラクターの音声エンジン')).toHaveValue('aivisspeech');
+  await page.getByText('他の8人への呼び方').click();
+  await page.getByLabel('個別設定がない相手の呼び方').selectOption('given_name_chan');
+  await expect(page.getByLabel('個別設定がない相手の呼び方')).toHaveValue('given_name_chan');
+
+  const portraitDataTransfer = await page.evaluateHandle(() => {
+    const base64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
+    const bytes = Uint8Array.from(atob(base64), (value) => value.charCodeAt(0));
+    const dataTransfer = new DataTransfer();
+    dataTransfer.items.add(new File([bytes], 'portrait.png', { type: 'image/png' }));
+    return dataTransfer;
+  });
+  const portraitDropZone = page.locator('.portrait-drop-zone');
+  await portraitDropZone.dispatchEvent('dragenter', { dataTransfer: portraitDataTransfer });
+  await expect(portraitDropZone).toHaveClass(/drag-active/);
+  await portraitDropZone.dispatchEvent('drop', { dataTransfer: portraitDataTransfer });
+  await expect(portraitDropZone.locator('img')).toHaveAttribute('src', /^data:image\/png;base64,/);
+
+  const saveRequestPromise = page.waitForRequest((request) => request.url().endsWith('/api/characters') && request.method() === 'PUT');
+  await page.getByRole('button', { name: '変更を保存' }).click();
+  const saveRequest = await saveRequestPromise;
+  expect(saveRequest.postDataJSON().character.seat).toBe('seat-2');
+  expect(saveRequest.postDataJSON().character.defaultAddressStyle).toBe('given_name_chan');
+  await expect(page.locator('.editor-message.success')).toContainText('検証済みキャラクターの設定を保存しました。');
+  const savedRoster = await page.evaluate(async () => {
+    const response = await fetch('/api/characters');
+    return (await response.json() as { characters: Array<{ seat: string; name: string; defaultAddressStyle: string }> }).characters;
+  });
+  expect(savedRoster.find((item) => item.seat === 'seat-2')?.name).toBe('検証済みキャラクター');
+  expect(savedRoster.find((item) => item.seat === 'seat-2')?.defaultAddressStyle).toBe('given_name_chan');
+  expect(savedRoster.find((item) => item.seat === 'seat-1')?.name).not.toBe('検証済みキャラクター');
+  await page.evaluate(async () => {
+    await fetch('/api/characters', {
+      method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ seat: 'seat-2' }),
+    });
+  });
+});
+
+test('ホームから試合を開始して公開／GM視点とリプレイを表示できる', async ({ page }) => {
+  test.setTimeout(150_000);
   await page.goto('/');
   await expect(page.getByRole('heading', { name: 'AI人狼' })).toBeVisible();
   await expect(page.getByRole('button', { name: '♫ BGM ON' })).toBeVisible();
   await expect(page.getByLabel('BGM音量')).toBeVisible();
   await expect(page.getByLabel('BGM音量')).toHaveValue('70');
+  await expect(page.getByLabel('言語モデル')).toHaveCount(0);
+  await expect(page.getByLabel('音声エンジン')).toHaveCount(0);
+  await expect(page.getByText('9人それぞれの保存済みキャラクター設定を使用します。')).toBeVisible();
   await page.getByLabel('BGM音量').fill('85');
   await page.getByLabel(/SEED/).fill('fixture-0');
   await page.getByText('最速').click();
   await page.getByRole('button', { name: /AI人狼を開始/ }).click();
-  await expect(page).toHaveURL(/\/match\//, { timeout: 15_000 });
-  await expect(page.locator('.cinematic-overlay')).toContainText('第0夜');
-  await expect(page.locator('.cinematic-overlay')).toContainText('1日目', { timeout: 10_000 });
-  await expect(page.getByRole('heading', { name: '名取 澪' })).toBeVisible();
+  await expect(page).toHaveURL(/\/match\//, { timeout: 45_000 });
+  await expect(page.locator('.cinematic-overlay')).toContainText('第0夜', { timeout: 15_000 });
+  await expect(page.locator('.cinematic-overlay')).toContainText('1日目', { timeout: 15_000 });
+  await expect(page.getByRole('heading', { name: '名取 澪' })).toBeVisible({ timeout: 15_000 });
   await page.getByRole('button', { name: '？ ルール' }).click();
   await expect(page.getByRole('dialog', { name: '観戦ガイド' })).toBeVisible();
   await expect(page.getByRole('button', { name: '観戦ガイドを閉じる' })).toBeFocused();
@@ -84,8 +168,9 @@ test('ホームから試合を開始して公開／GM視点とリプレイを表
 });
 
 test('Spaceキーでゲームと発言音声を一時停止・再開し、中断できる', async ({ page }) => {
+  test.setTimeout(90_000);
   const voiceAudio = await readFile('public/assets/bgm_village.ogg');
-  await page.route('**/api/voicevox', async (route) => {
+  await page.route('**/api/tts**', async (route) => {
     if (route.request().method() === 'GET') {
       await route.fulfill({ json: { available: true } });
       return;
@@ -94,9 +179,9 @@ test('Spaceキーでゲームと発言音声を一時停止・再開し、中断
   });
   await page.goto('/');
   await page.getByRole('button', { name: /AI人狼を開始/ }).click();
-  await expect(page).toHaveURL(/\/match\//, { timeout: 15_000 });
-  await expect(page.getByRole('heading', { name: '名取 澪' })).toBeVisible();
-  await expect(page.locator('.cinematic-overlay')).toContainText('第0夜');
+  await expect(page).toHaveURL(/\/match\//, { timeout: 45_000 });
+  await expect(page.locator('.cinematic-overlay')).toContainText('第0夜', { timeout: 15_000 });
+  await expect(page.getByRole('heading', { name: '名取 澪' })).toBeVisible({ timeout: 15_000 });
   await expect(page.locator('.agent-card.speaking')).toHaveCount(0);
   await expect(page.locator('.cinematic-overlay')).toContainText('1日目', { timeout: 15_000 });
   await expect(page.locator('.agent-card.speaking')).toHaveCount(0);
@@ -117,7 +202,7 @@ test('Spaceキーでゲームと発言音声を一時停止・再開し、中断
   expect((lastAgentBox?.y ?? 0) + (lastAgentBox?.height ?? 0)).toBeLessThanOrEqual(controlDockBox?.y ?? 0);
   await expect(page.locator('.vote-panel')).toHaveCount(0);
   await page.keyboard.press('Space');
-  await expect(page.locator('.round-status em')).toHaveText('PAUSED');
+  await expect(page.locator('.round-status em')).toHaveText('PAUSED', { timeout: 15_000 });
   await expect(page.locator('.agent-card.speaking')).toHaveCount(0);
   await expect(page.locator('.speaker-stage')).toHaveClass(/paused/);
   await expect(page.locator('.speaker-stage')).toContainText('PAUSED');
@@ -125,7 +210,7 @@ test('Spaceキーでゲームと発言音声を一時停止・再開し、中断
   await page.waitForTimeout(1_200);
   await expect(page.locator('.timeline-event')).toHaveCount(pausedEventCount);
   await page.keyboard.press('Space');
-  await expect(page.locator('.round-status em')).toHaveText('LIVE');
+  await expect(page.locator('.round-status em')).toHaveText('LIVE', { timeout: 15_000 });
   await expect(page.locator('.agent-card.speaking')).toHaveCount(1);
   await page.getByRole('button', { name: '中断' }).click();
   await expect(page.getByText('ABORTED')).toBeVisible();

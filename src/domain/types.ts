@@ -7,6 +7,12 @@ export type MatchStatus = 'running' | 'paused' | 'paused_error' | 'finished' | '
 export type Winner = 'village' | 'werewolf' | 'draw';
 export type Visibility = 'public' | 'private';
 export type ViewMode = 'public' | 'gm';
+export type LlmProvider = 'openai' | 'gemini';
+export const OPENAI_REASONING_EFFORTS = ['none', 'low', 'medium', 'high', 'xhigh', 'max'] as const;
+export type OpenAiReasoningEffort = (typeof OPENAI_REASONING_EFFORTS)[number];
+export const GEMINI_THINKING_BUDGET_PRESETS = [-1, 128, 1_024, 4_096, 8_192, 16_384, 32_768] as const;
+export type GeminiThinkingBudget = number;
+export type TtsProvider = 'voicevox' | 'aivisspeech';
 export type Phase =
   | 'setup' | 'night_zero' | 'dawn' | 'discussion' | 'vote' | 'runoff'
   | 'execution' | 'medium' | 'wolf_chat' | 'night_actions' | 'finished';
@@ -38,7 +44,17 @@ export interface MatchRecord {
   speed: number;
   apiCalls: number;
   error: { code: string; message: string; phase?: string; model?: string; reason?: string } | null;
-  config: { ai: 'mock' | 'real'; characters?: import('./characters').CharacterRoster };
+  config: {
+    ai: 'mock' | 'real';
+    llmProvider?: LlmProvider;
+    llmModel?: string;
+    openaiReasoningEffort?: OpenAiReasoningEffort;
+    geminiThinkingBudget?: GeminiThinkingBudget;
+    ttsProvider?: TtsProvider;
+    /** 新規試合ではキャラクターごとに解決したモデル名を席別に固定する。 */
+    characterLlmModels?: Partial<Record<SeatId, string>>;
+    characters?: import('./characters').CharacterRoster;
+  };
   createdAt: string;
   updatedAt: string;
   finishedAt: string | null;
