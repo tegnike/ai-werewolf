@@ -221,3 +221,34 @@ test('Spaceキーでゲームと発言音声を一時停止・再開し、中断
   await page.getByRole('button', { name: '中断' }).click();
   await expect(page.getByText('ABORTED')).toBeVisible();
 });
+
+test('発言終了後は1秒待ってから次の話者へ進む', async ({ page }) => {
+  test.setTimeout(60_000);
+  const voiceAudio = await readFile('public/assets/sfx_execution.ogg');
+  await page.addInitScript(() => {
+    const state = window as typeof window & { __ttsPlayTimes: number[] };
+    state.__ttsPlayTimes = [];
+    const originalPlay = HTMLMediaElement.prototype.play;
+    HTMLMediaElement.prototype.play = function play() {
+      if (this.src.startsWith('blob:')) state.__ttsPlayTimes.push(performance.now());
+      return originalPlay.call(this);
+    };
+  });
+  await page.route('**/api/tts**', async (route) => {
+    if (route.request().method() === 'GET') {
+      await route.fulfill({ json: { available: true } });
+      return;
+    }
+    await route.fulfill({ status: 200, contentType: 'audio/ogg', body: voiceAudio });
+  });
+
+  await page.goto('/');
+  await page.getByRole('button', { name: /AI人狼を開始/ }).click();
+  await expect(page).toHaveURL(/\/match\//, { timeout: 45_000 });
+  await expect.poll(() => page.evaluate(() =>
+    (window as typeof window & { __ttsPlayTimes: number[] }).__ttsPlayTimes.length), { timeout: 45_000 })
+    .toBeGreaterThanOrEqual(2);
+  const playTimes = await page.evaluate(() =>
+    (window as typeof window & { __ttsPlayTimes: number[] }).__ttsPlayTimes);
+  expect(playTimes[1] - playTimes[0]).toBeGreaterThanOrEqual(1_100);
+});

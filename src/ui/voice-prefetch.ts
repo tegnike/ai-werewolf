@@ -1,6 +1,7 @@
 export interface SpeechItem { seq: number; seat: string; speech: string }
 
 export const TTS_PREFETCH_DEPTH = 2;
+export const POST_SPEECH_GAP_MS = 1_000;
 
 export function fillSpeechPrefetch<T>(
   queue: readonly SpeechItem[],

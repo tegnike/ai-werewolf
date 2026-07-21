@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { UiEvent } from './types';
-import { fillSpeechPrefetch, type SpeechItem } from './voice-prefetch';
+import { fillSpeechPrefetch, POST_SPEECH_GAP_MS, type SpeechItem } from './voice-prefetch';
 
 export function useMatchVoice(matchId: string, events: UiEvent[], onSpeechStart: (seq: number) => void, paused = false) {
   const [enabled, setEnabledState] = useState(true);
@@ -21,6 +21,7 @@ export function useMatchVoice(matchId: string, events: UiEvent[], onSpeechStart:
   const currentAudio = useRef<HTMLAudioElement | null>(null);
   const currentItem = useRef<SpeechItem | null>(null);
   const finishCurrentAudio = useRef<(() => void) | null>(null);
+  const finishPostSpeechGap = useRef<(() => void) | null>(null);
   const pausedRef = useRef(paused);
 
   useEffect(() => {
@@ -43,6 +44,7 @@ export function useMatchVoice(matchId: string, events: UiEvent[], onSpeechStart:
     preparedAudio.current.clear();
     currentAudio.current?.pause();
     finishCurrentAudio.current?.();
+    finishPostSpeechGap.current?.();
     setBusy(false);
     setSpeakingSeat(null);
     setSpeakingSeq(null);
@@ -112,12 +114,22 @@ export function useMatchVoice(matchId: string, events: UiEvent[], onSpeechStart:
             });
           }
         });
-        setSpeakingSeat(null);
-        setSpeakingSeq(null);
         URL.revokeObjectURL(url);
         currentAudio.current = null;
         currentItem.current = null;
         finishCurrentAudio.current = null;
+        await new Promise<void>((resolve) => {
+          let timer: ReturnType<typeof setTimeout> | null = null;
+          const finish = () => {
+            if (timer !== null) clearTimeout(timer);
+            if (finishPostSpeechGap.current === finish) finishPostSpeechGap.current = null;
+            resolve();
+          };
+          finishPostSpeechGap.current = finish;
+          timer = setTimeout(finish, POST_SPEECH_GAP_MS);
+        });
+        setSpeakingSeat(null);
+        setSpeakingSeq(null);
       } catch { continue; }
     }
     pumping.current = false;

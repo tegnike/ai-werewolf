@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { fillSpeechPrefetch, TTS_PREFETCH_DEPTH, type SpeechItem } from '@/ui/voice-prefetch';
+import { fillSpeechPrefetch, POST_SPEECH_GAP_MS, TTS_PREFETCH_DEPTH, type SpeechItem } from '@/ui/voice-prefetch';
 
 const speeches: SpeechItem[] = [
   { seq: 1, seat: 'seat-1', speech: '一人目' },
@@ -8,6 +8,10 @@ const speeches: SpeechItem[] = [
 ];
 
 describe('音声合成の先読み', () => {
+  it('発言終了後に1秒の間を置く', () => {
+    expect(POST_SPEECH_GAP_MS).toBe(1_000);
+  });
+
   it('発言順を保ったまま上限件数まで合成を開始する', () => {
     const prepared = new Map<number, Promise<string>>();
     const prepare = vi.fn(async (item: SpeechItem) => `audio-${item.seq}`);
