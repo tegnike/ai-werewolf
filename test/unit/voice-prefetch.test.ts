@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
-  fillSpeechPrefetch, POST_SPEECH_GAP_MS, SerialSpeechPreparer, speechPlaybackFailureDisposition,
-  TTS_PREFETCH_DEPTH, type SpeechItem,
+  fillSpeechPrefetch, isRetryableTtsFailure, POST_SPEECH_GAP_MS, prepareSpeechWithRetry, SerialSpeechPreparer,
+  speechPlaybackFailureDisposition, TTS_PREFETCH_DEPTH, TTS_PREPARE_MAX_ATTEMPTS, TtsHttpError, type SpeechItem,
 } from '@/ui/voice-prefetch';
 
 const speeches: SpeechItem[] = [
@@ -69,5 +69,39 @@ describe('音声合成の先読み', () => {
     await expect(first).resolves.toBe('first');
     await expect(second).resolves.toBe('second');
     expect(secondTask).toHaveBeenCalledOnce();
+  });
+
+  it('一時的なTTS失敗は順序を保持したまま最大3回まで再試行する', async () => {
+    const prepare = vi.fn()
+      .mockRejectedValueOnce(new TtsHttpError(503))
+      .mockRejectedValueOnce(new TypeError('network error'))
+      .mockResolvedValue('audio');
+    const wait = vi.fn(async () => undefined);
+
+    await expect(prepareSpeechWithRetry(prepare, undefined, wait)).resolves.toBe('audio');
+
+    expect(TTS_PREPARE_MAX_ATTEMPTS).toBe(3);
+    expect(prepare).toHaveBeenCalledTimes(3);
+    expect(wait).toHaveBeenCalledTimes(2);
+  });
+
+  it('入力不正など再試行不能なHTTPエラーは繰り返さない', async () => {
+    const prepare = vi.fn().mockRejectedValue(new TtsHttpError(400));
+    const wait = vi.fn(async () => undefined);
+
+    await expect(prepareSpeechWithRetry(prepare, undefined, wait)).rejects.toMatchObject({ status: 400 });
+
+    expect(isRetryableTtsFailure(new TtsHttpError(400))).toBe(false);
+    expect(prepare).toHaveBeenCalledOnce();
+    expect(wait).not.toHaveBeenCalled();
+  });
+
+  it('キャンセルされた先行合成は再試行しない', async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const prepare = vi.fn(async () => 'audio');
+
+    await expect(prepareSpeechWithRetry(prepare, controller.signal)).rejects.toMatchObject({ name: 'AbortError' });
+    expect(prepare).not.toHaveBeenCalled();
   });
 });

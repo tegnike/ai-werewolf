@@ -3,8 +3,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { UiEvent } from './types';
 import {
-  fillSpeechPrefetch, POST_SPEECH_GAP_MS, SerialSpeechPreparer, speechPlaybackFailureDisposition, type SpeechItem,
+  fillSpeechPrefetch, POST_SPEECH_GAP_MS, prepareSpeechWithRetry, SerialSpeechPreparer,
+  speechPlaybackFailureDisposition, TtsHttpError, type SpeechItem,
 } from './voice-prefetch';
+
+interface PreparedSpeech {
+  blob: Blob | null;
+  failed: boolean;
+}
 
 export function useMatchVoice(matchId: string, events: UiEvent[], onSpeechStart: (seq: number) => void, paused = false) {
   const [enabled, setEnabledState] = useState(true);
@@ -15,9 +21,10 @@ export function useMatchVoice(matchId: string, events: UiEvent[], onSpeechStart:
   const volumeRef = useRef(0.9);
   const [busy, setBusy] = useState(false);
   const [speakingSeq, setSpeakingSeq] = useState<number | null>(null);
+  const [failedSeats, setFailedSeats] = useState<string[]>([]);
   const lastObservedSeq = useRef<number | null>(null);
   const queue = useRef<SpeechItem[]>([]);
-  const preparedAudio = useRef<Map<number, Promise<Blob | null>>>(new Map());
+  const preparedAudio = useRef<Map<number, Promise<PreparedSpeech>>>(new Map());
   const synthesisControllers = useRef<Map<number, AbortController>>(new Map());
   const serialPreparer = useRef(new SerialSpeechPreparer());
   const pumping = useRef(false);
@@ -55,27 +62,29 @@ export function useMatchVoice(matchId: string, events: UiEvent[], onSpeechStart:
   }, []);
 
   const markSpeechStarted = useCallback((item: SpeechItem) => {
+    setFailedSeats((current) => current.filter((seat) => seat !== item.seat));
     setSpeakingSeat(item.seat);
     setSpeakingSeq(item.seq);
     onSpeechStart(item.seq);
   }, [onSpeechStart]);
 
-  const prepareSpeech = useCallback((item: SpeechItem): Promise<Blob | null> => {
+  const prepareSpeech = useCallback((item: SpeechItem): Promise<PreparedSpeech> => {
     const existing = preparedAudio.current.get(item.seq);
     if (existing) return existing;
     const controller = new AbortController();
     synthesisControllers.current.set(item.seq, controller);
-    const prepared = serialPreparer.current.enqueue(async () => {
-      if (controller.signal.aborted) return null;
+    const prepared = serialPreparer.current.enqueue(() => prepareSpeechWithRetry(async () => {
       const response = await fetch('/api/tts', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ matchId, seat: item.seat, text: item.speech }),
         signal: controller.signal,
       });
-      return response.ok ? response.blob() : null;
-    })
-      .catch(() => null)
+      if (!response.ok) throw new TtsHttpError(response.status);
+      return response.blob();
+    }, controller.signal))
+      .then((blob) => ({ blob, failed: false }))
+      .catch(() => ({ blob: null, failed: !controller.signal.aborted }))
       .finally(() => synthesisControllers.current.delete(item.seq));
     preparedAudio.current.set(item.seq, prepared);
     return prepared;
@@ -94,11 +103,22 @@ export function useMatchVoice(matchId: string, events: UiEvent[], onSpeechStart:
       const item = queue.current.shift();
       if (!item) break;
       try {
-        const blob = await prepareSpeech(item);
+        const prepared = await prepareSpeech(item);
         preparedAudio.current.delete(item.seq);
         prefetchQueuedSpeech();
         // キャラクターごとにTTSが異なるため、1話者のEngine失敗で他の話者まで無効化しない。
-        if (!blob) continue;
+        if (!prepared.blob) {
+          if (!prepared.failed) continue;
+          if (pausedRef.current) {
+            queue.current.unshift(item);
+            break;
+          }
+          setFailedSeats((current) => current.includes(item.seat) ? current : [...current, item.seat]);
+          onSpeechStart(item.seq);
+          await new Promise((resolve) => setTimeout(resolve, POST_SPEECH_GAP_MS));
+          continue;
+        }
+        const blob = prepared.blob;
         if (!enabledRef.current) break;
         const url = URL.createObjectURL(blob);
         const audio = new Audio(url);
@@ -114,12 +134,16 @@ export function useMatchVoice(matchId: string, events: UiEvent[], onSpeechStart:
           };
           finishCurrentAudio.current = finish;
           audio.onended = finish;
-          audio.onerror = finish;
+          audio.onerror = () => {
+            setFailedSeats((current) => current.includes(item.seat) ? current : [...current, item.seat]);
+            finish();
+          };
           if (!pausedRef.current) {
             void audio.play().then(() => markSpeechStarted(item)).catch(() => {
               // 演出開始や手動pauseがplay()と競合した場合は、同じ音声をresume時に再試行する。
               if (speechPlaybackFailureDisposition(pausedRef.current) === 'retry') return;
               markSpeechStarted(item);
+              setFailedSeats((current) => current.includes(item.seat) ? current : [...current, item.seat]);
               finish();
             });
           }
@@ -140,14 +164,18 @@ export function useMatchVoice(matchId: string, events: UiEvent[], onSpeechStart:
         });
         setSpeakingSeat(null);
         setSpeakingSeq(null);
-      } catch { continue; }
+      } catch {
+        setFailedSeats((current) => current.includes(item.seat) ? current : [...current, item.seat]);
+        onSpeechStart(item.seq);
+        continue;
+      }
     }
     pumping.current = false;
     setBusy(false);
     setSpeakingSeat(null);
     setSpeakingSeq(null);
     if (queue.current.length > 0 && enabledRef.current && !pausedRef.current) void pump();
-  }, [available, markSpeechStarted, prefetchQueuedSpeech, prepareSpeech]);
+  }, [available, markSpeechStarted, onSpeechStart, prefetchQueuedSpeech, prepareSpeech]);
 
   useEffect(() => {
     pausedRef.current = paused;
@@ -191,5 +219,8 @@ export function useMatchVoice(matchId: string, events: UiEvent[], onSpeechStart:
     setVolumeState(value);
     if (currentAudio.current) currentAudio.current.volume = value;
   }, []);
-  return { voiceEnabled: enabled, setVoiceEnabled: setEnabled, voiceAvailable: available, speakingSeat, speakingSeq, voiceVolume: volume, setVoiceVolume: setVolume, voiceBusy: busy };
+  return {
+    voiceEnabled: enabled, setVoiceEnabled: setEnabled, voiceAvailable: available, speakingSeat, speakingSeq,
+    voiceVolume: volume, setVoiceVolume: setVolume, voiceBusy: busy, voiceFailedSeats: failedSeats,
+  };
 }

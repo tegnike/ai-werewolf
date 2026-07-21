@@ -115,7 +115,13 @@ export function MatchViewer({ matchId, mode }: { matchId: string; mode: 'live' |
   const revealSpeech = useCallback((seq: number) => setPresentedSeq((current) => Math.max(current, seq)), []);
   const paused = match?.status === 'paused';
   const presentationPaused = paused || cinematicBusy;
-  const { voiceEnabled, setVoiceEnabled, voiceAvailable, speakingSeat, speakingSeq, voiceVolume, setVoiceVolume, voiceBusy } = useMatchVoice(matchId, voiceEvents, revealSpeech, presentationPaused);
+  const {
+    voiceEnabled, setVoiceEnabled, voiceAvailable, speakingSeat, speakingSeq, voiceVolume, setVoiceVolume,
+    voiceBusy, voiceFailedSeats,
+  } = useMatchVoice(matchId, voiceEvents, revealSpeech, presentationPaused);
+  const voiceError = voiceFailedSeats.length > 0
+    ? `${voiceFailedSeats.map((seat) => resolveCharacterName(seat as SeatId)).join('、')}の音声を生成できませんでした。発言は画面に表示しています。`
+    : '';
 
   const load = useCallback(async () => {
     const reveal = view === 'public' && publicSecretsUnlocked ? '&reveal=1' : '';
@@ -314,7 +320,7 @@ export function MatchViewer({ matchId, mode }: { matchId: string; mode: 'live' |
         {mode === 'live' ? <div className="live-controls">{terminal ? <Link className="dock-link" href={`/replay/${matchId}`}>リプレイを見る →</Link> : match.status === 'paused_error' ? <><div className="error-strip"><strong>{match.error?.model}{match.error?.phase ? ` · ${phaseLabel[match.error.phase] ?? match.error.phase}` : ''}</strong><span>{aiErrorDescription(match.error)}</span></div><button onClick={() => void control('retry')}>再試行</button></> : <><button onClick={() => void control(match.status === 'paused' ? 'resume' : 'pause')}>{match.status === 'paused' ? '▶ 再開' : 'Ⅱ 一時停止'}</button><button className="danger" onClick={() => void control('abort')}>中断</button></>}</div> : <div className="replay-controls"><button onClick={() => setCursor(Math.max(0, events.filter((event) => event.seq < cursor).at(-1)?.seq ?? 0))}>‹</button><button className="play" onClick={() => setPlaying((value) => !value)}>{playing ? 'Ⅱ' : '▶'}</button><input aria-label="リプレイ位置" type="range" min="0" max={maxSeq} value={Math.min(cursor, maxSeq)} onChange={(event) => setCursor(Number(event.target.value))} /><span>{Math.min(cursor, maxSeq)} / {maxSeq}</span><button onClick={() => setCursor(events.find((event) => event.seq > cursor)?.seq ?? maxSeq)}>›</button></div>}
         <div className="api-count">API CALLS <strong>{match.apiCalls}</strong> / 240</div>
       </footer>
-      {error && <div className="connection-toast">{error}</div>}
+      {(error || voiceError) && <div className="connection-toast" role="alert">{error || voiceError}</div>}
       <CinematicOverlay cue={cinematicCue} />
     </main>
   );
