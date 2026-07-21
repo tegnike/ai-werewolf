@@ -18,6 +18,7 @@
     "accept:day1": "tsx scripts/accept-day1.ts",
     "character:validate": "tsx scripts/validate-character-preset.ts",
     "voicevox:dictionary": "tsx scripts/sync-voicevox-dictionary.ts",
+    "aivisspeech:dictionary": "tsx scripts/sync-aivisspeech-dictionary.ts",
     "db:migrate": "tsx scripts/migrate.ts"
   },
   "dependencies": {

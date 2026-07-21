@@ -1,4 +1,7 @@
 const DEFAULT_VOICEVOX_URL = 'http://127.0.0.1:50021';
+const DEFAULT_AIVISSPEECH_URL = 'http://127.0.0.1:10101';
+
+export type TtsDictionaryProvider = 'voicevox' | 'aivisspeech';
 
 export interface VoicevoxDictionaryEntry {
   surface: string;
@@ -7,7 +10,8 @@ export interface VoicevoxDictionaryEntry {
   priority?: number;
 }
 
-export const AGENT_NAME_DICTIONARY: readonly VoicevoxDictionaryEntry[] = [
+export const AI_WEREWOLF_DICTIONARY: readonly VoicevoxDictionaryEntry[] = [
+  { surface: '人狼', pronunciation: 'ジンロー', accentType: 0 },
   { surface: '名取', pronunciation: 'ナトリ', accentType: 3 },
   { surface: '澪', pronunciation: 'ミオ', accentType: 1 },
   { surface: '天満', pronunciation: 'テンマ', accentType: 1 },
@@ -42,6 +46,9 @@ export const AGENT_NAME_DICTIONARY: readonly VoicevoxDictionaryEntry[] = [
   { surface: '久遠さん', pronunciation: 'クオンサン', accentType: 0 },
 ];
 
+// 既存の利用箇所との互換性を保つ。
+export const AGENT_NAME_DICTIONARY = AI_WEREWOLF_DICTIONARY;
+
 interface VoicevoxUserDictionaryWord {
   surface: string;
   pronunciation: string;
@@ -57,6 +64,16 @@ export interface VoicevoxDictionarySyncResult {
   unchanged: string[];
 }
 
+const providerName = (provider: TtsDictionaryProvider): string => (
+  provider === 'aivisspeech' ? 'AIVISSPEECH' : 'VOICEVOX'
+);
+
+const providerBaseUrl = (provider: TtsDictionaryProvider): string => (
+  provider === 'aivisspeech'
+    ? process.env.AIVISSPEECH_URL ?? DEFAULT_AIVISSPEECH_URL
+    : process.env.VOICEVOX_URL ?? DEFAULT_VOICEVOX_URL
+);
+
 const requestUrl = (baseUrl: string, path: string, entry: VoicevoxDictionaryEntry): URL => {
   const url = new URL(path, `${baseUrl.replace(/\/$/, '')}/`);
   url.searchParams.set('surface', entry.surface);
@@ -67,27 +84,29 @@ const requestUrl = (baseUrl: string, path: string, entry: VoicevoxDictionaryEntr
   return url;
 };
 
-export async function syncAgentNameDictionary(
-  baseUrl = process.env.VOICEVOX_URL ?? DEFAULT_VOICEVOX_URL,
+export async function syncTtsUserDictionary(
+  provider: TtsDictionaryProvider,
+  baseUrl = providerBaseUrl(provider),
 ): Promise<VoicevoxDictionarySyncResult> {
+  const errorPrefix = providerName(provider);
   const dictionaryResponse = await fetch(new URL('/user_dict', baseUrl), {
     signal: AbortSignal.timeout(5_000),
     cache: 'no-store',
   });
-  if (!dictionaryResponse.ok) throw new Error(`VOICEVOX_USER_DICT_${dictionaryResponse.status}`);
+  if (!dictionaryResponse.ok) throw new Error(`${errorPrefix}_USER_DICT_${dictionaryResponse.status}`);
 
   const dictionary = await dictionaryResponse.json() as VoicevoxUserDictionary;
   const wordsBySurface = new Map(Object.entries(dictionary).map(([uuid, word]) => [word.surface, { uuid, word }]));
   const result: VoicevoxDictionarySyncResult = { added: [], updated: [], unchanged: [] };
 
-  for (const entry of AGENT_NAME_DICTIONARY) {
+  for (const entry of AI_WEREWOLF_DICTIONARY) {
     const existing = wordsBySurface.get(entry.surface);
     if (!existing) {
       const response = await fetch(requestUrl(baseUrl, '/user_dict_word', entry), {
         method: 'POST',
         signal: AbortSignal.timeout(10_000),
       });
-      if (!response.ok) throw new Error(`VOICEVOX_USER_DICT_ADD_${response.status}_${entry.surface}`);
+      if (!response.ok) throw new Error(`${errorPrefix}_USER_DICT_ADD_${response.status}_${entry.surface}`);
       result.added.push(entry.surface);
       continue;
     }
@@ -105,9 +124,17 @@ export async function syncAgentNameDictionary(
       method: 'PUT',
       signal: AbortSignal.timeout(10_000),
     });
-    if (!response.ok) throw new Error(`VOICEVOX_USER_DICT_UPDATE_${response.status}_${entry.surface}`);
+    if (!response.ok) throw new Error(`${errorPrefix}_USER_DICT_UPDATE_${response.status}_${entry.surface}`);
     result.updated.push(entry.surface);
   }
 
   return result;
 }
+
+export const syncAgentNameDictionary = (
+  baseUrl?: string,
+): Promise<VoicevoxDictionarySyncResult> => syncTtsUserDictionary('voicevox', baseUrl);
+
+export const syncAivisSpeechDictionary = (
+  baseUrl?: string,
+): Promise<VoicevoxDictionarySyncResult> => syncTtsUserDictionary('aivisspeech', baseUrl);

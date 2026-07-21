@@ -1,7 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AGENT_VOICES, voiceForSeat } from '@/domain/voices';
 import { synthesizeAgentSpeech, synthesizeTtsSpeech, TTS_SPEED_SCALE } from '@/server/voicevox';
-import { AGENT_NAME_DICTIONARY, syncAgentNameDictionary } from '@/server/voicevox-user-dictionary';
+import {
+  AI_WEREWOLF_DICTIONARY,
+  syncAgentNameDictionary,
+  syncAivisSpeechDictionary,
+} from '@/server/voicevox-user-dictionary';
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -54,7 +58,7 @@ describe('VOICEVOX話者割り当て', () => {
     expect(String(fetchMock.mock.calls[0][0])).toContain('127.0.0.1:10101/audio_query');
   });
 
-  it('漢字名の読みをVOICEVOXユーザー辞書へ追加する', async () => {
+  it('人狼と漢字名の読みをVOICEVOXユーザー辞書へ追加する', async () => {
     const requests: Array<{ method: string; url: URL }> = [];
     const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
       const url = new URL(input instanceof Request ? input.url : input);
@@ -66,8 +70,10 @@ describe('VOICEVOX話者割り当て', () => {
 
     const result = await syncAgentNameDictionary('http://voicevox.test:50021');
 
-    expect(result.added).toHaveLength(AGENT_NAME_DICTIONARY.length);
-    expect(requests.filter(({ method }) => method === 'POST')).toHaveLength(AGENT_NAME_DICTIONARY.length);
+    expect(result.added).toHaveLength(AI_WEREWOLF_DICTIONARY.length);
+    expect(requests.filter(({ method }) => method === 'POST')).toHaveLength(AI_WEREWOLF_DICTIONARY.length);
+    const werewolf = requests.find(({ url }) => url.searchParams.get('surface') === '人狼');
+    expect(werewolf?.url.searchParams.get('pronunciation')).toBe('ジンロー');
     const tenma = requests.find(({ url }) => url.searchParams.get('surface') === '天満');
     expect(tenma?.url.searchParams.get('pronunciation')).toBe('テンマ');
     const genzo = requests.find(({ url }) => url.searchParams.get('surface') === '源蔵');
@@ -79,8 +85,26 @@ describe('VOICEVOX話者割り当て', () => {
     expect(kuonSan?.url.searchParams.get('pronunciation')).toBe('クオンサン');
   });
 
+  it('同じ辞書をAivisSpeechユーザー辞書へ追加する', async () => {
+    const requests: URL[] = [];
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = new URL(input instanceof Request ? input.url : input);
+      requests.push(url);
+      if (url.pathname === '/user_dict') return Response.json({});
+      return Response.json('word-uuid');
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await syncAivisSpeechDictionary('http://aivis.test:10101');
+
+    expect(result.added).toHaveLength(AI_WEREWOLF_DICTIONARY.length);
+    expect(requests.every((url) => url.origin === 'http://aivis.test:10101')).toBe(true);
+    const werewolf = requests.find((url) => url.searchParams.get('surface') === '人狼');
+    expect(werewolf?.searchParams.get('pronunciation')).toBe('ジンロー');
+  });
+
   it('登録済みの正しい読みは重複登録しない', async () => {
-    const dictionary = Object.fromEntries(AGENT_NAME_DICTIONARY.map((entry, index) => [`word-${index}`, {
+    const dictionary = Object.fromEntries(AI_WEREWOLF_DICTIONARY.map((entry, index) => [`word-${index}`, {
       surface: entry.surface,
       pronunciation: entry.pronunciation,
       accent_type: entry.accentType,
@@ -91,7 +115,7 @@ describe('VOICEVOX話者割り当て', () => {
 
     const result = await syncAgentNameDictionary('http://voicevox.test:50021');
 
-    expect(result.unchanged).toHaveLength(AGENT_NAME_DICTIONARY.length);
+    expect(result.unchanged).toHaveLength(AI_WEREWOLF_DICTIONARY.length);
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });
