@@ -28,6 +28,22 @@ describe('編集可能なキャラクター設定', () => {
     expect(roster.some((profile) => profile.claimStrategy.trueMedium.emptyResultRevealTendency <= 15)).toBe(true);
   });
 
+  it('追加キャラクターには各人格の既存呼称に沿った既定スタイルを使う', () => {
+    const roster = cloneDefaultCharacterRoster();
+    expect(roster.map((profile) => profile.defaultAddressStyle)).toEqual([
+      'given_name_san', 'given_name', 'given_name_san', 'family_name_san', 'given_name',
+      'family_name', 'given_name', 'given_name_chan', 'given_name_san',
+    ]);
+
+    roster[1] = { ...roster[1], name: '月城 ニケ', addressBook: {} };
+    const sanitized = withoutReplacedCharacterDefaultAddresses(roster);
+    expect(sanitized.map((profile) => profile.seat === 'seat-2'
+      ? null
+      : characterAddressGuide(sanitized, profile.seat).match(/月城 ニケは「([^」]+)」/)?.[1])).toEqual([
+      'ニケさん', null, 'ニケさん', '月城さん', 'ニケ', '月城', 'ニケ', 'ニケちゃん', 'ニケさん',
+    ]);
+  });
+
   it('旧保存データは排他的形式へ変換し、共有JSONでは新形式だけを受け付ける', () => {
     const character = cloneDefaultCharacterRoster()[0];
     const legacy = {

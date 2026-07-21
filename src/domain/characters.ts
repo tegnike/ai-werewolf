@@ -24,6 +24,18 @@ export const CHARACTER_ADDRESS_STYLES = [
 ] as const;
 export type CharacterAddressStyle = (typeof CHARACTER_ADDRESS_STYLES)[number];
 
+const DEFAULT_CHARACTER_ADDRESS_STYLES: Record<SeatId, CharacterAddressStyle> = {
+  'seat-1': 'given_name_san',
+  'seat-2': 'given_name',
+  'seat-3': 'given_name_san',
+  'seat-4': 'family_name_san',
+  'seat-5': 'given_name',
+  'seat-6': 'family_name',
+  'seat-7': 'given_name',
+  'seat-8': 'given_name_chan',
+  'seat-9': 'given_name_san',
+};
+
 export interface CharacterProfile extends Omit<AgentPersona, 'firstPerson'> {
   firstPerson: string;
   roleClaimTemplate: string;
@@ -213,7 +225,7 @@ const roleClaimTemplate = (seat: SeatId): string =>
 export const DEFAULT_CHARACTER_ROSTER: CharacterRoster = AGENT_PERSONAS.map((persona, index) => ({
   ...persona,
   roleClaimTemplate: roleClaimTemplate(persona.seat),
-  defaultAddressStyle: 'full_name',
+  defaultAddressStyle: DEFAULT_CHARACTER_ADDRESS_STYLES[persona.seat],
   addressBook: { ...AGENT_ADDRESS_BOOKS[persona.seat] },
   roleBehaviors: { ...AGENT_ROLE_BEHAVIORS[persona.seat] },
   claimStrategy: structuredClone(AGENT_CLAIM_STRATEGIES[persona.seat]),
