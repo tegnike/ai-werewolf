@@ -147,7 +147,7 @@ describe('MatchRunner', () => {
     const events = manager.repo.events(match.id);
     expect(events.length).toBeGreaterThan(20);
     expect(new Set(events.map((event) => event.seq)).size).toBe(events.length);
-    expect(events.find((event) => event.type === 'match_created')?.payload.rules).toEqual({ discussion: 'v3', claims: 'v2', nightZero: 'uniform' });
+    expect(events.find((event) => event.type === 'match_created')?.payload.rules).toEqual({ discussion: 'v3', claims: 'v4', nightZero: 'uniform' });
     expect(events.some((event) => event.type === 'discussion_speech' && event.payload.structure)).toBe(true);
   });
   it('pause/resumeとabortを受け付ける', async () => {

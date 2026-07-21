@@ -1,4 +1,4 @@
-import type { ClaimDirective, SpeechClaim } from './claims';
+import type { ClaimDirective, ClaimIntent, SpeechClaim } from './claims';
 
 export type Role = 'villager' | 'werewolf' | 'seer' | 'medium' | 'bodyguard' | 'madman';
 export type Team = 'village' | 'werewolf';
@@ -197,6 +197,8 @@ export interface SpeechDecision {
   addressedTo: SeatId | null;
   requestsReply: boolean;
   claim?: SpeechClaim | null;
+  /** claims v3/v4でLLMが選んだ非公開作戦。discussion_speechの公開payloadへは保存しない。 */
+  claimIntent?: ClaimIntent;
   /** discussion v3で必須。v2以前の保存済みAI応答との互換のため型上は任意。 */
   structure?: SpeechStructure;
   /** 同一話者による変更のない投票予定の再宣言を主要貢献から格下げした印。 */

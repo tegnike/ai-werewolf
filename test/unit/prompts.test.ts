@@ -345,6 +345,86 @@ describe('実AI人格プロンプト', () => {
     expect(prompts.decisionPrompt).not.toContain('偽物');
   });
 
+  it('claims v3では人格設定と公開盤面からLLM自身に騙り・待機・潜伏を選ばせる', () => {
+    const players = setupPlayers('claims-v3-prompt');
+    const actor = { ...players[1], role: 'madman' as const };
+    const prompts = buildPrompts({
+      matchId: 'test', callKey: 'd1-claims-v3-seat-2', seed: 'claims-v3-prompt', day: 1,
+      phase: 'discussion', kind: 'speech', actor,
+      players: players.map((player) => player.seat === actor.seat ? actor : player),
+      legalTargets: [], publicHistory: [], privateFacts: ['自分の役職: madman'],
+      discussion: { version: 'v3', stage: 'opening', turn: 1 }, claimBoard: [],
+      claimDirective: {
+        mode: 'may', claimedRole: null, results: [], counterTargetSeat: null, strategicChoice: true,
+        priorIntent: null,
+        options: [
+          { claimedRole: 'seer', results: [{ day: 0, targetSeat: 'seat-3', verdict: '人狼ではない' }] },
+          { claimedRole: 'medium', results: [] },
+        ],
+      },
+    });
+    expect(prompts.systemPrompt).toContain('確率抽選ではありません');
+    expect(prompts.systemPrompt).toContain('騙り意欲=90/100');
+    expect(prompts.systemPrompt).toContain('占い師騙りで祭りを大きくする');
+    expect(prompts.systemPrompt).toContain('今名乗る、条件を決めて待つ、この試合では潜伏する');
+    expect(prompts.systemPrompt).toContain('claimIntent.action=claim_now');
+    expect(prompts.systemPrompt).toContain('主張を維持する方針');
+    expect(prompts.decisionPrompt).toContain('"options"');
+    expect(prompts.decisionPrompt).toContain('claimIntentは非公開の戦術判断');
+  });
+
+  it('claims v4では人数別の意欲・注目・露出コストを人格判断へ渡す', () => {
+    const players = setupPlayers('claims-v4-prompt');
+    const actor = { ...players[1], role: 'werewolf' as const };
+    const prompts = buildPrompts({
+      matchId: 'test', callKey: 'd1-claims-v4-seat-2', seed: 'claims-v4-prompt', day: 1,
+      phase: 'discussion', kind: 'speech', actor,
+      players: players.map((player) => player.seat === actor.seat ? actor : player),
+      legalTargets: [], publicHistory: [], privateFacts: ['自分の役職: werewolf'],
+      discussion: { version: 'v3', stage: 'opening', turn: 8 }, claimBoard: ['占い師2人'],
+      claimDirective: {
+        mode: 'may', claimedRole: null, results: [], counterTargetSeat: null, strategicChoice: true,
+        priorIntent: null,
+        personalityContext: {
+          existingRoleClaims: { seer: 2, medium: 0 }, actorBlackened: false,
+          day: 1, stage: 'opening', turn: 8,
+        },
+        options: [
+          { claimedRole: 'seer', results: [{ day: 0, targetSeat: 'seat-3', verdict: '人狼ではない' }] },
+          { claimedRole: 'medium', results: [] },
+        ],
+      },
+    });
+    expect(prompts.systemPrompt).toContain('今名乗ると3人目');
+    expect(prompts.systemPrompt).toContain('混雑許容=45/100');
+    expect(prompts.systemPrompt).toContain('仲間側の露出警戒=40/100');
+    expect(prompts.systemPrompt).toContain('対抗意欲よりこちらを優先');
+    expect(prompts.systemPrompt).toContain('0〜19=ほぼ選ばない');
+    expect(prompts.decisionPrompt).toContain('basisで人格と盤面を比較した決定打');
+  });
+
+  it('claims v4の結果なし真霊媒師はemptyResultRevealTendencyを優先する', () => {
+    const players = setupPlayers('claims-v4-empty-medium');
+    const actor = { ...players[5], role: 'medium' as const };
+    const prompts = buildPrompts({
+      matchId: 'test', callKey: 'd1-claims-v4-empty-medium', seed: 'claims-v4-empty-medium', day: 1,
+      phase: 'discussion', kind: 'speech', actor,
+      players: players.map((player) => player.seat === actor.seat ? actor : player),
+      legalTargets: [], publicHistory: [], privateFacts: ['自分の役職: medium'],
+      discussion: { version: 'v3', stage: 'opening', turn: 3 }, claimBoard: [],
+      claimDirective: {
+        mode: 'may', claimedRole: 'medium', results: [], counterTargetSeat: null, strategicChoice: true,
+        options: [{ claimedRole: 'medium', results: [] }],
+        personalityContext: {
+          existingRoleClaims: { seer: 1, medium: 0 }, actorBlackened: false,
+          day: 1, stage: 'opening', turn: 3,
+        },
+      },
+    });
+    expect(prompts.systemPrompt).toContain('結果なし公開意欲=15/100を主な決定値');
+    expect(prompts.systemPrompt).toContain('待機または潜伏を基本');
+  });
+
   it('役職主張の固定文も人格ごとの一人称へ統一する', () => {
     const players = setupPlayers('claim-first-person');
     const actor = { ...players[6], role: 'werewolf' as const };
@@ -449,6 +529,22 @@ describe('実AI人格プロンプト', () => {
     expect(consensusSchema.safeParse({
       speech: 'ひなたさんに投票します。', addressedTo: null, requestsReply: false,
       structure: { primaryAct: 'vote_intent', questionTopic: null, suspicion: null, voteIntent: 'seat-2', boardAnalysis: false },
+    }).success).toBe(true);
+
+    const strategicClaimSchema = speechDecisionSchema(['seat-2'], true, true, ['seat-2'], true);
+    const strategicDecision = {
+      speech: '今日は待ちます。', addressedTo: null, requestsReply: false, claim: null,
+      claimIntent: { action: 'wait', plannedRole: 'seer', trigger: 'counterclaim' },
+      structure: { primaryAct: 'other', questionTopic: null, suspicion: null, voteIntent: null, boardAnalysis: false },
+    };
+    expect(strategicClaimSchema.safeParse(strategicDecision).success).toBe(true);
+    const missingIntent = { ...strategicDecision, claimIntent: undefined };
+    expect(strategicClaimSchema.safeParse(missingIntent).success).toBe(false);
+    const personalityClaimSchema = speechDecisionSchema(['seat-2'], true, true, ['seat-2'], true, true);
+    expect(personalityClaimSchema.safeParse(strategicDecision).success).toBe(false);
+    expect(personalityClaimSchema.safeParse({
+      ...strategicDecision,
+      claimIntent: { ...strategicDecision.claimIntent, basis: 'avoid_crowding' },
     }).success).toBe(true);
   });
 

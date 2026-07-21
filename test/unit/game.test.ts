@@ -7,6 +7,7 @@ import { claimLedgerFromEvents } from '@/domain/claims';
 import { NIGHT_ZERO_UNINFORMED_FACT } from '@/domain/constants';
 import { setupPlayers } from '@/engine/setup';
 import { stableIndex } from '@/engine/prng';
+import { cloneDefaultCharacterRoster } from '@/domain/characters';
 
 describe('ゲームエンジン', () => {
   it('MockAIで終端し、同seedのpayload列が一致する', async () => {
@@ -283,6 +284,90 @@ describe('ゲームエンジン', () => {
         Number(closed.payload.openingSpeeches) + Number(closed.payload.consensusDefenseExtraSpeeches ?? 0));
       expect(Number(closed.payload.intentPolls)).toBeLessThanOrEqual(2);
     }
+  });
+
+  it('claims v3は人格設定から騙りを選び、非公開intentを公開イベントへ出さない', async () => {
+    const seed = 'claims-v3-personality';
+    const players = setupPlayers(seed);
+    const madman = players.find((player) => player.role === 'madman')!;
+    const runWithTendency = async (claimTendency: number) => {
+      const characters = cloneDefaultCharacterRoster();
+      const character = characters.find((item) => item.seat === madman.seat)!;
+      character.claimStrategy.madman = {
+        ...character.claimStrategy.madman,
+        claimTendency,
+        counterclaimTendency: claimTendency,
+        timing: claimTendency === 0 ? 'patient' : 'early',
+        preferredRole: 'seer',
+      };
+      const events: MatchEvent[] = [];
+      await runGame(`claims-v3-${claimTendency}`, seed, new MockAI(), {
+        emit: async (draft) => {
+          events.push({
+            ...draft, matchId: `claims-v3-${claimTendency}`, seq: events.length + 1, createdAt: '',
+          });
+        },
+        checkpoint: async () => {},
+      }, { claimsVersion: 'v3', discussionVersion: 'v3', characters });
+      return events;
+    };
+
+    const eagerEvents = await runWithTendency(100);
+    const hiddenEvents = await runWithTendency(0);
+    const eagerLedger = claimLedgerFromEvents(eagerEvents);
+    const hiddenLedger = claimLedgerFromEvents(hiddenEvents);
+    expect(eagerEvents.find((event) => event.type === 'match_created')?.payload.rules)
+      .toEqual({ discussion: 'v3', claims: 'v3', nightZero: 'uniform' });
+    expect(eagerLedger.some((entry) => entry.seat === madman.seat && entry.claimedRole === 'seer')).toBe(true);
+    expect(hiddenLedger.some((entry) => entry.seat === madman.seat)).toBe(false);
+    expect(eagerLedger.some((entry) => players.find((player) => player.seat === entry.seat)?.role === 'seer' && entry.coDay === 1)).toBe(true);
+    expect(JSON.stringify(eagerEvents)).not.toContain('claimIntent');
+    const eagerRoles = new Map(players.map((player) => [player.seat, player.role]));
+    expect(eagerLedger.filter((entry) => eagerRoles.get(entry.seat) === 'werewolf').length).toBeLessThanOrEqual(1);
+  });
+
+  it('claims v4は注目・混雑・仲間露出を含む人格差で騙りと潜伏を分ける', async () => {
+    const seed = 'claims-v4-personality-facets';
+    const runExtreme = async (eager: boolean) => {
+      const characters = cloneDefaultCharacterRoster().map((character) => ({
+        ...character,
+        claimStrategy: {
+          ...character.claimStrategy,
+          madman: {
+            ...character.claimStrategy.madman,
+            claimTendency: eager ? 100 : 0,
+            counterclaimTendency: eager ? 100 : 0,
+            crowdingTolerance: eager ? 100 : 0,
+            spotlightTolerance: eager ? 100 : 0,
+            selfPreservationTendency: eager ? 100 : 0,
+            pressureResponse: eager ? 'confront' as const : 'withdraw' as const,
+            timing: eager ? 'early' as const : 'patient' as const,
+          },
+          werewolf: {
+            ...character.claimStrategy.werewolf,
+            claimTendency: eager ? 100 : 0,
+            counterclaimTendency: eager ? 100 : 0,
+            crowdingTolerance: eager ? 100 : 0,
+            spotlightTolerance: eager ? 100 : 0,
+            selfPreservationTendency: eager ? 100 : 0,
+            pressureResponse: eager ? 'confront' as const : 'withdraw' as const,
+            teamExposureConcern: eager ? 0 : 100,
+            timing: eager ? 'early' as const : 'patient' as const,
+          },
+        },
+      }));
+      const events: MatchEvent[] = [];
+      await runGame(`claims-v4-${eager}`, seed, new MockAI(), {
+        emit: async (draft) => {
+          events.push({ ...draft, matchId: `claims-v4-${eager}`, seq: events.length + 1, createdAt: '' });
+        },
+        checkpoint: async () => {},
+      }, { claimsVersion: 'v4', discussionVersion: 'v3', characters });
+      const roles = new Map(setupPlayers(seed, characters).map((player) => [player.seat, player.role]));
+      return claimLedgerFromEvents(events).filter((entry) => ['madman', 'werewolf'].includes(roles.get(entry.seat) ?? '')).length;
+    };
+
+    expect(await runExtreme(true)).toBeGreaterThan(await runExtreme(false));
   });
 
   it.each([

@@ -1,8 +1,10 @@
 import { ROLE_LABEL } from '@/domain/constants';
-import { ClaimContractError, assertClaimWithinDirective } from '@/domain/claims';
+import {
+  ClaimContractError, assertClaimIntentWithinDirective, assertClaimWithinDirective,
+} from '@/domain/claims';
 import type { DecisionContext, SpeechDecision } from '@/domain/types';
 import {
-  characterAddressTerm, characterForSeat, characterNameForSeat, characterRoleClaimSentence,
+  characterAddressTerm, characterClaimStrategy, characterForSeat, characterNameForSeat, characterRoleClaimSentence,
 } from '@/domain/characters';
 
 const resultLikeClaim = /(?:人狼では(?:ない|ありません)|人狼)(?:でした|だった|です|だよ|と出|判定|結果)/;
@@ -257,6 +259,130 @@ export function resultDisclosureGuidance(context: DecisionContext): string | nul
     if (directive.mode === 'forbidden') {
       return '今回は役職を名乗らず、claimはnullにして公開情報への通常の発言だけをしてください。自分の能力結果や確認済みの正体を本文にも出さず、「村人だと確認できている」「結果はあるが今は言えない」のような匂わせもしないでください。';
     }
+    if (directive.strategicChoice && directive.options?.length && directive.personalityContext) {
+      const strategy = characterClaimStrategy(context.characters, context.actor.seat);
+      const relevant = context.actor.role === 'seer'
+        ? strategy.trueSeer
+        : context.actor.role === 'medium'
+          ? strategy.trueMedium
+          : context.actor.role === 'madman'
+            ? strategy.madman
+            : context.actor.role === 'werewolf'
+              ? strategy.werewolf
+              : null;
+      const situation = directive.personalityContext;
+      const timingLabels = { early: '自分から早め', responsive: '公開状況の変化へ反応', patient: '必要になるまで慎重に待つ' } as const;
+      const pressureLabels = { withdraw: '圧力を受けるほど露出を避ける', deliberate: '圧力の利益と危険を比較する', confront: '圧力へ正面から対抗する' } as const;
+      const scale = '尺度の意味は、0〜19=ほぼ選ばない、20〜39=明確な非常時だけ、40〜59=利益と代償を具体的に比較、60〜79=条件が合えば積極的、80〜100=人格として強く好む、です。これは乱数確率ではありません。';
+      const roleCounts = `現在の公開CO人数は占い師${situation.existingRoleClaims.seer}人、霊媒師${situation.existingRoleClaims.medium}人です。`;
+      const optionDescriptions = directive.options.map((option) => {
+        const count = situation.existingRoleClaims[option.claimedRole];
+        const roleLabel = option.claimedRole === 'seer' ? '占い師' : '霊媒師';
+        const roleClaimSentence = characterRoleClaimSentence(context.characters, context.actor.seat, roleLabel);
+        const results = option.results.map((result) =>
+          `${result.day}日目の${addressForSeat(context, result.targetSeat)}=${result.verdict}`).join('、') || '結果なし';
+        return `${option.claimedRole}: 今名乗ると${count + 1}人目。「${roleClaimSentence}」・${results}`;
+      }).join(' / ');
+      const personality = relevant && 'claimTendency' in relevant
+        ? [
+            `騙り意欲=${relevant.claimTendency}/100（同役職COが0人のとき）`,
+            `対抗意欲=${relevant.counterclaimTendency}/100（自分が2人目になるときだけ）`,
+            `混雑許容=${relevant.crowdingTolerance}/100（自分が3人目以降になるとき。ここでは対抗意欲よりこちらを優先）`,
+            `注目耐性=${relevant.spotlightTolerance}/100`,
+            `自己保全=${relevant.selfPreservationTendency}/100`,
+            `圧力反応=${pressureLabels[relevant.pressureResponse]}`,
+            `好む騙り=${relevant.preferredRole}`,
+            `時機=${timingLabels[relevant.timing]}`,
+            ...('teamExposureConcern' in relevant ? [`仲間側の露出警戒=${relevant.teamExposureConcern}/100（高いほど自分は潜伏）`] : []),
+          ].join('、')
+        : relevant && 'revealTendency' in relevant
+          ? `結果を持つ時の公開意欲=${relevant.revealTendency}/100、結果がない時の肩書公開意欲=${relevant.emptyResultRevealTendency}/100、注目耐性=${relevant.spotlightTolerance}/100、時機=${timingLabels[relevant.timing]}`
+          : '';
+      const trueRoleSituation = relevant && 'revealTendency' in relevant
+        ? directive.options.some((option) => option.results.length > 0)
+          ? `今回は公表できる結果があるため、主に結果あり公開意欲=${relevant.revealTendency}/100を使います。`
+          : `今回は公表できる結果がないため、結果あり公開意欲は使わず、結果なし公開意欲=${relevant.emptyResultRevealTendency}/100を主な決定値にします。0〜39なら、同役職対抗・公開期限・本人への強い圧力がない限り、肩書だけを出す一般セオリーを人格より優先せず、待機または潜伏を基本にしてください。`
+        : '';
+      const action = directive.mode === 'must'
+        ? '今回は公開期限・能力結果・真役職対抗のいずれかにより名乗る必要があります。認可候補から選び、claimIntent.action=claim_nowにしてください。'
+        : '候補があること自体を名乗る理由にしないでください。今名乗る利益と、注目・混雑・仲間側露出という人格上の代償を比較し、claim_now、公開条件付きのwait、この試合では潜伏するstay_hiddenから選んでください。';
+      const intent = 'claimIntent.basisには今回の決定打を一つだけ指定します。名乗るならclaimとplannedRoleを一致させ、待つなら再検討中の役職と公開triggerを指定し、潜伏ならplannedRole=null、trigger=noneにします。basisやこの判断過程は台詞へ出しません。';
+      const prior = directive.priorIntent
+        ? `以前の非公開方針は action=${directive.priorIntent.action}、plannedRole=${directive.priorIntent.plannedRole ?? 'null'}、trigger=${directive.priorIntent.trigger}、basis=${directive.priorIntent.basis ?? '未記録'}です。公開状況が変わっていないのに反転しないでください。`
+        : '以前の非公開方針はありません。';
+      const crowding = directive.options.some((option) => situation.existingRoleClaims[option.claimedRole] >= 2)
+        ? '3人目以降のCOは通常の対抗ではなく、処刑候補と露出を増やす別の賭けです。混雑許容が高い人物、強い自己保全、または人物固有の明確な狙いがない限り、単に対抗がいるという理由で選ばないでください。'
+        : '';
+      const nightZero = directive.options.some((option) => option.claimedRole === 'seer' && option.results.some((result) => result.day === 0))
+        ? '0日目は無情報選択なので、占い先を選んだ推理上の理由を作ってはいけません。'
+        : '';
+      return [
+        '役職主張は一般セオリーの模範解答ではなく、この人物が同じ状況で繰り返し選びそうな行動として決めてください。',
+        scale,
+        roleCounts,
+        `自分への公開上の人狼判定=${situation.actorBlackened ? 'あり' : 'なし'}。`,
+        personality,
+        trueRoleSituation,
+        relevant?.guidance ?? '',
+        `主張を維持する方針: ${strategy.consistency}`,
+        `今回認可された候補: ${optionDescriptions}。`,
+        crowding,
+        action,
+        intent,
+        prior,
+        nightZero,
+        '名乗る場合だけ、候補の対象・日・判定を変えず本文とclaimへ過不足なく入れてください。認可候補、数値、claimIntentという仕組み自体は台詞へ出さないでください。',
+      ].filter(Boolean).join(' ');
+    }
+    if (directive.strategicChoice && directive.options?.length) {
+      const strategy = characterClaimStrategy(context.characters, context.actor.seat);
+      const relevant = context.actor.role === 'seer'
+        ? strategy.trueSeer
+        : context.actor.role === 'medium'
+          ? strategy.trueMedium
+          : context.actor.role === 'madman'
+            ? strategy.madman
+            : context.actor.role === 'werewolf'
+              ? strategy.werewolf
+              : null;
+      const timingLabels = { early: '早め', responsive: '公開状況へ反応', patient: '慎重に待つ' } as const;
+      const tendency = relevant && 'revealTendency' in relevant
+        ? `公開意欲=${relevant.revealTendency}/100、時機=${timingLabels[relevant.timing]}`
+        : relevant && 'claimTendency' in relevant
+          ? `騙り意欲=${relevant.claimTendency}/100、対抗意欲=${relevant.counterclaimTendency}/100、好む騙り=${relevant.preferredRole}、時機=${timingLabels[relevant.timing]}`
+          : '';
+      const optionDescriptions = directive.options.map((option) => {
+        const roleLabel = option.claimedRole === 'seer' ? '占い師' : '霊媒師';
+        const roleClaimSentence = characterRoleClaimSentence(context.characters, context.actor.seat, roleLabel);
+        const results = option.results.map((result) =>
+          `${result.day}日目の${addressForSeat(context, result.targetSeat)}=${result.verdict}`).join('、') || '結果なし';
+        return `${option.claimedRole}:「${roleClaimSentence}」・${results}`;
+      }).join(' / ');
+      const action = directive.mode === 'must'
+        ? '今回は公開期限または能力結果・対抗状況により、認可候補から一つを必ず選んで名乗ってください。claimIntent.action=claim_now、plannedRole=実際に名乗る役職、claim=対応する候補にします。'
+        : '今回は人格と現在の公開盤面から、今名乗る、条件を決めて待つ、この試合では潜伏する、のいずれかをあなた自身で選んでください。これは確率抽選ではありません。';
+      const intent = directive.mode === 'must' ? '' : '今名乗るならclaimIntent.action=claim_nowとclaimを一致させます。待つならaction=wait、plannedRoleに検討中の役職、triggerに再検討条件を設定し、claim=nullにします。潜伏を決めるならaction=stay_hidden、plannedRole=null、trigger=none、claim=nullです。';
+      const prior = directive.priorIntent
+        ? `以前の非公開方針は action=${directive.priorIntent.action}、plannedRole=${directive.priorIntent.plannedRole ?? 'null'}、trigger=${directive.priorIntent.trigger} です。公開状況が変わった理由なしに気まぐれで反転しないでください。`
+        : '以前の非公開方針はありません。';
+      const resultLanguage = '名乗る場合は、候補の対象・日・判定を変えず、本文とclaimの両方へ過不足なく入れてください。「人狼ではない」は人物の口調に合う自然な過去形へ活用してください。';
+      const nightZero = directive.options.some((option) => option.claimedRole === 'seer' && option.results.some((result) => result.day === 0))
+        ? '0日目は無情報選択なので、占い先を選んだ推理上の理由を作ってはいけません。'
+        : '';
+      return [
+        '役職を名乗るかどうかはエンジンが決めた台本ではなく、この人物の人格と盤面に基づくあなたの非公開戦術判断です。',
+        tendency,
+        relevant?.guidance ?? '',
+        `主張を維持する方針: ${strategy.consistency}`,
+        `今回認可された候補: ${optionDescriptions}。`,
+        action,
+        intent,
+        prior,
+        resultLanguage,
+        nightZero,
+        'claimIntentや認可候補という仕組み自体は台詞へ出さないでください。',
+      ].filter(Boolean).join(' ');
+    }
     const roleLabel = directive.claimedRole === 'seer' ? '占い師' : '霊媒師';
     const roleClaimSentence = characterRoleClaimSentence(context.characters, context.actor.seat, roleLabel);
     const results = directive.results.map((result) =>
@@ -290,6 +416,7 @@ export function validateSpeechDisclosure(context: DecisionContext, decision: Spe
   if (abbreviatedRoleClaim.test(decision.speech)) throw new Error('Speech parse validation failed: abbreviated role claim is forbidden');
   if (context.claimDirective) {
     assertClaimWithinDirective(decision.claim, context.claimDirective);
+    assertClaimIntentWithinDirective(decision.claimIntent, decision.claim, context.claimDirective);
     if (!decision.claim) {
       if (hintsAtUnstructuredPrivateResult(decision.speech)) {
         throw new ClaimContractError(

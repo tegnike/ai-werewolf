@@ -18,6 +18,14 @@ describe('編集可能なキャラクター設定', () => {
     expect(characterAddressGuide(roster, 'seat-2')).toContain('福本 源蔵は「源蔵じいちゃん」');
     expect(roster.every((profile) => profile.llm.provider === 'openai' && profile.llm.reasoningEffort === 'low')).toBe(true);
     expect(roster.every((profile) => profile.tts.provider === 'voicevox')).toBe(true);
+    const madmanClaims = roster.map((profile) => profile.claimStrategy.madman.claimTendency);
+    const madmanCrowding = roster.map((profile) => profile.claimStrategy.madman.crowdingTolerance);
+    expect(Math.min(...madmanClaims)).toBeLessThanOrEqual(45);
+    expect(Math.max(...madmanClaims)).toBeGreaterThanOrEqual(90);
+    expect(Math.min(...madmanCrowding)).toBeLessThanOrEqual(10);
+    expect(Math.max(...madmanCrowding)).toBeGreaterThanOrEqual(75);
+    expect(roster.some((profile) => profile.claimStrategy.werewolf.teamExposureConcern >= 85)).toBe(true);
+    expect(roster.some((profile) => profile.claimStrategy.trueMedium.emptyResultRevealTendency <= 15)).toBe(true);
   });
 
   it('旧保存データは排他的形式へ変換し、共有JSONでは新形式だけを受け付ける', () => {
@@ -31,11 +39,13 @@ describe('編集可能なキャラクター設定', () => {
     delete legacy.llm;
     delete legacy.tts;
     delete legacy.defaultAddressStyle;
+    delete legacy.claimStrategy;
     const stored = characterProfileSchema.parse(legacy);
     expect(stored).toMatchObject({
       defaultAddressStyle: 'full_name',
       llm: { provider: 'gemini', thinkingBudget: 8_192 },
       tts: { provider: 'aivisspeech', voice: { speakerId: 888753760 } },
+      claimStrategy: { madman: { claimTendency: character.claimStrategy.madman.claimTendency } },
     });
     const portable = validateCharacterPreset(legacy);
     expect(portable.success).toBe(false);
@@ -79,6 +89,43 @@ describe('編集可能なキャラクター設定', () => {
     expect(result.errors.map((error) => error.path)).toEqual(expect.arrayContaining([
       'name', 'roleClaimTemplate', 'addressBook.seat-2',
     ]));
+  });
+
+  it('役職主張戦略の意欲値・時機・好む騙りを厳密に検証する', () => {
+    const character = cloneDefaultCharacterRoster()[0];
+    const invalid = {
+      ...character,
+      claimStrategy: {
+        ...character.claimStrategy,
+        madman: { ...character.claimStrategy.madman, claimTendency: 101, crowdingTolerance: -1, preferredRole: 'bodyguard' },
+        trueSeer: { ...character.claimStrategy.trueSeer, timing: 'random' },
+      },
+    };
+    const result = validateCharacterPreset(invalid);
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.errors.map((error) => error.path)).toEqual(expect.arrayContaining([
+        'claimStrategy.madman.claimTendency',
+        'claimStrategy.madman.crowdingTolerance',
+        'claimStrategy.madman.preferredRole',
+        'claimStrategy.trueSeer.timing',
+      ]));
+    }
+  });
+
+  it('claims v3以前の保存キャラクターへv4人格特性を補完する', () => {
+    const character = cloneDefaultCharacterRoster()[0];
+    const legacy = structuredClone(character) as unknown as Record<string, unknown>;
+    const claimStrategy = legacy.claimStrategy as Record<string, Record<string, unknown>>;
+    delete claimStrategy.trueMedium.emptyResultRevealTendency;
+    delete claimStrategy.trueMedium.spotlightTolerance;
+    delete claimStrategy.madman.crowdingTolerance;
+    delete claimStrategy.madman.pressureResponse;
+    delete claimStrategy.werewolf.teamExposureConcern;
+    const migrated = characterProfileSchema.parse(legacy);
+    expect(migrated.claimStrategy.trueMedium.emptyResultRevealTendency).toBeGreaterThanOrEqual(0);
+    expect(migrated.claimStrategy.madman.pressureResponse).toMatch(/withdraw|deliberate|confront/);
+    expect(migrated.claimStrategy.werewolf.teamExposureConcern).toBeGreaterThanOrEqual(0);
   });
 
   it('JSON構文と未知フィールドを検出し、席未定プリセットを受け付ける', () => {
@@ -171,6 +218,14 @@ describe('編集可能なキャラクター設定', () => {
       coreDrive: '相手の言葉を最後まで聞く。', roleClaimTemplate: '僕が{role}だよ',
       addressBook: { ...characters[1].addressBook, 'seat-1': '澪さん' },
       roleBehaviors: { ...characters[1].roleBehaviors, villager: '急がず、公開された発言を比較する。' },
+      claimStrategy: {
+        ...characters[1].claimStrategy,
+        madman: {
+          ...characters[1].claimStrategy.madman,
+          claimTendency: 99,
+          guidance: '注目を集めるため、最初の機会に占い師を名乗る。',
+        },
+      },
     };
     const players = setupPlayers('custom-character', characters);
     players[1] = { ...players[1], role: 'villager' };

@@ -119,6 +119,8 @@ export class RealAI implements DecisionProvider {
         context.discussion?.version === 'v3'
           ? context.players.filter((player) => player.alive && player.seat !== context.actor.seat).map((player) => player.seat)
           : undefined,
+        context.claimDirective?.strategicChoice === true,
+        Boolean(context.claimDirective?.personalityContext),
       ),
       'speech_decision',
       (decision) => validateSpeechDisclosure(context, decision),

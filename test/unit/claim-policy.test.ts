@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import type { ClaimLedger } from '@/domain/claims';
+import { GENERIC_CLAIM_STRATEGY } from '@/domain/claim-strategies';
 import {
-  claimDirectiveFor, decideClaimPolicies, planMadmanSeerFake, planWolfSeerFake, preserveFakeResultConsistency,
+  characterClaimDirectiveFor, claimDirectiveFor, decideClaimPolicies, planMadmanSeerFake, planWolfSeerFake,
+  preserveFakeResultConsistency,
 } from '@/engine/claim-policy';
 import { setupPlayers } from '@/engine/setup';
 
@@ -59,6 +61,70 @@ describe('役職主張ポリシー', () => {
       .not.toBe('must');
     expect(claimDirectiveFor(fixture!.seed, policy, [], available, { day: 1, stage: 'opening', turn: 6 }).mode)
       .toBe('must');
+  });
+
+  it('claims v3は騙り役職を事前抽選せずLLMへ占い師・霊媒師・潜伏を認可する', () => {
+    const seed = 'claims-v3-character-choice';
+    const players = setupPlayers(seed);
+    const policies = decideClaimPolicies(seed, players, 'v3');
+    const madman = players.find((player) => player.role === 'madman')!;
+    const wolf = players.find((player) => player.role === 'werewolf')!;
+    expect(policies.get(madman.seat)).toMatchObject({ stance: 'choice', claimedRole: null });
+    expect(policies.get(wolf.seat)).toMatchObject({ stance: 'choice', claimedRole: null });
+
+    const target = players.find((player) => player.seat !== madman.seat)!.seat;
+    const directive = characterClaimDirectiveFor(
+      policies.get(madman.seat)!, [],
+      { seer: [{ day: 0, targetSeat: target, verdict: '人狼ではない' }], medium: [] },
+      { day: 1, stage: 'opening', turn: 1 }, GENERIC_CLAIM_STRATEGY,
+    );
+    expect(directive).toMatchObject({ mode: 'may', strategicChoice: true, claimedRole: null });
+    expect(directive.options?.map((option) => option.claimedRole)).toEqual(['seer', 'medium']);
+  });
+
+  it('claims v3の真占い師は人格判断で待てるがturn 6から必須になる', () => {
+    const seed = 'claims-v3-true-seer';
+    const players = setupPlayers(seed);
+    const seer = players.find((player) => player.role === 'seer')!;
+    const policy = decideClaimPolicies(seed, players, 'v3').get(seer.seat)!;
+    const target = players.find((player) => player.seat !== seer.seat)!.seat;
+    const available = { seer: [{ day: 0, targetSeat: target, verdict: '人狼ではない' as const }], medium: [] };
+    expect(characterClaimDirectiveFor(policy, [], available, {
+      day: 1, stage: 'opening', turn: 5,
+    }, GENERIC_CLAIM_STRATEGY).mode).toBe('may');
+    expect(characterClaimDirectiveFor(policy, [], available, {
+      day: 1, stage: 'opening', turn: 6,
+    }, GENERIC_CLAIM_STRATEGY).mode).toBe('must');
+  });
+
+  it('claims v4は何人目のCOになるかを人格判断へ渡し、3人目を通常対抗扱いしない', () => {
+    const seed = 'claims-v4-crowding';
+    const players = setupPlayers(seed);
+    const madman = players.find((player) => player.role === 'madman')!;
+    const policy = decideClaimPolicies(seed, players, 'v4').get(madman.seat)!;
+    const targets = players.filter((player) => player.seat !== madman.seat).slice(0, 3);
+    const ledger = [
+      {
+        seat: targets[0].seat, name: targets[0].name, claimedRole: 'seer' as const,
+        coDay: 1, coStage: 'opening' as const, results: [],
+      },
+      {
+        seat: targets[1].seat, name: targets[1].name, claimedRole: 'seer' as const,
+        coDay: 1, coStage: 'opening' as const, results: [],
+      },
+    ];
+    const directive = characterClaimDirectiveFor(
+      policy,
+      ledger,
+      { seer: [{ day: 0, targetSeat: targets[2].seat, verdict: '人狼ではない' }], medium: [] },
+      { day: 1, stage: 'opening', turn: 8 },
+      GENERIC_CLAIM_STRATEGY,
+    );
+    expect(directive.personalityContext).toMatchObject({
+      existingRoleClaims: { seer: 2, medium: 0 }, actorBlackened: false, day: 1, turn: 8,
+    });
+    expect(directive.counterTargetSeat).toBeNull();
+    expect(directive.options?.find((option) => option.claimedRole === 'seer')).toBeDefined();
   });
 
   it('狂人は人狼位置を入力せず偽結果を作り、seed群では狼への黒誤爆も起きる', () => {

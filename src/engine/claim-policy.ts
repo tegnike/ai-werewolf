@@ -1,10 +1,13 @@
-import type { ClaimDirective, ClaimLedger, ClaimResult, ClaimStage, ClaimableRole } from '@/domain/claims';
+import type {
+  ClaimDirective, ClaimIntent, ClaimLedger, ClaimResult, ClaimStage, ClaimableRole, SpeechClaim,
+} from '@/domain/claims';
 import { unannouncedResults } from '@/domain/claims';
+import type { CharacterClaimStrategy } from '@/domain/claim-strategies';
 import type { Player, Role, SeatId } from '@/domain/types';
 import { stableIndex } from './prng';
 
-export type ClaimStance = 'truth' | 'fake' | 'silent';
-export type ClaimsVersion = 'v1' | 'v2';
+export type ClaimStance = 'truth' | 'fake' | 'choice' | 'silent';
+export type ClaimsVersion = 'v1' | 'v2' | 'v3' | 'v4';
 
 export interface ClaimSlot {
   day: number;
@@ -99,6 +102,13 @@ export function decideClaimPolicies(
       }];
     }
     if (player.role === 'madman') {
+      if (version === 'v3' || version === 'v4') {
+        return [player.seat, {
+          version, seat: player.seat, actualRole: player.role, stance: 'choice', claimedRole: null,
+          slot: { day: 1, stage: 'opening' }, deadline: null,
+          counterPercent: 0, advancePercent: 0, lateCounterPercent: 0, emergencyCounterPercent: 0,
+        }];
+      }
       const role = fakeRole(seed, player.seat, 78);
       const fake = happens(seed, `stance/madman/${player.seat}`, 62 + bias);
       return [player.seat, {
@@ -109,6 +119,13 @@ export function decideClaimPolicies(
       }];
     }
     if (player.role === 'werewolf') {
+      if (version === 'v3' || version === 'v4') {
+        return [player.seat, {
+          version, seat: player.seat, actualRole: player.role, stance: 'choice', claimedRole: null,
+          slot: { day: 1, stage: 'opening' }, deadline: null,
+          counterPercent: 0, advancePercent: 0, lateCounterPercent: 0, emergencyCounterPercent: 0,
+        }];
+      }
       const designated = player.seat === designatedWolf;
       const role = fakeRole(seed, player.seat, 68);
       const fake = designated && happens(seed, `stance/wolf/${player.seat}`, 16 + Math.trunc(bias / 2));
@@ -195,6 +212,93 @@ export function claimDirectiveFor(
     return { mode: 'must', claimedRole: role, results, counterTargetSeat: rival?.seat ?? null };
   }
   if (scheduled) return { mode: 'may', claimedRole: role, results, counterTargetSeat: rival?.seat ?? null };
+  return { mode: 'forbidden', claimedRole: null, results: [], counterTargetSeat: null };
+}
+
+function strategicDirective(
+  mode: ClaimDirective['mode'],
+  options: SpeechClaim[],
+  counterTargetSeat: SeatId | null,
+  priorIntent: ClaimIntent | undefined,
+  personalityContext?: ClaimDirective['personalityContext'],
+): ClaimDirective {
+  const single = options.length === 1 ? options[0] : null;
+  return {
+    mode,
+    claimedRole: single?.claimedRole ?? null,
+    results: single?.results.map((result) => ({ ...result })) ?? [],
+    counterTargetSeat,
+    options: options.map((option) => ({
+      claimedRole: option.claimedRole,
+      results: option.results.map((result) => ({ ...result })),
+    })),
+    strategicChoice: true,
+    priorIntent: priorIntent ?? null,
+    ...(personalityContext ? { personalityContext } : {}),
+  };
+}
+
+/**
+ * claims v3/v4: エンジンは合法な主張候補と最終期限だけを決め、
+ * その場で名乗るか・待つか・潜伏するかは人格設定を読んだLLMへ委ねる。
+ */
+export function characterClaimDirectiveFor(
+  policy: ClaimPolicy,
+  ledger: ClaimLedger,
+  availableResults: Record<ClaimableRole, ClaimResult[]>,
+  moment: ClaimMoment,
+  _strategy: CharacterClaimStrategy,
+  priorIntent?: ClaimIntent,
+): ClaimDirective {
+  const personalityContext: ClaimDirective['personalityContext'] = policy.version === 'v4' ? {
+    existingRoleClaims: {
+      seer: ledger.filter((entry) => entry.claimedRole === 'seer').length,
+      medium: ledger.filter((entry) => entry.claimedRole === 'medium').length,
+    },
+    actorBlackened: resultBlackens(ledger, policy.seat),
+    day: moment.day,
+    stage: moment.stage,
+    turn: moment.turn ?? null,
+  } : undefined;
+  const prior = ledger.find((entry) => entry.seat === policy.seat);
+  if (prior) {
+    const pending = unannouncedResults(availableResults[prior.claimedRole], prior);
+    if (pending.length === 0) {
+      return { mode: 'forbidden', claimedRole: null, results: [], counterTargetSeat: null };
+    }
+    const option = { claimedRole: prior.claimedRole, results: claimBatch(pending) };
+    const must = pending.some((result) => result.verdict === '人狼');
+    return strategicDirective(must ? 'must' : 'may', [option], null, priorIntent, personalityContext);
+  }
+
+  const rivalsFor = (role: ClaimableRole) => ledger.filter((entry) => entry.claimedRole === role);
+  const firstRivalFor = (role: ClaimableRole) => rivalsFor(role)[0]?.seat ?? null;
+  const counterTargetFor = (role: ClaimableRole) =>
+    policy.version === 'v4' && rivalsFor(role).length !== 1 ? null : firstRivalFor(role);
+  if (policy.actualRole === 'seer') {
+    const option: SpeechClaim = { claimedRole: 'seer', results: claimBatch(availableResults.seer) };
+    const must = option.results.some((result) => result.verdict === '人狼') ||
+      Boolean(firstRivalFor('seer')) || moment.day > 1 || (moment.day === 1 && (moment.turn ?? 0) >= 6);
+    return strategicDirective(must ? 'must' : 'may', [option], counterTargetFor('seer'), priorIntent, personalityContext);
+  }
+  if (policy.actualRole === 'medium') {
+    const option: SpeechClaim = { claimedRole: 'medium', results: claimBatch(availableResults.medium) };
+    const must = Boolean(firstRivalFor('medium')) || moment.day >= 3;
+    return strategicDirective(must ? 'must' : 'may', [option], counterTargetFor('medium'), priorIntent, personalityContext);
+  }
+  if (policy.actualRole === 'madman' || policy.actualRole === 'werewolf') {
+    const options: SpeechClaim[] = [
+      { claimedRole: 'seer', results: claimBatch(availableResults.seer) },
+      { claimedRole: 'medium', results: claimBatch(availableResults.medium) },
+    ];
+    return strategicDirective(
+      'may',
+      options,
+      policy.version === 'v4' ? null : counterTargetFor('seer') ?? counterTargetFor('medium'),
+      priorIntent,
+      personalityContext,
+    );
+  }
   return { mode: 'forbidden', claimedRole: null, results: [], counterTargetSeat: null };
 }
 

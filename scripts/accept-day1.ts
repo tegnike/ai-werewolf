@@ -3,9 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { claimLedgerFromEvents } from '../src/domain/claims';
 import type { MatchEvent, MatchRecord, SeatId, SpeechStructure } from '../src/domain/types';
-import { decideClaimPolicies } from '../src/engine/claim-policy';
 import { candidateEvidenceLedger, emptyDiscussionBoard, foldDiscussionBoard } from '../src/engine/discussion-board';
-import { setupPlayers } from '../src/engine/setup';
 import { closeDatabaseForTests } from '../src/server/db';
 import { MatchRepo } from '../src/server/repo';
 import { MatchRunnerManager } from '../src/server/runner';
@@ -52,30 +50,10 @@ function requireRealAI(): void {
 }
 
 function defaultSeedCases(): SeedCase[] {
-  const found = new Map<string, string>();
-  const usedSeeds = new Set<string>();
-  for (let index = 0; index < 50_000 && found.size < 3; index += 1) {
-    const seed = `day1-v3-${index}`;
-    const policies = [...decideClaimPolicies(seed, setupPlayers(seed), 'v2').values()];
-    const cases: Array<[string, boolean]> = [
-      ['madman-seer-opening', policies.some((policy) =>
-        policy.actualRole === 'madman' && policy.stance === 'fake' && policy.claimedRole === 'seer' &&
-        policy.slot?.day === 1 && policy.slot.stage === 'opening')],
-      ['wolf-seer-opening', policies.some((policy) =>
-        policy.actualRole === 'werewolf' && policy.stance === 'fake' && policy.claimedRole === 'seer' &&
-        policy.slot?.day === 1 && policy.slot.stage === 'opening')],
-      ['madman-medium-free', policies.some((policy) =>
-        policy.actualRole === 'madman' && policy.stance === 'fake' && policy.claimedRole === 'medium' &&
-        policy.slot?.day === 1 && policy.slot.stage === 'free')],
-    ];
-    const selected = cases.find(([scenario, matches]) => matches && !found.has(scenario) && !usedSeeds.has(seed));
-    if (selected) {
-      found.set(selected[0], seed);
-      usedSeeds.add(seed);
-    }
-  }
-  if (found.size !== 3) throw new Error(`Could not find all day-one seed classes: ${[...found.keys()].join(',')}`);
-  return [...found.entries()].map(([scenario, seed]) => ({ seed, scenario }));
+  return [0, 1, 2].map((index) => ({
+    seed: `day1-claims-v4-${index}`,
+    scenario: `personality-claim-choice-${index + 1}`,
+  }));
 }
 
 function requestedSeedCases(): SeedCase[] {
@@ -217,7 +195,7 @@ async function main(): Promise<void> {
       ai: 'real', llmProvider: configuredLlmProvider(), model: modelForProvider(configuredLlmProvider()), environmentSource,
       openaiReasoningEffort: DEFAULT_OPENAI_REASONING_EFFORT,
       geminiThinkingBudget: DEFAULT_GEMINI_THINKING_BUDGET,
-      discussionVersion: 'v3', claimsVersion: 'v2', stopAfter: 'day-one execution',
+      discussionVersion: 'v3', claimsVersion: 'v4', stopAfter: 'day-one execution',
       nightZeroMode: 'uniform',
     },
     databasePath,

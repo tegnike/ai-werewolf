@@ -116,9 +116,111 @@ export class MockAI implements DecisionProvider {
     ));
     const personaSeat = defaultProfile?.seat ?? context.actor.seat;
     const address = (seat: SeatId) => characterAddressTerm(context.characters, context.actor.seat, seat);
+    let strategicIntent: SpeechDecision['claimIntent'];
     if (context.kind === 'speech' && context.claimDirective) {
       const directive = context.claimDirective;
-      if (directive.mode !== 'forbidden' && directive.claimedRole) {
+      if (directive.strategicChoice && directive.options?.length) {
+        const options = directive.options;
+        const trueStrategy = context.actor.role === 'seer'
+          ? profile.claimStrategy.trueSeer
+          : context.actor.role === 'medium'
+            ? profile.claimStrategy.trueMedium
+            : null;
+        const deceptiveStrategy = context.actor.role === 'madman'
+          ? profile.claimStrategy.madman
+          : context.actor.role === 'werewolf'
+            ? profile.claimStrategy.werewolf
+            : null;
+        const preferredRole = deceptiveStrategy?.preferredRole;
+        const option = options.find((candidate) => candidate.claimedRole === preferredRole) ??
+          (preferredRole === 'adaptive'
+            ? options.find((candidate) => context.claimBoard?.some((entry) =>
+                entry.includes(candidate.claimedRole === 'seer' ? '占い師' : '霊媒師')))
+            : undefined) ??
+          options[stableIndex(context.seed, `${context.callKey}-claim-role`, options.length)];
+        const timing = trueStrategy?.timing ?? deceptiveStrategy?.timing ?? 'responsive';
+        const situation = directive.personalityContext;
+        const existingClaims = situation?.existingRoleClaims[option.claimedRole] ?? (directive.counterTargetSeat ? 1 : 0);
+        const situationalTendency = trueStrategy
+          ? option.results.length > 0 ? trueStrategy.revealTendency : trueStrategy.emptyResultRevealTendency
+          : deceptiveStrategy
+            ? existingClaims >= 2
+              ? deceptiveStrategy.crowdingTolerance
+              : existingClaims === 1
+                ? deceptiveStrategy.counterclaimTendency
+                : deceptiveStrategy.claimTendency
+            : 0;
+        let tendency = situationalTendency;
+        if (situation && trueStrategy) {
+          tendency = Math.round(situationalTendency * 0.7 + trueStrategy.spotlightTolerance * 0.3);
+        } else if (situation && deceptiveStrategy) {
+          const pressureWeight = situation.actorBlackened ? deceptiveStrategy.selfPreservationTendency * 0.35 : 0;
+          const exposurePenalty = context.actor.role === 'werewolf'
+            ? profile.claimStrategy.werewolf.teamExposureConcern * (existingClaims >= 2 ? 0.35 : 0.18)
+            : 0;
+          tendency = Math.round(
+            situationalTendency * (situation.actorBlackened ? 0.45 : 0.65) +
+            deceptiveStrategy.spotlightTolerance * 0.2 + pressureWeight - exposurePenalty,
+          );
+        }
+        const stageAdjustment = context.discussion?.stage === 'free' ? 8 : timing === 'early' ? 8 : timing === 'patient' ? -15 : 0;
+        const threshold = Math.max(0, Math.min(100, tendency + stageAdjustment));
+        const priorStayedHidden = directive.priorIntent?.action === 'stay_hidden';
+        const shouldClaim = directive.mode === 'must' || (!priorStayedHidden &&
+          stableIndex(context.seed, `${context.callKey}-claim-strategy`, 100) < threshold);
+        const claimBasis = situation?.actorBlackened
+          ? 'self_preservation' as const
+          : trueStrategy
+            ? 'information_duty' as const
+            : existingClaims === 1
+              ? 'counterclaim' as const
+              : existingClaims >= 2 ? 'control_discussion' as const : 'initiative' as const;
+        if (shouldClaim) {
+          const roleLabel = option.claimedRole === 'seer' ? '占い師' : '霊媒師';
+          const resultSpeech = option.results.map((result) => {
+            const verdict = result.verdict === '人狼' ? '人狼でした' : '人狼ではありませんでした';
+            return `${result.day}日目の${address(result.targetSeat)}は${verdict}`;
+          }).join('。');
+          const roleClaim = characterRoleClaimSentence(context.characters, context.actor.seat, roleLabel);
+          const speech = `${roleClaim}。${resultSpeech || '今は伝えられる結果はありません。'}`;
+          const addressedTo = directive.counterTargetSeat && context.legalTargets.includes(directive.counterTargetSeat)
+            ? directive.counterTargetSeat
+            : null;
+          return {
+            speech,
+            addressedTo,
+            requestsReply: false,
+            claim: { claimedRole: option.claimedRole, results: option.results.map((result) => ({ ...result })) },
+            claimIntent: {
+              action: 'claim_now',
+              plannedRole: option.claimedRole,
+              trigger: situation?.actorBlackened ? 'blackened' : existingClaims > 0 ? 'counterclaim' : 'opening',
+              ...(situation ? { basis: claimBasis } : {}),
+            },
+            ...(context.discussion?.version === 'v3' ? {
+              structure: { primaryAct: 'role_claim' as const, questionTopic: null, suspicion: null, voteIntent: null, boardAnalysis: false },
+            } : {}),
+          };
+        }
+        const finalOpportunity = context.discussion?.stage === 'free' || directive.priorIntent?.action === 'wait';
+        const action = finalOpportunity ? 'stay_hidden' as const : 'wait' as const;
+        const trigger = action === 'stay_hidden'
+          ? 'none' as const
+          : timing === 'patient' ? 'later_day' as const : directive.counterTargetSeat ? 'counterclaim' as const : 'pressure' as const;
+        const plannedRole = action === 'stay_hidden' ? null : option.claimedRole;
+        // 通常発言は下で人格別に生成し、非公開方針だけを添付する。
+        const hiddenBasis = context.actor.role === 'werewolf' && profile.claimStrategy.werewolf.teamExposureConcern >= 60
+          ? 'protect_team' as const
+          : existingClaims >= 2
+            ? 'avoid_crowding' as const
+            : 'avoid_spotlight' as const;
+        strategicIntent = {
+          action,
+          plannedRole,
+          trigger,
+          ...(situation ? { basis: action === 'wait' ? 'maintain_plan' as const : hiddenBasis } : {}),
+        };
+      } else if (directive.mode !== 'forbidden' && directive.claimedRole) {
         const roleLabel = directive.claimedRole === 'seer' ? '占い師' : '霊媒師';
         const resultSpeech = directive.results.map((result) => {
           const verdict = result.verdict === '人狼' ? '人狼でした' : '人狼ではありませんでした';
@@ -192,6 +294,11 @@ export class MockAI implements DecisionProvider {
       };
     }
     if (context.claimDirective) decision.claim = null;
+    if (context.claimDirective?.strategicChoice) {
+      decision.claimIntent = strategicIntent ?? context.claimDirective.priorIntent ?? {
+        action: 'stay_hidden', plannedRole: null, trigger: 'none',
+      };
+    }
     return decision;
   }
 

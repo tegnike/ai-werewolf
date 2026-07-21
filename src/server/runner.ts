@@ -176,8 +176,12 @@ export class MatchRunner {
       const created = this.existing.find((event) => event.type === 'match_created');
       const rules = created?.payload.rules as { claims?: unknown; discussion?: unknown; nightZero?: unknown } | undefined;
       const claimsVersion = this.existing.length === 0
-        ? 'v2'
-        : rules?.claims === 'v2'
+        ? 'v4'
+        : rules?.claims === 'v4'
+          ? 'v4'
+          : rules?.claims === 'v3'
+          ? 'v3'
+          : rules?.claims === 'v2'
           ? 'v2'
           : rules?.claims === 'v1'
             ? 'v1'

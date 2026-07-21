@@ -1,12 +1,13 @@
 import { MAX_DAYS, NIGHT_ZERO_UNINFORMED_FACT } from '@/domain/constants';
 import {
-  assertClaimWithinDirective, claimBoardDigest, foldClaim,
-  type ClaimDirective, type ClaimLedger, type ClaimResult, type ClaimableRole,
+  assertClaimIntentWithinDirective, assertClaimWithinDirective, claimBoardDigest, foldClaim,
+  type ClaimDirective, type ClaimIntent, type ClaimLedger, type ClaimResult, type ClaimableRole,
 } from '@/domain/claims';
 import type {
-  DecisionContext, DecisionProvider, DiscussionContext, GameState, MatchEvent, Player, RunHooks, SeatId, SpeechIntentDecision, Winner,
+  DecisionContext, DecisionProvider, DiscussionContext, GameState, MatchEvent, Player, RunHooks, SeatId, SpeechDecision,
+  SpeechIntentDecision, Winner,
 } from '@/domain/types';
-import { characterNameForSeat, type CharacterRoster } from '@/domain/characters';
+import { characterClaimStrategy, characterNameForSeat, type CharacterRoster } from '@/domain/characters';
 import { sanitizePublicVoteReason } from '@/domain/public-reason';
 import { legalAttackTargets, legalGuardTargets, legalSeerTargets, legalVoteTargets } from './legal';
 import { normalizeSpeech } from './narration';
@@ -15,7 +16,7 @@ import { setupPlayers } from './setup';
 import { createInitialState } from './state';
 import { checkVictory, isWerewolfResult } from './victory';
 import {
-  claimDirectiveFor, decideClaimPolicies, planMadmanMediumFake, planMadmanSeerFake,
+  characterClaimDirectiveFor, claimDirectiveFor, decideClaimPolicies, planMadmanMediumFake, planMadmanSeerFake,
   planWolfMediumFake, planWolfSeerFake, preserveFakeResultConsistency,
 } from './claim-policy';
 import {
@@ -139,7 +140,7 @@ export async function runGame(
   hooks: RunHooks,
   options: {
     includeDayOneDawn?: boolean;
-    claimsVersion?: 'v1' | 'v2';
+    claimsVersion?: 'v1' | 'v2' | 'v3' | 'v4';
     discussionVersion?: 'legacy' | 'v2' | 'v3';
     nightZeroMode?: 'ai' | 'uniform';
     characters?: CharacterRoster;
@@ -148,7 +149,8 @@ export async function runGame(
   const characters = options.characters;
   const players = setupPlayers(seed, characters);
   const seatName = (seat: SeatId | null): string => seat ? characterNameForSeat(characters, seat) : 'なし';
-  const claimsEnabled = options.claimsVersion === 'v1' || options.claimsVersion === 'v2';
+  const claimsEnabled = options.claimsVersion === 'v1' || options.claimsVersion === 'v2' ||
+    options.claimsVersion === 'v3' || options.claimsVersion === 'v4';
   const claimsVersion = options.claimsVersion;
   const discussionVersion = options.discussionVersion ?? 'v3';
   const nightZeroMode = options.nightZeroMode ?? 'uniform';
@@ -156,6 +158,7 @@ export async function runGame(
   let state = createInitialState(players);
   const publicHistory: string[] = [];
   let claimLedger: ClaimLedger = [];
+  const claimIntents = new Map<SeatId, ClaimIntent>();
   const claimResults = new Map<SeatId, Record<ClaimableRole, ClaimResult[]>>(
     players.map((player) => [player.seat, { seer: [], medium: [] }]),
   );
@@ -175,10 +178,32 @@ export async function runGame(
       return { mode: 'forbidden', claimedRole: null, results: [], counterTargetSeat: null };
     }
     const results = claimResults.get(actor.seat) ?? { seer: [], medium: [] };
-    return claimDirectiveFor(seed, policy, claimLedger, {
+    const availableResults = {
       seer: results.seer.map((result) => ({ ...result })),
       medium: results.medium.map((result) => ({ ...result })),
-    }, { day, stage, ...(turn ? { turn } : {}) });
+    };
+    const moment = { day, stage, ...(turn ? { turn } : {}) };
+    return claimsVersion === 'v3' || claimsVersion === 'v4'
+      ? characterClaimDirectiveFor(
+          policy,
+          claimLedger,
+          availableResults,
+          moment,
+          characterClaimStrategy(characters, actor.seat),
+          claimIntents.get(actor.seat),
+        )
+      : claimDirectiveFor(seed, policy, claimLedger, availableResults, moment);
+  };
+
+  const validateAndRememberClaimDecision = (
+    directive: ClaimDirective | undefined,
+    decision: SpeechDecision,
+    actor: Player,
+  ): void => {
+    if (!directive) return;
+    assertClaimWithinDirective(decision.claim, directive);
+    assertClaimIntentWithinDirective(decision.claimIntent, decision.claim, directive);
+    if (directive.strategicChoice && decision.claimIntent) claimIntents.set(actor.seat, { ...decision.claimIntent });
   };
 
   const emit = async (
@@ -291,7 +316,7 @@ export async function runGame(
         actor, day, 'discussion', 'speech', `d${day}-speech-opening-${actor.seat}`, legalTargets, 1, discussion,
       );
       const decision = await ai.speech(speechContext);
-      if (speechContext.claimDirective) assertClaimWithinDirective(decision.claim, speechContext.claimDirective);
+      validateAndRememberClaimDecision(speechContext.claimDirective, decision, actor);
       const speech = normalizeSpeech(decision.speech);
       await emit(day, 'discussion', 'discussion_speech', {
         seat: actor.seat, name: actor.name, round: 1, stage: 'opening', turn: index + 1,
@@ -408,7 +433,7 @@ export async function runGame(
         legalTargets, 2, discussion,
       );
       const decision = await ai.speech(speechContext);
-      if (speechContext.claimDirective) assertClaimWithinDirective(decision.claim, speechContext.claimDirective);
+      validateAndRememberClaimDecision(speechContext.claimDirective, decision, actor);
       const speech = normalizeSpeech(decision.speech);
       freeSpeechCount += 1;
       freeSpeechCounts.set(actor.seat, (freeSpeechCounts.get(actor.seat) ?? 0) + 1);
@@ -685,7 +710,7 @@ export async function runGame(
           legalTargets, actorSpeechCount + 1, discussion,
         );
         const decision = await ai.speech(speechContext);
-        if (speechContext.claimDirective) assertClaimWithinDirective(decision.claim, speechContext.claimDirective);
+        validateAndRememberClaimDecision(speechContext.claimDirective, decision, actor);
         if (discussionVersion === 'v3' && !decision.structure) throw new Error('DISCUSSION_V3_STRUCTURE_REQUIRED');
         if (discussionVersion === 'v3' && decision.structure) {
           decision.structure = sanitizeEchoSourceSeat(

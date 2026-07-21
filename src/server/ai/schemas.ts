@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { SEATS } from '@/domain/constants';
-import type { SeatId } from '@/domain/types';
+import { CLAIM_INTENT_BASES } from '@/domain/claims';
+import type { SeatId, SpeechDecision } from '@/domain/types';
 
 const motivationSchema = z.enum(['reply', 'question', 'challenge', 'new_information', 'clarify', 'none']);
 const speechActSchema = z.enum(['role_claim', 'question', 'answer', 'suspicion', 'defense', 'vote_intent', 'board_analysis', 'agreement', 'other']);
@@ -27,11 +28,20 @@ const speechClaimSchema = z.object({
   results: z.array(claimResultSchema),
 }).nullable();
 
+const baseClaimIntentSchema = z.object({
+  action: z.enum(['claim_now', 'wait', 'stay_hidden']),
+  plannedRole: z.enum(['seer', 'medium']).nullable(),
+  trigger: z.enum(['opening', 'counterclaim', 'blackened', 'pressure', 'later_day', 'none']),
+  basis: z.enum(CLAIM_INTENT_BASES).optional(),
+});
+
 export function speechDecisionSchema(
   legalSeats: SeatId[],
   withClaim = false,
   allowReply = true,
   structureSeats?: SeatId[],
+  withClaimIntent = false,
+  withClaimBasis = false,
 ) {
   const base = {
     speech: z.string().max(200),
@@ -50,8 +60,13 @@ export function speechDecisionSchema(
     voteIntent: nullableSeatSchema(structureSeats),
     boardAnalysis: z.boolean(),
   }) : null;
-  const shape = withClaim ? { ...base, claim: speechClaimSchema } : base;
-  return z.object(structure ? { ...shape, structure } : shape);
+  const claimIntentSchema = withClaimBasis
+    ? baseClaimIntentSchema.extend({ basis: z.enum(CLAIM_INTENT_BASES) })
+    : baseClaimIntentSchema;
+  const shape = withClaim
+    ? { ...base, claim: speechClaimSchema, ...(withClaimIntent ? { claimIntent: claimIntentSchema } : {}) }
+    : base;
+  return z.object(structure ? { ...shape, structure } : shape) as unknown as z.ZodType<SpeechDecision>;
 }
 
 export function speechIntentDecisionSchema(legalSeats: SeatId[]) {

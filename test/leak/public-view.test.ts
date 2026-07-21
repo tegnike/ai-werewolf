@@ -78,7 +78,7 @@ describe('公開viewの秘密情報分離', () => {
   });
 
   it('公開claimを厳密allowlistで射影し、方針や真役職を同乗させない', async () => {
-    const { events } = await runMock('1000', 'v1');
+    const { events } = await runMock('1000', 'v4');
     const projected = projectEvents(events.filter((event) => event.type !== 'match_finished'), 'public');
     const speech = projected.find((event) => event.type === 'discussion_speech' && event.payload.claim);
     expect(speech?.payload.claim).toBeTruthy();
@@ -90,5 +90,7 @@ describe('公開viewの秘密情報分離', () => {
     expect(json).not.toContain('claimDirective');
     expect(json).not.toContain('counterTargetSeat');
     expect(json).not.toContain('stance');
+    expect(json).not.toContain('claimIntent');
+    expect(json).not.toContain('avoid_crowding');
   });
 });

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
-  assertClaimWithinDirective, claimBoardDigest, foldClaim, type ClaimDirective, type ClaimLedger,
+  assertClaimIntentWithinDirective, assertClaimWithinDirective, claimBoardDigest, foldClaim,
+  type ClaimDirective, type ClaimLedger,
 } from '@/domain/claims';
 
 const directive: ClaimDirective = {
@@ -51,5 +52,51 @@ describe('公開役職主張', () => {
     expect(() => assertClaimWithinDirective({ claimedRole: 'seer', results: [] }, {
       mode: 'forbidden', claimedRole: null, results: [], counterTargetSeat: null,
     })).toThrow('forbidden_claim');
+  });
+
+  it('claims v3の複数候補と非公開intentを整合させる', () => {
+    const strategic: ClaimDirective = {
+      mode: 'may', claimedRole: null, results: [], counterTargetSeat: null, strategicChoice: true,
+      options: [
+        { claimedRole: 'seer', results: [{ day: 0, targetSeat: 'seat-2', verdict: '人狼ではない' }] },
+        { claimedRole: 'medium', results: [] },
+      ],
+    };
+    const seerClaim = strategic.options![0];
+    expect(() => assertClaimWithinDirective(seerClaim, strategic)).not.toThrow();
+    expect(() => assertClaimWithinDirective({ claimedRole: 'seer', results: [] }, strategic)).toThrow('unauthorized_result');
+    expect(() => assertClaimIntentWithinDirective({
+      action: 'claim_now', plannedRole: 'seer', trigger: 'opening',
+    }, seerClaim, strategic)).not.toThrow();
+    expect(() => assertClaimIntentWithinDirective({
+      action: 'wait', plannedRole: 'seer', trigger: 'counterclaim',
+    }, null, strategic)).not.toThrow();
+    expect(() => assertClaimIntentWithinDirective({
+      action: 'stay_hidden', plannedRole: null, trigger: 'none',
+    }, null, strategic)).not.toThrow();
+    expect(() => assertClaimIntentWithinDirective(undefined, null, strategic)).toThrow('claim_intent_missing');
+    expect(() => assertClaimIntentWithinDirective({
+      action: 'wait', plannedRole: 'seer', trigger: 'none',
+    }, null, strategic)).toThrow('wait_trigger_missing');
+    expect(() => assertClaimIntentWithinDirective({
+      action: 'wait', plannedRole: null, trigger: 'pressure',
+    }, null, strategic)).toThrow('wait_role_missing');
+  });
+
+  it('claims v4は非公開intentへ人格上の決定打を必須にする', () => {
+    const directive: ClaimDirective = {
+      mode: 'may', claimedRole: null, results: [], counterTargetSeat: null, strategicChoice: true,
+      options: [{ claimedRole: 'seer', results: [] }],
+      personalityContext: {
+        existingRoleClaims: { seer: 2, medium: 0 }, actorBlackened: false,
+        day: 1, stage: 'opening', turn: 5,
+      },
+    };
+    expect(() => assertClaimIntentWithinDirective({
+      action: 'stay_hidden', plannedRole: null, trigger: 'none',
+    }, null, directive)).toThrow('claim_basis_missing');
+    expect(() => assertClaimIntentWithinDirective({
+      action: 'stay_hidden', plannedRole: null, trigger: 'none', basis: 'avoid_crowding',
+    }, null, directive)).not.toThrow();
   });
 });

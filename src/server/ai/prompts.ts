@@ -296,7 +296,7 @@ export function buildPrompts(context: DecisionContext): { systemPrompt: string; 
           ? '発言は日本語200文字以内の独り言。addressedTo=null、requestsReply=false。誰かの返答を前提にしない'
           : '発言は日本語200文字以内の人狼同士の秘密会話。台詞では自然に相談へ応じるが、昼の次話者制御には使わないためaddressedTo=null、requestsReply=false'
         : context.claimDirective
-        ? `発言は日本語200文字以内。claimは役職主張の指示と本文を一致させる。addressedToは実際に話を向ける相手だけ、requestsReplyはその相手から後で返答が必要な場合だけtrue${discussionV3 ? '。structureは本文に現れる主目的・質問話題・疑い・投票予定と一致させる' : ''}`
+        ? `発言は日本語200文字以内。claimは役職主張の指示と本文を一致させる${context.claimDirective.strategicChoice ? `。claimIntentは非公開の戦術判断としてclaimと整合させる${context.claimDirective.personalityContext ? '。basisで人格と盤面を比較した決定打を一つ示す' : ''}` : ''}。addressedToは実際に話を向ける相手だけ、requestsReplyはその相手から後で返答が必要な場合だけtrue${discussionV3 ? '。structureは本文に現れる主目的・質問話題・疑い・投票予定と一致させる' : ''}`
         : `発言は日本語200文字以内。addressedToは実際に話を向ける相手だけ、requestsReplyはその相手から後で返答が必要な場合だけtrue${discussionV3 ? '。structureは本文に現れる主目的・質問話題・疑い・投票予定と一致させる' : ''}`
       : isSpeechIntent
         ? '今話す必要がなければurgency=0、motivation=none、targetSeat=null'

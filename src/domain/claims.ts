@@ -15,6 +15,31 @@ export interface SpeechClaim {
   results: ClaimResult[];
 }
 
+export type ClaimIntentAction = 'claim_now' | 'wait' | 'stay_hidden';
+export type ClaimIntentTrigger = 'opening' | 'counterclaim' | 'blackened' | 'pressure' | 'later_day' | 'none';
+export const CLAIM_INTENT_BASES = [
+  'information_duty', 'initiative', 'counterclaim', 'self_preservation', 'control_discussion',
+  'avoid_spotlight', 'avoid_crowding', 'protect_team', 'maintain_plan',
+] as const;
+export type ClaimIntentBasis = (typeof CLAIM_INTENT_BASES)[number];
+
+/** claims v3/v4で通常発言と同時に返す、公開イベントへは出さない役職主張方針。 */
+export interface ClaimIntent {
+  action: ClaimIntentAction;
+  plannedRole: ClaimableRole | null;
+  trigger: ClaimIntentTrigger;
+  /** claims v4で、どの人格特性・盤面コストを決定打にしたかを非公開で監査する。 */
+  basis?: ClaimIntentBasis;
+}
+
+export interface ClaimDecisionSituation {
+  existingRoleClaims: Record<ClaimableRole, number>;
+  actorBlackened: boolean;
+  day: number;
+  stage: ClaimStage;
+  turn: number | null;
+}
+
 export interface ClaimLedgerResult extends ClaimResult {
   announcedDay: number;
 }
@@ -35,6 +60,14 @@ export interface ClaimDirective {
   claimedRole: ClaimableRole | null;
   results: ClaimResult[];
   counterTargetSeat: SeatId | null;
+  /** claims v3/v4では複数の合法な主張からLLM自身が選ぶ。v1/v2には存在しない。 */
+  options?: SpeechClaim[];
+  /** trueならclaimと同時に非公開claimIntentを必須にする。 */
+  strategicChoice?: true;
+  /** 同じ試合の以前の発言で本人が選んだ非公開方針。 */
+  priorIntent?: ClaimIntent | null;
+  /** claims v4で、LLMが人格特性とCO人数を明示的に比較するための公開盤面。 */
+  personalityContext?: ClaimDecisionSituation;
 }
 
 export class ClaimContractError extends Error {
@@ -45,6 +78,11 @@ export class ClaimContractError extends Error {
 
 export function sameClaimResult(a: ClaimResult, b: ClaimResult): boolean {
   return a.day === b.day && a.targetSeat === b.targetSeat && a.verdict === b.verdict;
+}
+
+function sameSpeechClaim(a: SpeechClaim, b: SpeechClaim): boolean {
+  return a.claimedRole === b.claimedRole && a.results.length === b.results.length &&
+    a.results.every((result) => b.results.some((candidate) => sameClaimResult(result, candidate)));
 }
 
 export function foldClaim(
@@ -124,7 +162,11 @@ export function assertClaimWithinDirective(claim: SpeechClaim | null | undefined
     }
     return;
   }
-  if (claim.claimedRole !== directive.claimedRole) {
+  const options = directive.options?.length ? directive.options : directive.claimedRole ? [{
+    claimedRole: directive.claimedRole,
+    results: directive.results,
+  }] : [];
+  if (!options.some((option) => option.claimedRole === claim.claimedRole)) {
     throw new ClaimContractError('wrong_claimed_role', '指定された役職だけを名乗ってください。');
   }
   const duplicateDays = new Set<number>();
@@ -134,9 +176,45 @@ export function assertClaimWithinDirective(claim: SpeechClaim | null | undefined
     }
     duplicateDays.add(result.day);
   }
-  const exact = claim.results.length === directive.results.length &&
-    claim.results.every((result) => directive.results.some((allowed) => sameClaimResult(result, allowed)));
+  const exact = options.some((option) => sameSpeechClaim(claim, option));
   if (!exact) {
     throw new ClaimContractError('unauthorized_result', '指定された対象・日・結果を変えず、一覧を過不足なく伝えてください。');
+  }
+}
+
+
+export function assertClaimIntentWithinDirective(
+  intent: ClaimIntent | null | undefined,
+  claim: SpeechClaim | null | undefined,
+  directive: ClaimDirective,
+): void {
+  if (!directive.strategicChoice) return;
+  if (!intent) {
+    throw new ClaimContractError('claim_intent_missing', '役職主張をするか待つかの非公開方針claimIntentを必ず返してください。');
+  }
+  if (directive.personalityContext && !intent.basis) {
+    throw new ClaimContractError('claim_basis_missing', '人格と盤面のどちらを決定打にしたかbasisを必ず指定してください。');
+  }
+  const optionRoles = new Set((directive.options ?? []).map((option) => option.claimedRole));
+  if (intent.plannedRole && !optionRoles.has(intent.plannedRole)) {
+    throw new ClaimContractError('unauthorized_planned_role', 'plannedRoleは認可された役職だけを指定してください。');
+  }
+  if (intent.action === 'claim_now') {
+    if (!claim || intent.plannedRole !== claim.claimedRole) {
+      throw new ClaimContractError('claim_intent_mismatch', 'claim_nowならclaimを出し、plannedRoleを実際に名乗る役職と一致させてください。');
+    }
+    return;
+  }
+  if (claim) {
+    throw new ClaimContractError('claim_intent_mismatch', 'waitまたはstay_hiddenを選ぶならclaimはnullにしてください。');
+  }
+  if (intent.action === 'stay_hidden' && intent.trigger !== 'none') {
+    throw new ClaimContractError('hidden_trigger_mismatch', 'stay_hiddenではtriggerをnoneにしてください。');
+  }
+  if (intent.action === 'wait' && intent.trigger === 'none') {
+    throw new ClaimContractError('wait_trigger_missing', 'waitでは名乗りを再検討する公開上のtriggerを指定してください。');
+  }
+  if (intent.action === 'wait' && intent.plannedRole === null) {
+    throw new ClaimContractError('wait_role_missing', 'waitでは再検討中の認可済み役職をplannedRoleへ指定してください。');
   }
 }

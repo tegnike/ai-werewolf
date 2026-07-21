@@ -1,5 +1,9 @@
 import { z } from 'zod';
 import { AGENT_ADDRESS_BOOKS, AGENT_PERSONAS, roleClaimSentenceForSeat, type AgentPersona } from './agents';
+import {
+  AGENT_CLAIM_STRATEGIES, CLAIM_PRESSURE_RESPONSES, CLAIM_TIMINGS, DECEPTIVE_CLAIM_ROLES, GENERIC_CLAIM_STRATEGY,
+  type CharacterClaimStrategy,
+} from './claim-strategies';
 import { AGENT_ROLE_BEHAVIORS, type RoleBehaviorBook } from './role-behaviors';
 import { AGENT_VOICES, type AgentVoice } from './voices';
 import { SEATS } from './constants';
@@ -27,6 +31,8 @@ export interface CharacterProfile extends Omit<AgentPersona, 'firstPerson'> {
   defaultAddressStyle: CharacterAddressStyle;
   addressBook: Partial<Record<SeatId, string>>;
   roleBehaviors: RoleBehaviorBook;
+  /** 役職を名乗るか、騙るか、待つかをLLMが人格として判断するための傾向。 */
+  claimStrategy: CharacterClaimStrategy;
   /** 選択したLLMと、そのLLMだけに有効な推論設定。 */
   llm: CharacterLlmSettings;
   /** 選択した音声Engineと、そのEngineだけに有効な話者設定。 */
@@ -43,6 +49,36 @@ const roleBehaviorSchema = z.object({
   medium: z.string().trim().min(1).max(1_200),
   bodyguard: z.string().trim().min(1).max(1_200),
   madman: z.string().trim().min(1).max(1_200),
+}).strict();
+
+const trueRoleClaimStrategySchema = z.object({
+  revealTendency: z.number().int().min(0).max(100),
+  emptyResultRevealTendency: z.number().int().min(0).max(100),
+  spotlightTolerance: z.number().int().min(0).max(100),
+  timing: z.enum(CLAIM_TIMINGS),
+  guidance: z.string().trim().min(1).max(2_000),
+}).strict();
+
+const deceptiveRoleClaimStrategySchema = z.object({
+  claimTendency: z.number().int().min(0).max(100),
+  counterclaimTendency: z.number().int().min(0).max(100),
+  crowdingTolerance: z.number().int().min(0).max(100),
+  spotlightTolerance: z.number().int().min(0).max(100),
+  selfPreservationTendency: z.number().int().min(0).max(100),
+  pressureResponse: z.enum(CLAIM_PRESSURE_RESPONSES),
+  preferredRole: z.enum(DECEPTIVE_CLAIM_ROLES),
+  timing: z.enum(CLAIM_TIMINGS),
+  guidance: z.string().trim().min(1).max(2_000),
+}).strict();
+
+const claimStrategySchema = z.object({
+  trueSeer: trueRoleClaimStrategySchema,
+  trueMedium: trueRoleClaimStrategySchema,
+  madman: deceptiveRoleClaimStrategySchema,
+  werewolf: deceptiveRoleClaimStrategySchema.extend({
+    teamExposureConcern: z.number().int().min(0).max(100),
+  }).strict(),
+  consistency: z.string().trim().min(1).max(2_000),
 }).strict();
 
 const shortText = z.string().trim().min(1).max(120);
@@ -95,6 +131,7 @@ export const strictCharacterProfileSchema = z.object({
   defaultAddressStyle: z.enum(CHARACTER_ADDRESS_STYLES),
   addressBook: z.record(z.string(), z.string().trim().min(1).max(60)),
   roleBehaviors: roleBehaviorSchema,
+  claimStrategy: claimStrategySchema,
   llm: llmSchema,
   tts: ttsSchema,
   portraitSrc: z.string().min(1).max(3_000_000).refine(
@@ -126,6 +163,21 @@ function normalizeLegacyCharacterProfile(value: unknown): unknown {
   if (!('defaultAddressStyle' in normalized)) {
     normalized.defaultAddressStyle = 'full_name';
   }
+
+  const defaultPersona = AGENT_PERSONAS.find((persona) => persona.name === normalized.name);
+  const claimDefaults = structuredClone(
+    defaultPersona ? AGENT_CLAIM_STRATEGIES[defaultPersona.seat] : GENERIC_CLAIM_STRATEGY,
+  );
+  const storedClaimStrategy = isRecord(normalized.claimStrategy) ? normalized.claimStrategy : {};
+  normalized.claimStrategy = {
+    trueSeer: { ...claimDefaults.trueSeer, ...(isRecord(storedClaimStrategy.trueSeer) ? storedClaimStrategy.trueSeer : {}) },
+    trueMedium: { ...claimDefaults.trueMedium, ...(isRecord(storedClaimStrategy.trueMedium) ? storedClaimStrategy.trueMedium : {}) },
+    madman: { ...claimDefaults.madman, ...(isRecord(storedClaimStrategy.madman) ? storedClaimStrategy.madman : {}) },
+    werewolf: { ...claimDefaults.werewolf, ...(isRecord(storedClaimStrategy.werewolf) ? storedClaimStrategy.werewolf : {}) },
+    consistency: typeof storedClaimStrategy.consistency === 'string'
+      ? storedClaimStrategy.consistency
+      : claimDefaults.consistency,
+  };
 
   if (!('llm' in normalized)) {
     const provider: LlmProvider = normalized.llmProvider === 'gemini' ? 'gemini' : 'openai';
@@ -164,6 +216,7 @@ export const DEFAULT_CHARACTER_ROSTER: CharacterRoster = AGENT_PERSONAS.map((per
   defaultAddressStyle: 'full_name',
   addressBook: { ...AGENT_ADDRESS_BOOKS[persona.seat] },
   roleBehaviors: { ...AGENT_ROLE_BEHAVIORS[persona.seat] },
+  claimStrategy: structuredClone(AGENT_CLAIM_STRATEGIES[persona.seat]),
   llm: { provider: 'openai', reasoningEffort: 'low' },
   tts: { provider: 'voicevox', voice: { ...AGENT_VOICES[index] } },
   portraitSrc: `/assets/agents/agent_${index + 1}.png`,
@@ -251,6 +304,13 @@ export function characterRoleClaimSentence(
 
 export function characterRoleBehavior(characters: CharacterRoster | undefined, seat: SeatId, role: Role): string {
   return characterForSeat(characters, seat).roleBehaviors[role];
+}
+
+export function characterClaimStrategy(
+  characters: CharacterRoster | undefined,
+  seat: SeatId,
+): CharacterClaimStrategy {
+  return characterForSeat(characters, seat).claimStrategy;
 }
 
 export function llmProviderForCharacter(character: CharacterProfile): LlmProvider {

@@ -251,11 +251,47 @@ export function CharacterEditor() {
             <label className="full-width">ビジュアル設定<textarea value={draft.visualBrief} onChange={(event) => update('visualBrief', event.target.value)} /><small>将来の立ち絵再生成用メモです。</small></label>
           </div></section>
 
-          <details className="editor-advanced"><summary><span>05</span><div><strong>役職別の行動方針</strong><small>6役職それぞれの発言・投票・夜行動</small></div></summary><div className="editor-fields">
+          <details className="editor-advanced"><summary><span>05</span><div><strong>役職主張と騙り戦略</strong><small>LLMが人格として名乗る・待つ・潜伏を選ぶための傾向</small></div></summary><div className="editor-fields">
+            <p className="full-width execution-settings-note">0〜100は確率抽選ではなく、LLMへ渡す人格上の強さです。0〜19はほぼ選ばない、20〜39は非常時だけ、40〜59は状況次第、60〜79は積極的、80〜100は強く好む、を目安にします。</p>
+            {([
+              ['trueSeer', '真占い師', 'revealTendency', '公開意欲'],
+              ['trueMedium', '真霊媒師', 'revealTendency', '公開意欲'],
+            ] as const).map(([key, label, tendencyKey, tendencyLabel]) => {
+              const strategy = draft.claimStrategy[key];
+              return <div className="editor-fields two-column full-width" key={key}><h3 className="voice-provider-heading">{label}</h3>
+                <label>{tendencyLabel}<input type="number" min="0" max="100" value={strategy[tendencyKey]} onChange={(event) => update('claimStrategy', { ...draft.claimStrategy, [key]: { ...strategy, [tendencyKey]: Number(event.target.value) } })} /></label>
+                <label>結果なしでの公開意欲<input type="number" min="0" max="100" value={strategy.emptyResultRevealTendency} onChange={(event) => update('claimStrategy', { ...draft.claimStrategy, [key]: { ...strategy, emptyResultRevealTendency: Number(event.target.value) } })} /></label>
+                <label>注目への耐性<input type="number" min="0" max="100" value={strategy.spotlightTolerance} onChange={(event) => update('claimStrategy', { ...draft.claimStrategy, [key]: { ...strategy, spotlightTolerance: Number(event.target.value) } })} /></label>
+                <label>名乗る時機<select value={strategy.timing} onChange={(event) => update('claimStrategy', { ...draft.claimStrategy, [key]: { ...strategy, timing: event.target.value as typeof strategy.timing } })}><option value="early">早め</option><option value="responsive">公開状況へ反応</option><option value="patient">慎重に待つ</option></select></label>
+                <label className="full-width">判断方針<textarea value={strategy.guidance} onChange={(event) => update('claimStrategy', { ...draft.claimStrategy, [key]: { ...strategy, guidance: event.target.value } })} /></label>
+              </div>;
+            })}
+            {([
+              ['madman', '狂人'],
+              ['werewolf', '人狼'],
+            ] as const).map(([key, label]) => {
+              const strategy = draft.claimStrategy[key];
+              return <div className="editor-fields two-column full-width" key={key}><h3 className="voice-provider-heading">{label}の騙り</h3>
+                <label>騙り意欲<input type="number" min="0" max="100" value={strategy.claimTendency} onChange={(event) => update('claimStrategy', { ...draft.claimStrategy, [key]: { ...strategy, claimTendency: Number(event.target.value) } })} /></label>
+                <label>対抗意欲<input type="number" min="0" max="100" value={strategy.counterclaimTendency} onChange={(event) => update('claimStrategy', { ...draft.claimStrategy, [key]: { ...strategy, counterclaimTendency: Number(event.target.value) } })} /></label>
+                <label>3人目以降への混雑許容<input type="number" min="0" max="100" value={strategy.crowdingTolerance} onChange={(event) => update('claimStrategy', { ...draft.claimStrategy, [key]: { ...strategy, crowdingTolerance: Number(event.target.value) } })} /></label>
+                <label>注目への耐性<input type="number" min="0" max="100" value={strategy.spotlightTolerance} onChange={(event) => update('claimStrategy', { ...draft.claimStrategy, [key]: { ...strategy, spotlightTolerance: Number(event.target.value) } })} /></label>
+                <label>追い込まれた時の騙り意欲<input type="number" min="0" max="100" value={strategy.selfPreservationTendency} onChange={(event) => update('claimStrategy', { ...draft.claimStrategy, [key]: { ...strategy, selfPreservationTendency: Number(event.target.value) } })} /></label>
+                <label>圧力への反応<select value={strategy.pressureResponse} onChange={(event) => update('claimStrategy', { ...draft.claimStrategy, [key]: { ...strategy, pressureResponse: event.target.value as typeof strategy.pressureResponse } })}><option value="withdraw">露出を避ける</option><option value="deliberate">利益と危険を比較</option><option value="confront">正面から対抗</option></select></label>
+                {key === 'werewolf' && <label>仲間側の露出への警戒<input type="number" min="0" max="100" value={draft.claimStrategy.werewolf.teamExposureConcern} onChange={(event) => update('claimStrategy', { ...draft.claimStrategy, werewolf: { ...draft.claimStrategy.werewolf, teamExposureConcern: Number(event.target.value) } })} /></label>}
+                <label>好む騙り<select value={strategy.preferredRole} onChange={(event) => update('claimStrategy', { ...draft.claimStrategy, [key]: { ...strategy, preferredRole: event.target.value as typeof strategy.preferredRole } })}><option value="seer">占い師</option><option value="medium">霊媒師</option><option value="adaptive">盤面で選ぶ</option></select></label>
+                <label>名乗る時機<select value={strategy.timing} onChange={(event) => update('claimStrategy', { ...draft.claimStrategy, [key]: { ...strategy, timing: event.target.value as typeof strategy.timing } })}><option value="early">早め</option><option value="responsive">公開状況へ反応</option><option value="patient">慎重に待つ</option></select></label>
+                <label className="full-width">判断方針<textarea value={strategy.guidance} onChange={(event) => update('claimStrategy', { ...draft.claimStrategy, [key]: { ...strategy, guidance: event.target.value } })} /></label>
+              </div>;
+            })}
+            <label>主張を維持する方針<textarea value={draft.claimStrategy.consistency} onChange={(event) => update('claimStrategy', { ...draft.claimStrategy, consistency: event.target.value })} /></label>
+          </div></details>
+
+          <details className="editor-advanced"><summary><span>06</span><div><strong>役職別の行動方針</strong><small>6役職それぞれの発言・投票・夜行動</small></div></summary><div className="editor-fields">
             {roles.map((role) => <label key={role.key}>{role.label}<textarea value={draft.roleBehaviors[role.key]} onChange={(event) => update('roleBehaviors', { ...draft.roleBehaviors, [role.key]: event.target.value })} /></label>)}
           </div></details>
 
-          <details className="editor-advanced"><summary><span>06</span><div><strong>他の8人への呼び方</strong><small>大まかな既定ルールを選び、必要な相手だけ個別設定</small></div></summary><div className="editor-fields two-column">
+          <details className="editor-advanced"><summary><span>07</span><div><strong>他の8人への呼び方</strong><small>大まかな既定ルールを選び、必要な相手だけ個別設定</small></div></summary><div className="editor-fields two-column">
             <label className="full-width">個別設定がない相手の呼び方<select aria-label="個別設定がない相手の呼び方" value={draft.defaultAddressStyle} onChange={(event) => update('defaultAddressStyle', event.target.value as CharacterAddressStyle)}>{addressStyles.map((style) => <option key={style.value} value={style.value}>{style.label}</option>)}</select><small>下の個別呼称が設定されている相手には、そちらを優先します。</small></label>
             {characters.filter((character) => character.seat !== draft.seat).map((character) => <label key={character.seat}>{character.name}<input value={draft.addressBook[character.seat] ?? ''} onChange={(event) => update('addressBook', { ...draft.addressBook, [character.seat]: event.target.value })} /></label>)}
           </div></details>

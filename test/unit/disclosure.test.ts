@@ -161,6 +161,62 @@ describe('能力結果の公開', () => {
     })).not.toThrow();
   });
 
+  it('claims v3のclaimIntentと複数の認可候補を本文・claimと合わせる', () => {
+    const base = seerContext();
+    const context: DecisionContext = {
+      ...base,
+      actor: { ...base.actor, role: 'madman' },
+      claimDirective: {
+        mode: 'may', claimedRole: null, results: [], counterTargetSeat: null, strategicChoice: true,
+        options: [
+          { claimedRole: 'seer', results: [{ day: 0, targetSeat: 'seat-3', verdict: '人狼ではない' }] },
+          { claimedRole: 'medium', results: [] },
+        ],
+      },
+    };
+    const claim = { claimedRole: 'seer' as const, results: [{
+      day: 0, targetSeat: 'seat-3' as const, verdict: '人狼ではない' as const,
+    }] };
+    expect(() => validateSpeechDisclosure(context, {
+      speech: 'うち、占い師やで。0日目のさくらちゃんは人狼ではありませんでした。',
+      addressedTo: null, requestsReply: false, claim,
+      claimIntent: { action: 'claim_now', plannedRole: 'seer', trigger: 'opening' },
+    })).not.toThrow();
+    expect(() => validateSpeechDisclosure(context, {
+      ...decision('今日は話を聞くで。'), claim: null,
+      claimIntent: { action: 'wait', plannedRole: 'seer', trigger: 'counterclaim' },
+    })).not.toThrow();
+    expect(() => validateSpeechDisclosure(context, {
+      speech: 'うち、占い師やで。0日目のさくらちゃんは人狼ではありませんでした。',
+      addressedTo: null, requestsReply: false, claim,
+      claimIntent: { action: 'wait', plannedRole: 'seer', trigger: 'counterclaim' },
+    })).toThrow('claim_intent_mismatch');
+  });
+
+  it('claims v4は人格判断basisのないclaimIntentを拒否する', () => {
+    const base = seerContext();
+    const context: DecisionContext = {
+      ...base,
+      actor: { ...base.actor, role: 'madman' },
+      claimDirective: {
+        mode: 'may', claimedRole: null, results: [], counterTargetSeat: null, strategicChoice: true,
+        options: [{ claimedRole: 'seer', results: [] }],
+        personalityContext: {
+          existingRoleClaims: { seer: 2, medium: 0 }, actorBlackened: false,
+          day: 1, stage: 'opening', turn: 4,
+        },
+      },
+    };
+    expect(() => validateSpeechDisclosure(context, {
+      ...decision('今日は潜って様子を見るで。'), claim: null,
+      claimIntent: { action: 'stay_hidden', plannedRole: null, trigger: 'none' },
+    })).toThrow('claim_basis_missing');
+    expect(() => validateSpeechDisclosure(context, {
+      ...decision('今日は潜って様子を見るで。'), claim: null,
+      claimIntent: { action: 'stay_hidden', plannedRole: null, trigger: 'none', basis: 'avoid_crowding' },
+    })).not.toThrow();
+  });
+
   it('人格の呼称と自然な過去形で認可結果を伝えられる', () => {
     const base = seerContext();
     const result = { day: 1, targetSeat: 'seat-8' as const, verdict: '人狼ではない' as const };

@@ -8,7 +8,7 @@
 
 - 1ファイルにつき1キャラクターです。9人分をまとめて読み込む形式ではありません。
 - APIキーは含みません。APIキーはOpenAI・Geminiそれぞれのサーバー環境変数を使用します。
-- 立ち絵、人格、役職別の行動方針、大まかな既定呼称、任意の個別呼称、キャラクターごとのLLM・推論設定と、選択したTTS Engineの話者設定を含みます。
+- 立ち絵、人格、役職別の行動方針、人格に基づく役職主張・騙り戦略、大まかな既定呼称、任意の個別呼称、キャラクターごとのLLM・推論設定と、選択したTTS Engineの話者設定を含みます。
 - LLMとTTSはそれぞれ1つだけ選びます。選択していないプロバイダー用の推論設定や話者設定はJSONへ入れません。
 - 共有用JSONでは席を決めません。`seat`関連の値を空文字にし、試合開始時にシステムが9人を配置します。
 - 読み込んだだけでは保存されません。内容を確認して「保存」を押すと、次に作成する試合から反映されます。
@@ -92,6 +92,46 @@ roleClaimTemplate: 役職名の差し込み位置 {role} が必要です。
     "bodyguard": "公開情報から襲撃されそうな相手を選び、連続護衛禁止を守る。",
     "madman": "人狼を知らない前提で推理し、村の判断を迷わせる主張を選ぶ。"
   },
+  "claimStrategy": {
+    "trueSeer": {
+      "revealTendency": 78,
+      "emptyResultRevealTendency": 20,
+      "spotlightTolerance": 58,
+      "timing": "responsive",
+      "guidance": "初日中の情報公開を基本にするが、対抗や議論の要求を確認してから丁寧に名乗る。"
+    },
+    "trueMedium": {
+      "revealTendency": 70,
+      "emptyResultRevealTendency": 24,
+      "spotlightTolerance": 48,
+      "timing": "responsive",
+      "guidance": "処刑結果が出たら抱え込みすぎず、投票理由と照合して共有する。"
+    },
+    "madman": {
+      "claimTendency": 62,
+      "counterclaimTendency": 74,
+      "crowdingTolerance": 18,
+      "spotlightTolerance": 52,
+      "selfPreservationTendency": 60,
+      "pressureResponse": "deliberate",
+      "preferredRole": "seer",
+      "timing": "responsive",
+      "guidance": "一般的な狂人の基本として占い師騙りを有力視するが、目立つより信用を得られる時機を選ぶ。"
+    },
+    "werewolf": {
+      "claimTendency": 24,
+      "counterclaimTendency": 52,
+      "crowdingTolerance": 8,
+      "spotlightTolerance": 42,
+      "selfPreservationTendency": 58,
+      "pressureResponse": "deliberate",
+      "teamExposureConcern": 78,
+      "preferredRole": "adaptive",
+      "timing": "patient",
+      "guidance": "仲間の露出と役職主張数を見て、潜伏より信用勝負に価値がある場合だけ騙る。"
+    },
+    "consistency": "一度公表した役職と結果は維持し、待つと決めた場合も公開状況が変わった理由なしに方針を反転しない。"
+  },
   "tts": {
     "provider": "voicevox",
     "voice": {
@@ -135,6 +175,7 @@ roleClaimTemplate: 役職名の差し込み位置 {role} が必要です。
 | `llm` | — | OpenAIまたはGeminiのどちらか一方と、そのプロバイダー専用の推論設定。 |
 | `tts` | — | VOICEVOXまたはAivisSpeechのどちらか一方と、そのEngine専用の話者設定。 |
 | `roleBehaviors` | 各1,200文字 | 6役職それぞれの発言、投票、夜行動方針。 |
+| `claimStrategy` | 下記参照 | 真役職の公開、狂人・人狼の騙り、対抗、作戦維持をLLMが人格として判断するための設定。 |
 | `portraitSrc` | 3,000,000文字 | アプリ内アセットのパス、または画像のData URL。 |
 
 `seat`と`tts.voice.seat`以外の文字列は空にできません。未使用にしたい項目も、キャラクターとして意味のある短い説明を入れてください。
@@ -182,6 +223,55 @@ roleClaimTemplate: 役職名の差し込み位置 {role} が必要です。
 
 一般ルール上の能力や秘密情報を増やす指示は書かないでください。たとえば、狂人が最初から人狼を知る設定や、狩人が連続護衛禁止を無視する設定は無効です。
 
+### `claimStrategy`
+
+`claimStrategy`は、実AIが現在の公開盤面と人格を合わせて、役職を今名乗るか、条件を決めて待つか、潜伏するかを選ぶための設定です。エンジンが最終行動を確率抽選するための値ではありません。
+
+- `trueSeer`と`trueMedium`は、結果を持つ場合の`revealTendency`、結果がない場合の`emptyResultRevealTendency`、注目への`spotlightTolerance`、`timing`、`guidance`を持ちます。
+- `madman`と`werewolf`は、0人盤面の`claimTendency`、2人目になる`counterclaimTendency`、3人目以降になる`crowdingTolerance`、`spotlightTolerance`、追い込まれた際の`selfPreservationTendency`と`pressureResponse`、`preferredRole`、`timing`、`guidance`を持ちます。
+- `werewolf`だけは、仲間側の露出を増やすことへの`teamExposureConcern`も持ちます。
+- `consistency`には、一度決めた非公開作戦と公表した役職・結果をどう維持する人物かを書きます。
+
+意欲値は0〜100の整数です。実AIは乱数確率として使わず、次の共通尺度で人物傾向を解釈します。MockAIだけが決定論的な反復試験のために数値を利用します。
+
+| 範囲 | 人格としての意味 |
+| ---: | --- |
+| 0〜19 | ほぼ選ばない。 |
+| 20〜39 | 明確な非常時だけ選ぶ。 |
+| 40〜59 | 利益と代償を具体的に比較する。 |
+| 60〜79 | 条件が合えば積極的に選ぶ。 |
+| 80〜100 | 人格として強く好む。 |
+
+`counterclaimTendency`は自分が2人目になる場合だけに使います。すでに同じ役職が2人いる場合は、単なる対抗ではなく`crowdingTolerance`を優先します。これにより「対抗がいるから全員出る」という均一化を避けます。
+
+試合中のLLMには、現在の占い師・霊媒師CO人数と、各候補を選んだ場合に自分が何人目になるかが渡されます。LLMは設定値、`guidance`、公開盤面を比較し、決定打だけを非公開の`basis`へ記録します。自由な思考過程や`basis`は公開会話・観戦画面へ出ません。
+
+`pressureResponse`は次の3種類です。
+
+| 値 | 意味 |
+| --- | --- |
+| `withdraw` | 疑いや人狼判定を受けるほど露出を避ける。 |
+| `deliberate` | 騙る利益と露出の危険を比較する。 |
+| `confront` | 圧力へ役職主張で正面から対抗しやすい。 |
+
+`timing`は次の3種類です。
+
+| 値 | 意味 |
+| --- | --- |
+| `early` | 最初の発言機会など早い段階を好む。 |
+| `responsive` | 対抗、質問、公開結果など盤面の変化を見て動く。 |
+| `patient` | 必要性が高まるまで慎重に待つ。 |
+
+`preferredRole`は、狂人・人狼が騙る場合の初期的な好みです。
+
+| 値 | 意味 |
+| --- | --- |
+| `seer` | 占い師騙りを好む。 |
+| `medium` | 霊媒師騙りを好む。 |
+| `adaptive` | 現在の役職主張数や人物像から選ぶ。 |
+
+狂人の設定では、人狼が誰かを最初から知っている前提を書かないでください。人狼の設定でも狂人位置は分かりません。一般的な9人人狼として、狂人の占い師騙りが基本戦術であることは判断材料にできますが、全キャラクターを同じ数値・同じ文章へ揃えず、その人物がなぜ前へ出るか、なぜ待つかを具体的に書いてください。
+
 ### `tts`
 
 次のどちらか一方だけを指定します。
@@ -226,6 +316,7 @@ roleClaimTemplate: 役職名の差し込み位置 {role} が必要です。
 - `llm`または`tts`がない、選択プロバイダーと対応しない設定が入っている、または旧フラット形式のキーを使っている。
 - `defaultAddressStyle`がない、または許可された8種類以外の値になっている。
 - `roleClaimTemplate` に `{role}` がない。
+- `claimStrategy`がない、意欲値・耐性値が0〜100の整数ではない、または`timing`・`preferredRole`・`pressureResponse`が許可値に含まれない。
 - 席未定なのに `seat`または`tts.voice.seat`へ固定席を入れている。
 - `addressBook` に存在しない席や自分自身の席を指定している。
 - 同じ名前のキャラクターが別の席にいる。
