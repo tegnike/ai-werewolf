@@ -170,29 +170,35 @@ test('ホームから試合を開始して公開／GM視点とリプレイを表
 test('Spaceキーでゲームと発言音声を一時停止・再開し、中断できる', async ({ page }) => {
   test.setTimeout(90_000);
   const voiceAudio = await readFile('public/assets/bgm_village.ogg');
+  let ttsPostCount = 0;
   await page.route('**/api/tts**', async (route) => {
     if (route.request().method() === 'GET') {
       await route.fulfill({ json: { available: true } });
       return;
     }
+    ttsPostCount += 1;
     await route.fulfill({ status: 200, contentType: 'audio/ogg', body: voiceAudio });
   });
   await page.goto('/');
   await page.getByRole('button', { name: /AI人狼を開始/ }).click();
   await expect(page).toHaveURL(/\/match\//, { timeout: 45_000 });
   await expect(page.locator('.cinematic-overlay')).toContainText('第0夜', { timeout: 15_000 });
-  await expect(page.getByRole('heading', { name: '名取 澪' })).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByRole('heading', { name: '名取 澪', exact: true })).toBeVisible({ timeout: 15_000 });
   await expect(page.locator('.agent-card.speaking')).toHaveCount(0);
   await expect(page.locator('.cinematic-overlay')).toContainText('1日目', { timeout: 15_000 });
   await expect(page.locator('.agent-card.speaking')).toHaveCount(0);
   await expect(page.locator('.cinematic-overlay')).toHaveCount(0, { timeout: 10_000 });
   await expect(page.locator('.viewer-shell')).toHaveClass(/day/);
   await expect(page.locator('.agent-card.speaking')).toHaveCount(1, { timeout: 30_000 });
-  const speakingName = await page.locator('.agent-card.speaking h2').textContent();
-  const speakingText = await page.locator('.agent-card.speaking blockquote').textContent();
+  await expect.poll(() => ttsPostCount).toBeGreaterThanOrEqual(2);
   await expect(page.getByRole('region', { name: '注目中の発言' })).toBeVisible();
-  await expect(page.locator('.speaker-stage h2')).toContainText(speakingName ?? '');
-  await expect(page.locator('.speaker-stage blockquote')).toContainText(speakingText ?? '');
+  await expect.poll(() => page.evaluate(() => {
+    const speakingName = document.querySelector('.agent-card.speaking h2')?.textContent;
+    const speakingText = document.querySelector('.agent-card.speaking blockquote')?.textContent;
+    const stageName = document.querySelector('.speaker-stage h2')?.textContent;
+    const stageText = document.querySelector('.speaker-stage blockquote')?.textContent;
+    return Boolean(speakingName && speakingText && stageName?.includes(speakingName) && stageText?.includes(speakingText));
+  })).toBe(true);
   const speakerStageBox = await page.locator('.speaker-stage').boundingBox();
   const controlDockBox = await page.locator('.control-dock').boundingBox();
   const lastAgentBox = await page.locator('.agent-card').last().boundingBox();

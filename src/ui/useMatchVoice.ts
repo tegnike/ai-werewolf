@@ -2,8 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { UiEvent } from './types';
-
-interface SpeechItem { seq: number; seat: string; speech: string }
+import { fillSpeechPrefetch, type SpeechItem } from './voice-prefetch';
 
 export function useMatchVoice(matchId: string, events: UiEvent[], onSpeechStart: (seq: number) => void, paused = false) {
   const [enabled, setEnabledState] = useState(true);
@@ -16,6 +15,8 @@ export function useMatchVoice(matchId: string, events: UiEvent[], onSpeechStart:
   const [speakingSeq, setSpeakingSeq] = useState<number | null>(null);
   const lastObservedSeq = useRef<number | null>(null);
   const queue = useRef<SpeechItem[]>([]);
+  const preparedAudio = useRef<Map<number, Promise<Blob | null>>>(new Map());
+  const synthesisControllers = useRef<Map<number, AbortController>>(new Map());
   const pumping = useRef(false);
   const currentAudio = useRef<HTMLAudioElement | null>(null);
   const currentItem = useRef<SpeechItem | null>(null);
@@ -37,6 +38,9 @@ export function useMatchVoice(matchId: string, events: UiEvent[], onSpeechStart:
 
   const stopVoice = useCallback(() => {
     queue.current = [];
+    for (const controller of synthesisControllers.current.values()) controller.abort();
+    synthesisControllers.current.clear();
+    preparedAudio.current.clear();
     currentAudio.current?.pause();
     finishCurrentAudio.current?.();
     setBusy(false);
@@ -50,19 +54,43 @@ export function useMatchVoice(matchId: string, events: UiEvent[], onSpeechStart:
     onSpeechStart(item.seq);
   }, [onSpeechStart]);
 
+  const prepareSpeech = useCallback((item: SpeechItem): Promise<Blob | null> => {
+    const existing = preparedAudio.current.get(item.seq);
+    if (existing) return existing;
+    const controller = new AbortController();
+    synthesisControllers.current.set(item.seq, controller);
+    const prepared = fetch('/api/tts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ matchId, seat: item.seat, text: item.speech }),
+      signal: controller.signal,
+    }).then(async (response) => response.ok ? response.blob() : null)
+      .catch(() => null)
+      .finally(() => synthesisControllers.current.delete(item.seq));
+    preparedAudio.current.set(item.seq, prepared);
+    return prepared;
+  }, [matchId]);
+
+  const prefetchQueuedSpeech = useCallback(() => {
+    fillSpeechPrefetch(queue.current, preparedAudio.current, prepareSpeech);
+  }, [prepareSpeech]);
+
   const pump = useCallback(async () => {
     if (pumping.current || pausedRef.current || !enabledRef.current || available === false) return;
     pumping.current = true;
     setBusy(true);
     while (queue.current.length > 0 && enabledRef.current && !pausedRef.current) {
+      prefetchQueuedSpeech();
       const item = queue.current.shift();
       if (!item) break;
       try {
-        const response = await fetch('/api/tts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ matchId, seat: item.seat, text: item.speech }) });
+        const blob = await prepareSpeech(item);
+        preparedAudio.current.delete(item.seq);
+        prefetchQueuedSpeech();
         // キャラクターごとにTTSが異なるため、1話者のEngine失敗で他の話者まで無効化しない。
-        if (!response.ok) continue;
+        if (!blob) continue;
         if (!enabledRef.current) break;
-        const url = URL.createObjectURL(await response.blob());
+        const url = URL.createObjectURL(blob);
         const audio = new Audio(url);
         audio.volume = volumeRef.current;
         currentAudio.current = audio;
@@ -97,7 +125,7 @@ export function useMatchVoice(matchId: string, events: UiEvent[], onSpeechStart:
     setSpeakingSeat(null);
     setSpeakingSeq(null);
     if (queue.current.length > 0 && enabledRef.current && !pausedRef.current) void pump();
-  }, [available, markSpeechStarted, matchId]);
+  }, [available, markSpeechStarted, prefetchQueuedSpeech, prepareSpeech]);
 
   useEffect(() => {
     pausedRef.current = paused;
@@ -121,8 +149,9 @@ export function useMatchVoice(matchId: string, events: UiEvent[], onSpeechStart:
     lastObservedSeq.current = Math.max(lastObservedSeq.current, maxSeq);
     if (!enabled || fresh.length === 0) return;
     queue.current.push(...fresh.map((event) => ({ seq: event.seq, seat: String(event.payload.seat), speech: String(event.payload.speech) })));
+    prefetchQueuedSpeech();
     void pump();
-  }, [enabled, events, pump]);
+  }, [enabled, events, prefetchQueuedSpeech, pump]);
 
   useEffect(() => { if (!enabled) stopVoice(); }, [enabled, stopVoice]);
   useEffect(() => stopVoice, [stopVoice]);
