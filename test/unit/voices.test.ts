@@ -58,6 +58,29 @@ describe('VOICEVOX話者割り当て', () => {
     expect(String(fetchMock.mock.calls[0][0])).toContain('127.0.0.1:10101/audio_query');
   });
 
+  it('複数タブ相当の同時要求も同一TTS Engineへは1件ずつ送る', async () => {
+    let activeRequests = 0;
+    let maxConcurrency = 0;
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      activeRequests += 1;
+      maxConcurrency = Math.max(maxConcurrency, activeRequests);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      activeRequests -= 1;
+      const url = String(input instanceof Request ? input.url : input);
+      return url.includes('/audio_query')
+        ? Response.json({ speedScale: 1 })
+        : new Response(new Uint8Array([1, 2, 3]), { status: 200 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await Promise.all([
+      synthesizeTtsSpeech('voicevox', 'seat-1', '一人目です。'),
+      synthesizeTtsSpeech('voicevox', 'seat-2', '二人目です。'),
+    ]);
+
+    expect(maxConcurrency).toBe(1);
+  });
+
   it('人狼と漢字名の読みをVOICEVOXユーザー辞書へ追加する', async () => {
     const requests: Array<{ method: string; url: URL }> = [];
     const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {

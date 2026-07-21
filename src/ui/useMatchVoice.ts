@@ -2,7 +2,9 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { UiEvent } from './types';
-import { fillSpeechPrefetch, POST_SPEECH_GAP_MS, type SpeechItem } from './voice-prefetch';
+import {
+  fillSpeechPrefetch, POST_SPEECH_GAP_MS, SerialSpeechPreparer, speechPlaybackFailureDisposition, type SpeechItem,
+} from './voice-prefetch';
 
 export function useMatchVoice(matchId: string, events: UiEvent[], onSpeechStart: (seq: number) => void, paused = false) {
   const [enabled, setEnabledState] = useState(true);
@@ -17,6 +19,7 @@ export function useMatchVoice(matchId: string, events: UiEvent[], onSpeechStart:
   const queue = useRef<SpeechItem[]>([]);
   const preparedAudio = useRef<Map<number, Promise<Blob | null>>>(new Map());
   const synthesisControllers = useRef<Map<number, AbortController>>(new Map());
+  const serialPreparer = useRef(new SerialSpeechPreparer());
   const pumping = useRef(false);
   const currentAudio = useRef<HTMLAudioElement | null>(null);
   const currentItem = useRef<SpeechItem | null>(null);
@@ -42,6 +45,7 @@ export function useMatchVoice(matchId: string, events: UiEvent[], onSpeechStart:
     for (const controller of synthesisControllers.current.values()) controller.abort();
     synthesisControllers.current.clear();
     preparedAudio.current.clear();
+    serialPreparer.current.reset();
     currentAudio.current?.pause();
     finishCurrentAudio.current?.();
     finishPostSpeechGap.current?.();
@@ -61,12 +65,16 @@ export function useMatchVoice(matchId: string, events: UiEvent[], onSpeechStart:
     if (existing) return existing;
     const controller = new AbortController();
     synthesisControllers.current.set(item.seq, controller);
-    const prepared = fetch('/api/tts', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ matchId, seat: item.seat, text: item.speech }),
-      signal: controller.signal,
-    }).then(async (response) => response.ok ? response.blob() : null)
+    const prepared = serialPreparer.current.enqueue(async () => {
+      if (controller.signal.aborted) return null;
+      const response = await fetch('/api/tts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ matchId, seat: item.seat, text: item.speech }),
+        signal: controller.signal,
+      });
+      return response.ok ? response.blob() : null;
+    })
       .catch(() => null)
       .finally(() => synthesisControllers.current.delete(item.seq));
     preparedAudio.current.set(item.seq, prepared);
@@ -109,6 +117,8 @@ export function useMatchVoice(matchId: string, events: UiEvent[], onSpeechStart:
           audio.onerror = finish;
           if (!pausedRef.current) {
             void audio.play().then(() => markSpeechStarted(item)).catch(() => {
+              // 演出開始や手動pauseがplay()と競合した場合は、同じ音声をresume時に再試行する。
+              if (speechPlaybackFailureDisposition(pausedRef.current) === 'retry') return;
               markSpeechStarted(item);
               finish();
             });
@@ -148,7 +158,9 @@ export function useMatchVoice(matchId: string, events: UiEvent[], onSpeechStart:
       return;
     }
     if (audio && item) {
-      void audio.play().then(() => markSpeechStarted(item)).catch(() => finishCurrentAudio.current?.());
+      void audio.play().then(() => markSpeechStarted(item)).catch(() => {
+        if (speechPlaybackFailureDisposition(pausedRef.current) === 'finish') finishCurrentAudio.current?.();
+      });
       return;
     }
     void pump();
