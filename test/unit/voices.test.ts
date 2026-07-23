@@ -1,6 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AGENT_VOICES, voiceForSeat } from '@/domain/voices';
-import { synthesizeAgentSpeech, synthesizeTtsSpeech, TTS_SPEED_SCALE } from '@/server/voicevox';
+import {
+  splitTtsText,
+  synthesizeAgentSpeech,
+  synthesizeTtsSpeech,
+  TTS_MAX_CHUNK_LENGTH,
+  TTS_SPEED_SCALE,
+} from '@/server/voicevox';
 import {
   AI_WEREWOLF_DICTIONARY,
   syncAgentNameDictionary,
@@ -8,6 +14,29 @@ import {
 } from '@/server/voicevox-user-dictionary';
 
 afterEach(() => vi.unstubAllGlobals());
+
+function testWav(data: number[]): ArrayBuffer {
+  const output = new Uint8Array(44 + data.length + (data.length % 2));
+  const view = new DataView(output.buffer);
+  const writeId = (offset: number, id: string) => {
+    for (let index = 0; index < 4; index += 1) output[offset + index] = id.charCodeAt(index);
+  };
+  writeId(0, 'RIFF');
+  view.setUint32(4, output.length - 8, true);
+  writeId(8, 'WAVE');
+  writeId(12, 'fmt ');
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, 1, true);
+  view.setUint32(24, 24_000, true);
+  view.setUint32(28, 48_000, true);
+  view.setUint16(32, 2, true);
+  view.setUint16(34, 16, true);
+  writeId(36, 'data');
+  view.setUint32(40, data.length, true);
+  output.set(data, 44);
+  return output.buffer as ArrayBuffer;
+}
 
 describe('VOICEVOX話者割り当て', () => {
   it('9座席を9人の異なるキャラクターへ固定する', () => {
@@ -79,6 +108,51 @@ describe('VOICEVOX話者割り当て', () => {
     ]);
 
     expect(maxConcurrency).toBe(1);
+  });
+
+  it('句読点と実試合で多い感嘆符・疑問符・三点リーダーを順序どおり分割する', () => {
+    const text = '最初です。次です！質問です？少し考える……続けます♪';
+    const chunks = splitTtsText(text);
+
+    expect(chunks).toEqual(['最初です。', '次です！', '質問です？', '少し考える……', '続けます♪']);
+    expect(chunks.join('')).toBe(text);
+  });
+
+  it('長い一文は読点で分割し、区切りのない部分も上限を超えない', () => {
+    const text = `前半の説明を置きます、${'長い情報'.repeat(12)}、最後に結論を述べます。`;
+    const chunks = splitTtsText(text);
+
+    expect(chunks.join('')).toBe(text);
+    expect(chunks.every((chunk) => Array.from(chunk).length <= TTS_MAX_CHUNK_LENGTH)).toBe(true);
+    expect(chunks.length).toBeGreaterThan(1);
+  });
+
+  it('分割した音声を直列合成し、発言順のまま一つのWAVへ結合する', async () => {
+    const requests: string[] = [];
+    let synthesisIndex = 0;
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = new URL(input instanceof Request ? input.url : input);
+      if (url.pathname === '/audio_query') {
+        requests.push(`query:${url.searchParams.get('text')}`);
+        return Response.json({ speedScale: 1 });
+      }
+      synthesisIndex += 1;
+      requests.push(`synthesis:${synthesisIndex}`);
+      return new Response(testWav([synthesisIndex, synthesisIndex + 10]), { status: 200 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const audio = await synthesizeTtsSpeech('aivisspeech', 'seat-1', '最初です。次です。');
+    const output = new Uint8Array(audio);
+
+    expect(requests).toEqual([
+      'query:最初です。',
+      'synthesis:1',
+      'query:次です。',
+      'synthesis:2',
+    ]);
+    expect(new TextDecoder().decode(output.slice(36, 40))).toBe('data');
+    expect([...output.slice(44, 48)]).toEqual([1, 11, 2, 12]);
   });
 
   it('人狼と漢字名の読みをVOICEVOXユーザー辞書へ追加する', async () => {

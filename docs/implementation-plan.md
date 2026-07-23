@@ -42,6 +42,7 @@
 - 画像は実装セッションがCodex組み込み`imagegen`で生成する。
 - ON/OFF・個別音量調整可能なオリジナルBGMと、VOICEVOXまたはAivisSpeechによる9名別々の読み上げを備える。
 - VOICEVOXとAivisSpeechの話速は全キャラクター共通で `speedScale=1.1` とする。AivisSpeechの互換APIから返されたAudioQueryも、他のEngine固有値は維持したまま`speedScale`だけを1.1へ上書きする。
+- 長い発言は `。` `！` `？` `…` を優先し、必要なら `、` でも最大64文字を目安に分割する。各断片は同一Engineへ直列送信し、生成したWAVを発言順に結合してから再生する。
 - 「人狼」と人名の漢字表記はVOICEVOX／AivisSpeechのユーザー辞書APIへ固有名詞として同期し、Engineや話者が変わっても読みを統一する。同期はEngineごとに冪等とし、アプリ外の辞書項目を変更しない。
 
 ### 1.3 非ゴール
