@@ -58,7 +58,13 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid 
 .match-summary,.match-result { display:flex; flex-direction:column; gap:4px; }
 .match-summary strong { font-size:12px; font-weight:600; }.match-summary span,.match-result span { color:#6f798a; font:10px ui-monospace,monospace; }
 .match-result strong { color:#d2d7e0; font-size:11px; font-weight:500; }
+.match-actions { display:flex; flex-direction:column; align-items:stretch; gap:7px; }
 .match-row a { color:var(--gold); text-decoration:none; font-size:11px; text-align:right; }
+.force-abort-confirm { display:grid; grid-template-columns:1fr auto; gap:4px; }
+.force-abort-button { border:1px solid rgba(239,107,114,.42); background:rgba(239,107,114,.07); color:#ef9a9f; padding:5px 7px; font-size:10px; cursor:pointer; white-space:nowrap; }
+.force-abort-button:hover { border-color:var(--danger); background:rgba(239,107,114,.14); color:#ffc1c4; }
+.force-abort-cancel { border:0; background:transparent; color:#7f899a; padding:5px 2px; font-size:9px; cursor:pointer; }
+.force-abort-button:disabled,.force-abort-cancel:disabled { opacity:.55; cursor:wait; }
 .empty-state { text-align:center; color:#596476; padding:70px 0; }.empty-state span { font-size:30px; }.empty-state p { font-size:12px; }
 .site-footer { max-width:1540px; margin:auto; display:flex; justify-content:space-between; color:#4d5667; font:10px ui-monospace,monospace; letter-spacing:.13em; }
 

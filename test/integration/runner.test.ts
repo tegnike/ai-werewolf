@@ -166,6 +166,19 @@ describe('MatchRunner', () => {
     await waitFor(manager.repo, second.id, 'aborted');
   });
 
+  it('実行中runnerが見つからない試合もabortで即時に強制終了する', () => {
+    const repo = new MatchRepo();
+    const now = new Date().toISOString();
+    const record: MatchRecord = { id: 'orphaned-running-match', seed: 'orphaned', status: 'running', winner: null, speed: 0, apiCalls: 0, error: null, config: { ai: 'mock' }, createdAt: now, updatedAt: now, finishedAt: null };
+    repo.createMatch(record);
+    const manager = new MatchRunnerManager(repo);
+
+    manager.control(record.id, 'abort');
+
+    expect(repo.getMatch(record.id)?.status).toBe('aborted');
+    expect(repo.getMatch(record.id)?.finishedAt).not.toBeNull();
+  });
+
   it('旧仕様の1日目dawnを含む中断地点も照合し、重複せず復旧する', async () => {
     const repo = new MatchRepo();
     const now = new Date().toISOString();

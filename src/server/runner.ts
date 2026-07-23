@@ -300,6 +300,13 @@ export class MatchRunnerManager {
     const match = this.repo.getMatch(matchId);
     if (!match) throw new Error('MATCH_NOT_FOUND');
     let runner = this.runners.get(matchId);
+    if (action === 'abort') {
+      runner?.control(action, speed);
+      if (match.status === 'running' || match.status === 'paused' || match.status === 'paused_error') {
+        this.repo.updateStatus(matchId, 'aborted');
+      }
+      return;
+    }
     if ((!runner || !runner.isRunning()) && (action === 'resume' || action === 'retry')) {
       runner = new MatchRunner(matchId, this.repo);
       this.runners.set(matchId, runner);

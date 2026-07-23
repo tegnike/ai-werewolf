@@ -18,6 +18,8 @@ export function HomeScreen() {
   const [loading, setLoading] = useState(false);
   const [settingsReady, setSettingsReady] = useState(false);
   const [error, setError] = useState('');
+  const [confirmingAbortId, setConfirmingAbortId] = useState<string | null>(null);
+  const [abortingMatchId, setAbortingMatchId] = useState<string | null>(null);
   const [aiProvider, setAiProvider] = useState<'mock' | 'real'>('mock');
   const { bgmEnabled, setBgmEnabled, bgmVolume, setBgmVolume } = useAmbientBgm('night');
 
@@ -53,6 +55,26 @@ export function HomeScreen() {
       window.sessionStorage.setItem('werewolf-new-match', data.id);
       window.location.href = `/match/${data.id}`;
     } catch (cause) { setError(cause instanceof Error ? cause.message : '開始できませんでした。'); setLoading(false); }
+  };
+
+  const abortMatch = async (match: UiMatch) => {
+    setAbortingMatchId(match.id);
+    setError('');
+    try {
+      const response = await fetch(`/api/match/${match.id}/control`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'abort' }),
+      });
+      const data = await response.json() as { error?: { message: string } };
+      if (!response.ok) throw new Error(data.error?.message ?? '試合を強制終了できませんでした。');
+      await refresh();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : '試合を強制終了できませんでした。');
+    } finally {
+      setAbortingMatchId(null);
+      setConfirmingAbortId(null);
+    }
   };
 
   return (
@@ -92,7 +114,15 @@ export function HomeScreen() {
               <article className="match-row" key={match.id}>
                 <div className={`status-orb ${match.status}`} /><div className="match-summary"><strong>{new Date(match.createdAt).toLocaleString('ja-JP')}</strong><span>seed: {match.seed}</span></div>
                 <div className="match-result"><span>{statusLabel[match.status] ?? match.status}</span><strong>{match.winner ? winnerLabel[match.winner] : '—'}</strong></div>
-                <Link href={match.status === 'finished' ? `/replay/${match.id}` : `/match/${match.id}`}>{match.status === 'finished' ? 'リプレイ' : '観戦'} →</Link>
+                <div className="match-actions">
+                  <Link href={match.status === 'finished' ? `/replay/${match.id}` : `/match/${match.id}`}>{match.status === 'finished' ? 'リプレイ' : '観戦'} →</Link>
+                  {match.status === 'running' && (confirmingAbortId === match.id
+                    ? <div className="force-abort-confirm" aria-label={`seed ${match.seed} の強制終了確認`}>
+                      <button className="force-abort-button" disabled={abortingMatchId === match.id} onClick={() => void abortMatch(match)}>{abortingMatchId === match.id ? '終了中…' : '終了する'}</button>
+                      <button className="force-abort-cancel" disabled={abortingMatchId === match.id} onClick={() => setConfirmingAbortId(null)}>取消</button>
+                    </div>
+                    : <button className="force-abort-button" onClick={() => setConfirmingAbortId(match.id)}>強制終了</button>)}
+                </div>
               </article>
             ))}
           </div>

@@ -167,6 +167,29 @@ test('ホームから試合を開始して公開／GM視点とリプレイを表
   await expect(page.locator('.cinematic-overlay')).toContainText('開票', { timeout: 15_000 });
 });
 
+test('ホームの試合記録から進行中の試合を強制終了できる', async ({ page }) => {
+  const seed = `home-force-abort-${page.viewportSize()?.width ?? 'desktop'}`;
+  await page.goto('/');
+  await page.evaluate(async (matchSeed) => {
+    const response = await fetch('/api/matches', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ seed: matchSeed, speed: 3000 }),
+    });
+    if (!response.ok) throw new Error('試合を作成できませんでした。');
+  }, seed);
+  await page.reload();
+
+  const row = page.locator('.match-row').filter({ hasText: `seed: ${seed}` });
+  await expect(row.getByText('進行中', { exact: true })).toBeVisible();
+  await row.getByRole('button', { name: '強制終了' }).click();
+  await expect(row.getByLabel(`seed ${seed} の強制終了確認`)).toBeVisible();
+  await row.getByRole('button', { name: '終了する' }).click();
+
+  await expect(row.getByText('中断', { exact: true })).toBeVisible();
+  await expect(row.getByRole('button', { name: '強制終了' })).toHaveCount(0);
+});
+
 test('Spaceキーでゲームと発言音声を一時停止・再開し、中断できる', async ({ page }) => {
   test.setTimeout(90_000);
   const voiceAudio = await readFile('public/assets/bgm_village.ogg');
