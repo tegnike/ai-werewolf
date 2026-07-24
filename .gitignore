@@ -1,5 +1,8 @@
 node_modules/
 .next/
+.next-dev-*/
+.next-e2e-*/
+.tsconfig.next-*.json
 playwright-report/
 test-results/
 coverage/

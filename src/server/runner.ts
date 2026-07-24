@@ -1,16 +1,17 @@
 import { randomBytes, randomUUID } from 'node:crypto';
 import type {
-  DecisionContext, DecisionProvider, GeminiThinkingBudget, LlmProvider, MatchEvent, MatchRecord, OpenAiReasoningEffort,
-  RunHooks, SpeechDecision, SpeechIntentDecision, TargetDecision, TtsProvider,
+  DecisionContext, DecisionProvider, GeminiThinkingBudget, GeminiThinkingLevel, LlmProvider, MatchEvent, MatchRecord,
+  OpenAiReasoningEffort, RunHooks, SpeechDecision, SpeechIntentDecision, TargetDecision, TtsProvider,
 } from '@/domain/types';
-import type { CharacterRoster } from '@/domain/characters';
+import type { CharacterLlmSettings, CharacterRoster } from '@/domain/characters';
 import { runGame } from '@/engine/game';
 import { assignCharacterSeats } from '@/engine/character-seating';
 import { MockAI } from './ai/mock';
 import { AIRequestError, ApiBudgetError, RealAI } from './ai/client';
 import {
-  configuredLlmProvider, DEFAULT_GEMINI_THINKING_BUDGET, DEFAULT_OPENAI_REASONING_EFFORT, hasApiKey,
-  isGeminiThinkingBudget, isOpenAiReasoningEffort, modelForProvider,
+  configuredLlmProvider, DEFAULT_GEMINI_THINKING_BUDGET,
+  DEFAULT_OPENAI_REASONING_EFFORT, defaultGeminiThinkingLevel, hasApiKey, isGeminiThinkingBudget, isOpenAiReasoningEffort,
+  modelForCharacterLlm, modelForProvider,
 } from './ai/provider';
 import { publishEvent } from './bus';
 import { logger } from './log';
@@ -44,6 +45,7 @@ export class MatchRunner {
   private readonly legacyLlmModel: string;
   private readonly legacyOpenaiReasoningEffort: OpenAiReasoningEffort;
   private readonly legacyGeminiThinkingBudget: GeminiThinkingBudget;
+  private readonly legacyGeminiThinkingLevel: GeminiThinkingLevel;
   private readonly realAiBySeat = new Map<string, RealAI>();
   private cursor = 0;
   private seq = 0;
@@ -55,10 +57,15 @@ export class MatchRunner {
     this.legacyLlmModel = match?.config.llmModel ?? modelForProvider(this.legacyLlmProvider);
     this.legacyOpenaiReasoningEffort = match?.config.openaiReasoningEffort ?? DEFAULT_OPENAI_REASONING_EFFORT;
     this.legacyGeminiThinkingBudget = match?.config.geminiThinkingBudget ?? DEFAULT_GEMINI_THINKING_BUDGET;
+    this.legacyGeminiThinkingLevel = defaultGeminiThinkingLevel(this.legacyLlmModel);
   }
 
   private decisionSettings(context: DecisionContext): {
-    provider: LlmProvider; model: string; openaiReasoningEffort: OpenAiReasoningEffort; geminiThinkingBudget: GeminiThinkingBudget;
+    provider: LlmProvider;
+    model: string;
+    openaiReasoningEffort: OpenAiReasoningEffort;
+    geminiThinkingBudget: GeminiThinkingBudget;
+    geminiThinkingLevel: GeminiThinkingLevel;
   } {
     const match = this.repo.getMatch(this.matchId);
     const character = match?.config.characters?.find((item) => item.seat === context.actor.seat);
@@ -66,23 +73,28 @@ export class MatchRunner {
     return {
       provider,
       model: match?.config.characterLlmModels?.[context.actor.seat]
+        ?? (character ? modelForCharacterLlm(character.llm) : undefined)
         ?? (provider === this.legacyLlmProvider ? this.legacyLlmModel : modelForProvider(provider)),
       openaiReasoningEffort: character?.llm.provider === 'openai'
         ? character.llm.reasoningEffort
         : this.legacyOpenaiReasoningEffort,
-      geminiThinkingBudget: character?.llm.provider === 'gemini'
+      geminiThinkingBudget: character?.llm.provider === 'gemini' && character.llm.model === 'gemini-2.5-pro'
         ? character.llm.thinkingBudget
         : this.legacyGeminiThinkingBudget,
+      geminiThinkingLevel: character?.llm.provider === 'gemini' && character.llm.model !== 'gemini-2.5-pro'
+        ? character.llm.thinkingLevel
+        : this.legacyGeminiThinkingLevel,
     };
   }
 
   private realAi(context: DecisionContext): RealAI {
     const settings = this.decisionSettings(context);
-    const key = `${context.actor.seat}:${settings.provider}:${settings.model}:${settings.openaiReasoningEffort}:${settings.geminiThinkingBudget}`;
+    const key = `${context.actor.seat}:${settings.provider}:${settings.model}:${settings.openaiReasoningEffort}:${settings.geminiThinkingBudget}:${settings.geminiThinkingLevel}`;
     let client = this.realAiBySeat.get(key);
     if (!client) {
       client = new RealAI(
         this.repo, settings.provider, settings.model, settings.openaiReasoningEffort, settings.geminiThinkingBudget,
+        settings.geminiThinkingLevel,
       );
       this.realAiBySeat.set(key, client);
     }
@@ -245,17 +257,24 @@ export class MatchRunnerManager {
     if (hasRuntimeOverride) {
       characters = characters.map((character) => {
         const provider = input.llmProvider ?? character.llm.provider;
-        const llm = provider === 'openai'
+        const geminiModel = modelForProvider('gemini');
+        const llm: CharacterLlmSettings = provider === 'openai'
           ? {
             provider,
             reasoningEffort: input.openaiReasoningEffort
               ?? (character.llm.provider === 'openai' ? character.llm.reasoningEffort : DEFAULT_OPENAI_REASONING_EFFORT),
-          } as const
-          : {
-            provider,
-            thinkingBudget: input.geminiThinkingBudget
-              ?? (character.llm.provider === 'gemini' ? character.llm.thinkingBudget : DEFAULT_GEMINI_THINKING_BUDGET),
-          } as const;
+          }
+          : input.llmProvider === undefined && character.llm.provider === 'gemini'
+            ? character.llm
+            : geminiModel === 'gemini-3.6-flash'
+              ? { provider, model: 'gemini-3.6-flash', thinkingLevel: defaultGeminiThinkingLevel(geminiModel) }
+              : geminiModel === 'gemini-3.5-flash-lite'
+                ? { provider, model: 'gemini-3.5-flash-lite', thinkingLevel: defaultGeminiThinkingLevel(geminiModel) }
+              : {
+                provider,
+                model: 'gemini-2.5-pro',
+                thinkingBudget: input.geminiThinkingBudget ?? DEFAULT_GEMINI_THINKING_BUDGET,
+              };
         return {
           ...character,
           llm,
@@ -269,7 +288,7 @@ export class MatchRunnerManager {
     if (ai === 'real' && process.env.ALLOW_REAL_AI !== '1') throw new Error('REAL_AI_NOT_ALLOWED');
     if (ai === 'real' && [...requiredLlmProviders].some((provider) => !hasApiKey(provider))) throw new Error('REAL_AI_NOT_CONFIGURED');
     const characterLlmModels = Object.fromEntries(
-      characters.map((character) => [character.seat, modelForProvider(character.llm.provider)]),
+      characters.map((character) => [character.seat, modelForCharacterLlm(character.llm)]),
     );
     const record: MatchRecord = {
       id: randomUUID(), seed, status: 'running', winner: null,

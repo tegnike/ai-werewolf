@@ -51,39 +51,43 @@ describe('VOICEVOX話者割り当て', () => {
   });
 
   it('全話者の合成クエリへ1.1倍の話速を適用する', async () => {
-    let synthesisBody: Record<string, unknown> | null = null;
+    const synthesisBodies: Record<string, unknown>[] = [];
     const fetchMock = vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
       if (init?.body) {
-        synthesisBody = JSON.parse(String(init.body)) as Record<string, unknown>;
+        synthesisBodies.push(JSON.parse(String(init.body)) as Record<string, unknown>);
         return new Response(new Uint8Array([1, 2, 3]), { status: 200 });
       }
       return Response.json({ speedScale: 1, volumeScale: 1, prePhonemeLength: 0.1, postPhonemeLength: 0.1 });
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    await synthesizeAgentSpeech('seat-1', '話速の確認です。');
+    for (const voice of AGENT_VOICES) {
+      await synthesizeAgentSpeech(voice.seat, `${voice.seat}の話速確認です。`, voice);
+    }
 
     expect(TTS_SPEED_SCALE).toBe(1.1);
-    expect(synthesisBody).toMatchObject({ speedScale: 1.1 });
+    expect(synthesisBodies).toHaveLength(AGENT_VOICES.length);
+    expect(synthesisBodies.every((body) => body.speedScale === 1.1)).toBe(true);
   });
 
   it('AivisSpeechでも話速を1.1倍にし、それ以外の互換Engine固有値を維持する', async () => {
     const audioQuery = { speedScale: 0.95, volumeScale: 0.8, customField: 'aivis' };
-    let synthesisBody: Record<string, unknown> | null = null;
+    const synthesisBodies: Record<string, unknown>[] = [];
     const fetchMock = vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
       if (init?.body) {
-        synthesisBody = JSON.parse(String(init.body)) as Record<string, unknown>;
+        synthesisBodies.push(JSON.parse(String(init.body)) as Record<string, unknown>);
         return new Response(new Uint8Array([1, 2, 3]), { status: 200 });
       }
       return Response.json(audioQuery);
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    await synthesizeTtsSpeech('aivisspeech', 'seat-1', 'AivisSpeechの確認です。', {
-      ...AGENT_VOICES[0], speakerId: 888753760, speakerName: 'Anneli',
-    });
+    for (const voice of AGENT_VOICES) {
+      await synthesizeTtsSpeech('aivisspeech', voice.seat, `${voice.seat}のAivisSpeech話速確認です。`, voice);
+    }
 
-    expect(synthesisBody).toEqual({ ...audioQuery, speedScale: 1.1 });
+    expect(synthesisBodies).toHaveLength(AGENT_VOICES.length);
+    expect(synthesisBodies.every((body) => JSON.stringify(body) === JSON.stringify({ ...audioQuery, speedScale: 1.1 }))).toBe(true);
     expect(String(fetchMock.mock.calls[0][0])).toContain('127.0.0.1:10101/audio_query');
   });
 
@@ -171,6 +175,20 @@ describe('VOICEVOX話者割り当て', () => {
     expect(requests.filter(({ method }) => method === 'POST')).toHaveLength(AI_WEREWOLF_DICTIONARY.length);
     const werewolf = requests.find(({ url }) => url.searchParams.get('surface') === '人狼');
     expect(werewolf?.url.searchParams.get('pronunciation')).toBe('ジンロー');
+    expect(Object.fromEntries(requests.map(({ url }) => [
+      url.searchParams.get('surface'),
+      {
+        pronunciation: url.searchParams.get('pronunciation'),
+        accentType: url.searchParams.get('accent_type'),
+      },
+    ]))).toMatchObject({
+      '無情報': { pronunciation: 'ムジョウホウ', accentType: '2' },
+      '霊花': { pronunciation: 'レイカ', accentType: '1' },
+      '夜汐': { pronunciation: 'ヤセキ', accentType: '1' },
+      '花音': { pronunciation: 'カノン', accentType: '1' },
+      '浅見': { pronunciation: 'アサミ', accentType: '3' },
+      '珪花': { pronunciation: 'ケイカ', accentType: '1' },
+    });
     const tenma = requests.find(({ url }) => url.searchParams.get('surface') === '天満');
     expect(tenma?.url.searchParams.get('pronunciation')).toBe('テンマ');
     const genzo = requests.find(({ url }) => url.searchParams.get('surface') === '源蔵');
@@ -198,6 +216,17 @@ describe('VOICEVOX話者割り当て', () => {
     expect(requests.every((url) => url.origin === 'http://aivis.test:10101')).toBe(true);
     const werewolf = requests.find((url) => url.searchParams.get('surface') === '人狼');
     expect(werewolf?.searchParams.get('pronunciation')).toBe('ジンロー');
+    expect(Object.fromEntries(requests.map((url) => [
+      url.searchParams.get('surface'),
+      url.searchParams.get('pronunciation'),
+    ]))).toMatchObject({
+      '無情報': 'ムジョウホウ',
+      '霊花': 'レイカ',
+      '夜汐': 'ヤセキ',
+      '花音': 'カノン',
+      '浅見': 'アサミ',
+      '珪花': 'ケイカ',
+    });
   });
 
   it('登録済みの正しい読みは重複登録しない', async () => {

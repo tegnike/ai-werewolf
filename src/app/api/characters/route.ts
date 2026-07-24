@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { ZodError } from 'zod';
 import { strictCharacterProfileSchema } from '@/domain/characters';
+import { GEMINI_MODELS } from '@/domain/types';
 import { getRunnerManager } from '@/server/runner';
 import { modelForProvider } from '@/server/ai/provider';
 
@@ -12,7 +13,7 @@ export async function GET() {
   return NextResponse.json({
     characters: repo.characterRoster(),
     customizedSeats: repo.customizedCharacterSeats(),
-    llmModels: { openai: modelForProvider('openai'), gemini: modelForProvider('gemini') },
+    llmModels: { openai: [modelForProvider('openai')], gemini: GEMINI_MODELS },
   });
 }
 

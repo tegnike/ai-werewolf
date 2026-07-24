@@ -27,7 +27,9 @@ export interface UiCharacter {
   title: string;
   portraitSrc: string;
   llm: { provider: 'openai'; reasoningEffort: 'none' | 'low' | 'medium' | 'high' | 'xhigh' | 'max' }
-    | { provider: 'gemini'; thinkingBudget: number };
+    | { provider: 'gemini'; model: 'gemini-2.5-pro'; thinkingBudget: number }
+    | { provider: 'gemini'; model: 'gemini-3.6-flash'; thinkingLevel: 'minimal' | 'low' | 'medium' | 'high' }
+    | { provider: 'gemini'; model: 'gemini-3.5-flash-lite'; thinkingLevel: 'minimal' | 'low' | 'medium' | 'high' };
   tts: {
     provider: 'voicevox' | 'aivisspeech';
     voice: { seat: string; speakerId: number; speakerName: string; styleName: string; presentation: 'female' | 'male' | 'androgynous' };

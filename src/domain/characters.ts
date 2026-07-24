@@ -7,12 +7,16 @@ import {
 import { AGENT_ROLE_BEHAVIORS, type RoleBehaviorBook } from './role-behaviors';
 import { AGENT_VOICES, type AgentVoice } from './voices';
 import { SEATS } from './constants';
-import { OPENAI_REASONING_EFFORTS } from './types';
-import type { GeminiThinkingBudget, LlmProvider, OpenAiReasoningEffort, Role, SeatId, TtsProvider } from './types';
+import { GEMINI_MODELS, GEMINI_THINKING_LEVELS, OPENAI_REASONING_EFFORTS } from './types';
+import type {
+  GeminiThinkingBudget, GeminiThinkingLevel, LlmProvider, OpenAiReasoningEffort, Role, SeatId, TtsProvider,
+} from './types';
 
 export type CharacterLlmSettings =
   | { provider: 'openai'; reasoningEffort: OpenAiReasoningEffort }
-  | { provider: 'gemini'; thinkingBudget: GeminiThinkingBudget };
+  | { provider: 'gemini'; model: 'gemini-2.5-pro'; thinkingBudget: GeminiThinkingBudget }
+  | { provider: 'gemini'; model: 'gemini-3.6-flash'; thinkingLevel: GeminiThinkingLevel }
+  | { provider: 'gemini'; model: 'gemini-3.5-flash-lite'; thinkingLevel: GeminiThinkingLevel };
 
 export type CharacterTtsSettings =
   | { provider: 'voicevox'; voice: AgentVoice }
@@ -104,17 +108,23 @@ const voiceSchema = z.object({
   presentation: z.enum(['female', 'male', 'androgynous']),
 }).strict();
 
-const llmSchema = z.discriminatedUnion('provider', [
+const llmSchema = z.union([
   z.object({
     provider: z.literal('openai'),
     reasoningEffort: z.enum(OPENAI_REASONING_EFFORTS),
   }).strict(),
   z.object({
     provider: z.literal('gemini'),
+    model: z.literal(GEMINI_MODELS[0]),
     thinkingBudget: z.number().int().refine(
       (value) => value === -1 || (value >= 128 && value <= 32_768),
       'Geminiの思考トークン予算は-1または128〜32768で指定してください。',
     ),
+  }).strict(),
+  z.object({
+    provider: z.literal('gemini'),
+    model: z.enum([GEMINI_MODELS[1], GEMINI_MODELS[2]]),
+    thinkingLevel: z.enum(GEMINI_THINKING_LEVELS),
   }).strict(),
 ]);
 
@@ -194,11 +204,13 @@ function normalizeLegacyCharacterProfile(value: unknown): unknown {
   if (!('llm' in normalized)) {
     const provider: LlmProvider = normalized.llmProvider === 'gemini' ? 'gemini' : 'openai';
     normalized.llm = provider === 'gemini'
-      ? { provider, thinkingBudget: normalized.geminiThinkingBudget ?? -1 }
+      ? { provider, model: GEMINI_MODELS[0], thinkingBudget: normalized.geminiThinkingBudget ?? -1 }
       : { provider, reasoningEffort: normalized.openaiReasoningEffort ?? 'low' };
     delete normalized.llmProvider;
     delete normalized.openaiReasoningEffort;
     delete normalized.geminiThinkingBudget;
+  } else if (isRecord(normalized.llm) && normalized.llm.provider === 'gemini' && !('model' in normalized.llm)) {
+    normalized.llm = { ...normalized.llm, model: GEMINI_MODELS[0] };
   }
 
   if (!('tts' in normalized)) {

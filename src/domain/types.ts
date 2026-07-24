@@ -10,8 +10,12 @@ export type ViewMode = 'public' | 'gm';
 export type LlmProvider = 'openai' | 'gemini';
 export const OPENAI_REASONING_EFFORTS = ['none', 'low', 'medium', 'high', 'xhigh', 'max'] as const;
 export type OpenAiReasoningEffort = (typeof OPENAI_REASONING_EFFORTS)[number];
+export const GEMINI_MODELS = ['gemini-2.5-pro', 'gemini-3.6-flash', 'gemini-3.5-flash-lite'] as const;
+export type GeminiModel = (typeof GEMINI_MODELS)[number];
 export const GEMINI_THINKING_BUDGET_PRESETS = [-1, 128, 1_024, 4_096, 8_192, 16_384, 32_768] as const;
 export type GeminiThinkingBudget = number;
+export const GEMINI_THINKING_LEVELS = ['minimal', 'low', 'medium', 'high'] as const;
+export type GeminiThinkingLevel = (typeof GEMINI_THINKING_LEVELS)[number];
 export type TtsProvider = 'voicevox' | 'aivisspeech';
 export type Phase =
   | 'setup' | 'night_zero' | 'dawn' | 'discussion' | 'vote' | 'runoff'

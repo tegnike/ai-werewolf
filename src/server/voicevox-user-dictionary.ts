@@ -12,6 +12,12 @@ export interface VoicevoxDictionaryEntry {
 
 export const AI_WEREWOLF_DICTIONARY: readonly VoicevoxDictionaryEntry[] = [
   { surface: '人狼', pronunciation: 'ジンロー', accentType: 0 },
+  { surface: '無情報', pronunciation: 'ムジョウホウ', accentType: 2 },
+  { surface: '霊花', pronunciation: 'レイカ', accentType: 1 },
+  { surface: '夜汐', pronunciation: 'ヤセキ', accentType: 1 },
+  { surface: '花音', pronunciation: 'カノン', accentType: 1 },
+  { surface: '浅見', pronunciation: 'アサミ', accentType: 3 },
+  { surface: '珪花', pronunciation: 'ケイカ', accentType: 1 },
   { surface: '名取', pronunciation: 'ナトリ', accentType: 3 },
   { surface: '澪', pronunciation: 'ミオ', accentType: 1 },
   { surface: '天満', pronunciation: 'テンマ', accentType: 1 },

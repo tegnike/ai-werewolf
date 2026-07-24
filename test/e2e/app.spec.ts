@@ -40,10 +40,15 @@ test('キャラクターJSONと立ち絵をドラッグ＆ドロップでき、J
   await expect(page.locator('.character-preview')).toContainText('SLOT 2');
   await expect(page.getByLabel('名前')).toHaveValue('検証済みキャラクター');
   await page.getByLabel('キャラクターの言語モデル').selectOption('gemini');
-  await page.getByLabel('キャラクターのGemini思考トークン予算').selectOption('4096');
+  await page.getByLabel('キャラクターのGeminiモデル').selectOption('gemini-3.6-flash');
+  await expect(page.getByLabel('キャラクターのGemini思考レベル')).toHaveValue('medium');
+  await page.getByLabel('キャラクターのGeminiモデル').selectOption('gemini-3.5-flash-lite');
+  await expect(page.getByLabel('キャラクターのGemini思考レベル')).toHaveValue('minimal');
+  await page.getByLabel('キャラクターのGemini思考レベル').selectOption('high');
   await page.getByLabel('キャラクターの音声エンジン').selectOption('aivisspeech');
   await expect(page.getByLabel('キャラクターの言語モデル')).toHaveValue('gemini');
-  await expect(page.getByLabel('キャラクターのGemini思考トークン予算')).toHaveValue('4096');
+  await expect(page.getByLabel('キャラクターのGeminiモデル')).toHaveValue('gemini-3.5-flash-lite');
+  await expect(page.getByLabel('キャラクターのGemini思考レベル')).toHaveValue('high');
   await expect(page.getByLabel('キャラクターの音声エンジン')).toHaveValue('aivisspeech');
   await page.getByText('他の8人への呼び方').click();
   await page.getByLabel('個別設定がない相手の呼び方').selectOption('given_name_chan');
@@ -188,6 +193,25 @@ test('ホームの試合記録から進行中の試合を強制終了できる',
 
   await expect(row.getByText('中断', { exact: true })).toBeVisible();
   await expect(row.getByRole('button', { name: '強制終了' })).toHaveCount(0);
+});
+
+test('試合取得が失敗したときにエラーと再試行を表示する', async ({ page }) => {
+  let attempts = 0;
+  await page.route('**/api/match/load-error?view=public', async (route) => {
+    attempts += 1;
+    if (attempts === 1) {
+      await route.fulfill({ status: 500, contentType: 'text/html', body: '<h1>broken dev artifacts</h1>' });
+      return;
+    }
+    await route.fulfill({ status: 404, contentType: 'application/json', body: JSON.stringify({ error: { message: '試合が見つかりません。' } }) });
+  });
+
+  await page.goto('/match/load-error');
+  const loadError = page.locator('.viewer-load-error').getByRole('alert');
+  await expect(loadError).toContainText('試合を読み込めません（HTTP 500）。');
+  await expect(page.getByRole('button', { name: '再試行' })).toBeVisible();
+  await page.getByRole('button', { name: '再試行' }).click();
+  await expect(loadError).toContainText('試合が見つかりません。');
 });
 
 test('Spaceキーでゲームと発言音声を一時停止・再開し、中断できる', async ({ page }) => {

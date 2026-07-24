@@ -124,15 +124,26 @@ export function MatchViewer({ matchId, mode }: { matchId: string; mode: 'live' |
     : '';
 
   const load = useCallback(async () => {
-    const reveal = view === 'public' && publicSecretsUnlocked ? '&reveal=1' : '';
-    const response = await fetch(`/api/match/${matchId}?view=${view}${reveal}`, { cache: 'no-store' });
-    const data = await response.json() as { match?: UiMatch; events?: UiEvent[]; error?: { message: string } };
-    if (!response.ok || !data.match || !data.events) { setError(data.error?.message ?? '試合を読み込めません。'); return; }
-    const maxLoadedSeq = Math.max(0, ...data.events.map((event) => event.seq));
-    setMatch(data.match); setEvents(data.events); setCursor((value) => value === Number.MAX_SAFE_INTEGER ? maxLoadedSeq : value);
-    const alreadyInitialized = presentationInitialized.current;
-    presentationInitialized.current = true;
-    setPresentedSeq((current) => presentationCursorAfterLoad(current, maxLoadedSeq, alreadyInitialized));
+    try {
+      const reveal = view === 'public' && publicSecretsUnlocked ? '&reveal=1' : '';
+      const response = await fetch(`/api/match/${matchId}?view=${view}${reveal}`, { cache: 'no-store' });
+      const contentType = response.headers.get('content-type') ?? '';
+      const data = contentType.includes('application/json')
+        ? await response.json() as { match?: UiMatch; events?: UiEvent[]; error?: { message: string } }
+        : null;
+      if (!response.ok || !data?.match || !data.events) {
+        setError(data?.error?.message ?? `試合を読み込めません（HTTP ${response.status}）。`);
+        return;
+      }
+      const maxLoadedSeq = Math.max(0, ...data.events.map((event) => event.seq));
+      setMatch(data.match); setEvents(data.events); setCursor((value) => value === Number.MAX_SAFE_INTEGER ? maxLoadedSeq : value);
+      setError('');
+      const alreadyInitialized = presentationInitialized.current;
+      presentationInitialized.current = true;
+      setPresentedSeq((current) => presentationCursorAfterLoad(current, maxLoadedSeq, alreadyInitialized));
+    } catch {
+      setError('試合サーバーへ接続できません。');
+    }
   }, [matchId, publicSecretsUnlocked, view]);
 
   useEffect(() => {
@@ -152,7 +163,7 @@ export function MatchViewer({ matchId, mode }: { matchId: string; mode: 'live' |
     if (announceInitialCues) window.sessionStorage.removeItem('werewolf-new-match');
   }, [announceInitialCues]);
   useEffect(() => {
-    if (mode !== 'live' || terminal) return;
+    if (mode !== 'live' || terminal || !match?.id) return;
     sourceRef.current?.close();
     const source = new EventSource(`/api/match/${matchId}/stream?view=${view}&fromSeq=0`);
     source.addEventListener('match', (message) => {
@@ -164,7 +175,7 @@ export function MatchViewer({ matchId, mode }: { matchId: string; mode: 'live' |
     sourceRef.current = source;
     const poll = setInterval(() => void load(), 2000);
     return () => { source.close(); clearInterval(poll); };
-  }, [matchId, mode, view, load, terminal]);
+  }, [match?.id, matchId, mode, view, load, terminal]);
 
   useEffect(() => {
     if (mode !== 'replay' || !playing) return;
@@ -249,7 +260,11 @@ export function MatchViewer({ matchId, mode }: { matchId: string; mode: 'live' |
   const sceneTitle = finalEvent ? '試合終了' : day === 0 ? '役職確認の夜' : isNight ? `${day}日目の夜` : phase === 'vote' ? `${day}日目の投票` : phase === 'runoff' ? `${day}日目の決選投票` : phase === 'execution' ? `${day}日目の処刑` : `${day}日目の議論`;
   const sceneDescription = finalEvent ? '全配役と夜の記録を公開。試合の真相を答え合わせできます' : isNight ? '夜の処理中です。次の夜明けをお待ちください' : phase === 'vote' || phase === 'runoff' ? '全員の票が揃うまで、投票先は公開されません' : phase === 'execution' ? '開票結果により処刑者が決まります' : '発言と投票履歴から、人狼を推理してください';
 
-  if (!match) return <main className="viewer-loading"><span className="spinner" />{error || '試合を読み込み中…'}</main>;
+  if (!match) return <main className="viewer-loading">
+    {error
+      ? <div className="viewer-load-error"><strong>試合を表示できません</strong><p role="alert">{error}</p><div><button onClick={() => void load()}>再試行</button><Link href="/">トップへ戻る</Link></div></div>
+      : <><span className="spinner" />試合を読み込み中…</>}
+  </main>;
   return (
     <main className={`viewer-shell ${isNight ? 'night' : 'day'}`}>
       <header className="viewer-header">

@@ -113,7 +113,7 @@ npm run dev -- -p 3001
 2. `ALLOW_REAL_AI=1`
 3. 保存済みキャラクターが選択しているプロバイダーすべてについて、`OPENAI_API_KEY`または`GEMINI_API_KEY`が設定済み
 
-OpenAIは`gpt-5.6-luna`に固定し、推論レベルは`none / low / medium / high / xhigh / max`からキャラクターごとに選択できます（既定`low`）。Geminiの既定モデルは`gemini-2.5-pro`で、思考トークン予算は自動`-1`または`128〜32768`からキャラクターごとに指定します。設定は試合開始時に9人分を保存します。別プロバイダーやランダム行動への自動フォールバックはありません。1判断につき最大3回まで同じモデル・推論設定を再試行し、物理API呼び出しは1試合240回を上限とします。
+OpenAIは`gpt-5.6-luna`に固定し、推論レベルは`none / low / medium / high / xhigh / max`からキャラクターごとに選択できます（既定`low`）。Geminiは`gemini-2.5-pro`、`gemini-3.6-flash`、`gemini-3.5-flash-lite`をキャラクターごとに選択できます。2.5 Proは思考トークン予算を自動`-1`または`128〜32768`から指定します。3.6 Flashと3.5 Flash-Liteは思考レベルを`minimal / low / medium / high`から指定し、既定はそれぞれ`medium`と`minimal`です。設定は試合開始時に9人分を保存します。別プロバイダーやランダム行動への自動フォールバックはありません。1判断につき最大3回まで同じモデル・推論設定を再試行し、物理API呼び出しは1試合240回を上限とします。
 
 ## 環境変数
 
@@ -124,7 +124,7 @@ OpenAIは`gpt-5.6-luna`に固定し、推論レベルは`none / low / medium / h
 | `OPENAI_API_KEY` | 未設定 | OpenAI Responses APIのサーバー側APIキー |
 | `GEMINI_API_KEY` | 未設定 | Gemini APIのサーバー側APIキー |
 | `LLM_PROVIDER` | `openai` | CLI受け入れ試験で全キャラクターへ適用するLLM。Web試合はキャラクター設定を使用 |
-| `GEMINI_MODEL` | `gemini-2.5-pro` | Gemini選択時のモデル |
+| `GEMINI_MODEL` | `gemini-2.5-pro` | CLI互換設定で使うGeminiモデル。`gemini-2.5-pro`、`gemini-3.6-flash`、`gemini-3.5-flash-lite` |
 | `TTS_PROVIDER` | `voicevox` | CLI実行で全キャラクターへ適用するTTS。Web試合はキャラクター設定を使用 |
 | `DATABASE_PATH` | `./data/ai-werewolf.db` | SQLiteデータベースの保存先 |
 | `VOICEVOX_URL` | `http://127.0.0.1:50021` | VOICEVOX EngineのベースURL |

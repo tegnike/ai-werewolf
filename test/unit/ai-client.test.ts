@@ -4,7 +4,7 @@ import {
   MAX_AI_ATTEMPTS, aiRetryPolicy, geminiThinkingConfig, openAiReasoningConfig, safeAIRequestReason,
 } from '@/server/ai/client';
 import {
-  configuredLlmProvider, DEFAULT_GEMINI_THINKING_BUDGET, DEFAULT_OPENAI_REASONING_EFFORT,
+  configuredLlmProvider, defaultGeminiThinkingLevel, DEFAULT_GEMINI_THINKING_BUDGET, DEFAULT_OPENAI_REASONING_EFFORT,
   isGeminiThinkingBudget, isOpenAiReasoningEffort, modelForProvider,
 } from '@/server/ai/provider';
 
@@ -47,13 +47,17 @@ describe('safeAIRequestReason', () => {
 
   it('LLMプロバイダーごとのモデル設定を独立して解決する', () => {
     process.env.LLM_PROVIDER = 'gemini';
-    process.env.GEMINI_MODEL = 'gemini-test-model';
+    process.env.GEMINI_MODEL = 'gemini-3.5-flash-lite';
     expect(configuredLlmProvider()).toBe('gemini');
     expect(modelForProvider('openai')).toBe('gpt-5.6-luna');
-    expect(modelForProvider('gemini')).toBe('gemini-test-model');
+    expect(modelForProvider('gemini')).toBe('gemini-3.5-flash-lite');
+    process.env.GEMINI_MODEL = 'gemini-3.6-flash';
+    expect(modelForProvider('gemini')).toBe('gemini-3.6-flash');
+    process.env.GEMINI_MODEL = 'unsupported-model';
+    expect(modelForProvider('gemini')).toBe('gemini-2.5-pro');
   });
 
-  it('OpenAI推論レベルとGemini 2.5思考予算を検証する', () => {
+  it('OpenAI推論レベルとGeminiモデル別の思考設定を検証する', () => {
     expect(DEFAULT_OPENAI_REASONING_EFFORT).toBe('low');
     expect(DEFAULT_GEMINI_THINKING_BUDGET).toBe(-1);
     expect(isOpenAiReasoningEffort('max')).toBe(true);
@@ -64,6 +68,12 @@ describe('safeAIRequestReason', () => {
     expect(isGeminiThinkingBudget(0)).toBe(false);
     expect(isGeminiThinkingBudget(32_769)).toBe(false);
     expect(openAiReasoningConfig('xhigh')).toEqual({ effort: 'xhigh' });
-    expect(geminiThinkingConfig(8_192)).toEqual({ thinkingBudget: 8_192 });
+    expect(defaultGeminiThinkingLevel('gemini-3.6-flash')).toBe('medium');
+    expect(defaultGeminiThinkingLevel('gemini-3.5-flash-lite')).toBe('minimal');
+    expect(geminiThinkingConfig('gemini-2.5-pro', 8_192, 'medium')).toEqual({ thinkingBudget: 8_192 });
+    expect(geminiThinkingConfig('gemini-3.6-flash', -1, 'medium')).toEqual({ thinkingLevel: 'MEDIUM' });
+    expect(geminiThinkingConfig('gemini-3.5-flash-lite', -1, 'minimal')).toEqual({ thinkingLevel: 'MINIMAL' });
+    expect(geminiThinkingConfig('gemini-3.5-flash-lite', -1, 'low')).toEqual({ thinkingLevel: 'LOW' });
+    expect(geminiThinkingConfig('gemini-3.5-flash-lite', -1, 'high')).toEqual({ thinkingLevel: 'HIGH' });
   });
 });

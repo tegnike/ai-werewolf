@@ -1,19 +1,33 @@
 import { MODEL as OPENAI_MODEL } from '@/domain/constants';
-import { OPENAI_REASONING_EFFORTS } from '@/domain/types';
-import type { GeminiThinkingBudget, LlmProvider, OpenAiReasoningEffort } from '@/domain/types';
+import { GEMINI_MODELS, OPENAI_REASONING_EFFORTS } from '@/domain/types';
+import type {
+  GeminiModel, GeminiThinkingBudget, GeminiThinkingLevel, LlmProvider, OpenAiReasoningEffort,
+} from '@/domain/types';
 
 export const DEFAULT_LLM_PROVIDER: LlmProvider = 'openai';
-export const DEFAULT_GEMINI_MODEL = 'gemini-2.5-pro';
+export const DEFAULT_GEMINI_MODEL: GeminiModel = GEMINI_MODELS[0];
 export const DEFAULT_OPENAI_REASONING_EFFORT: OpenAiReasoningEffort = 'low';
 export const DEFAULT_GEMINI_THINKING_BUDGET: GeminiThinkingBudget = -1;
+export const DEFAULT_GEMINI_THINKING_LEVEL: GeminiThinkingLevel = 'minimal';
+
+export function defaultGeminiThinkingLevel(model: string): GeminiThinkingLevel {
+  return model === 'gemini-3.6-flash' ? 'medium' : DEFAULT_GEMINI_THINKING_LEVEL;
+}
 
 export function configuredLlmProvider(): LlmProvider {
   return process.env.LLM_PROVIDER === 'gemini' ? 'gemini' : DEFAULT_LLM_PROVIDER;
 }
 
 export function modelForProvider(provider: LlmProvider): string {
-  if (provider === 'gemini') return process.env.GEMINI_MODEL?.trim() || DEFAULT_GEMINI_MODEL;
+  if (provider === 'gemini') {
+    const configured = process.env.GEMINI_MODEL?.trim();
+    return GEMINI_MODELS.includes(configured as GeminiModel) ? configured! : DEFAULT_GEMINI_MODEL;
+  }
   return OPENAI_MODEL;
+}
+
+export function modelForCharacterLlm(llm: import('@/domain/characters').CharacterLlmSettings): string {
+  return llm.provider === 'gemini' ? llm.model : OPENAI_MODEL;
 }
 
 export function hasApiKey(provider: LlmProvider): boolean {

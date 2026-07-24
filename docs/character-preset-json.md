@@ -185,8 +185,10 @@ roleClaimTemplate: 役職名の差し込み位置 {role} が必要です。
 `llm.provider`と`tts.provider`は試合全体ではなく、そのキャラクターだけに適用されます。1試合の中でOpenAIとGemini、VOICEVOXとAivisSpeechを混在できます。
 
 - OpenAIは `"llm": { "provider": "openai", "reasoningEffort": "low" }` の形です。モデルは`gpt-5.6-luna`で、推論レベルは`none`、`low`、`medium`、`high`、`xhigh`、`max`です。
-- Geminiは `"llm": { "provider": "gemini", "thinkingBudget": -1 }` の形です。モデル名はサーバーの`GEMINI_MODEL`、未設定時は`gemini-2.5-pro`です。予算は自動`-1`または128〜32768の整数です。
-- `llm`は判別可能unionです。OpenAI構成へ`thinkingBudget`を、Gemini構成へ`reasoningEffort`を入れると検証エラーになります。
+- Gemini 2.5 Proは `"llm": { "provider": "gemini", "model": "gemini-2.5-pro", "thinkingBudget": -1 }` の形です。予算は自動`-1`または128〜32768の整数です。
+- Gemini 3.6 Flashは `"llm": { "provider": "gemini", "model": "gemini-3.6-flash", "thinkingLevel": "medium" }` の形です。思考レベルは`minimal`、`low`、`medium`、`high`です。
+- Gemini 3.5 Flash-Liteは `"llm": { "provider": "gemini", "model": "gemini-3.5-flash-lite", "thinkingLevel": "minimal" }` の形です。思考レベルは`minimal`、`low`、`medium`、`high`です。
+- `llm`は排他的なunionです。OpenAI構成へGemini用設定を、Gemini 2.5 Proへ`thinkingLevel`を、Gemini 3.6 Flash／3.5 Flash-Liteへ`thinkingBudget`を入れると検証エラーになります。
 - APIキーはJSONへ記載せず、サーバー側の`OPENAI_API_KEY`と`GEMINI_API_KEY`を使用します。
 
 ### `defaultAddressStyle` と `addressBook`

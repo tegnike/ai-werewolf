@@ -59,7 +59,7 @@ describe('編集可能なキャラクター設定', () => {
     const stored = characterProfileSchema.parse(legacy);
     expect(stored).toMatchObject({
       defaultAddressStyle: 'full_name',
-      llm: { provider: 'gemini', thinkingBudget: 8_192 },
+      llm: { provider: 'gemini', model: 'gemini-2.5-pro', thinkingBudget: 8_192 },
       tts: { provider: 'aivisspeech', voice: { speakerId: 888753760 } },
       claimStrategy: { madman: { claimTendency: character.claimStrategy.madman.claimTendency } },
     });
@@ -74,7 +74,7 @@ describe('編集可能なキャラクター設定', () => {
     const character = cloneDefaultCharacterRoster()[0];
     const configured = {
       ...character,
-      llm: { provider: 'gemini' as const, thinkingBudget: 8_192 },
+      llm: { provider: 'gemini' as const, model: 'gemini-2.5-pro' as const, thinkingBudget: 8_192 },
       tts: {
         provider: 'aivisspeech' as const,
         voice: { ...character.tts.voice, speakerId: 888753760, speakerName: 'Anneli' },
@@ -89,6 +89,18 @@ describe('編集可能なキャラクター設定', () => {
     expect(characterProfileSchema.safeParse({
       ...configured,
       llm: { ...configured.llm, reasoningEffort: 'high' },
+    }).success).toBe(false);
+    expect(characterProfileSchema.safeParse({
+      ...configured,
+      llm: { provider: 'gemini', model: 'gemini-3.6-flash', thinkingLevel: 'medium' },
+    }).success).toBe(true);
+    expect(characterProfileSchema.safeParse({
+      ...configured,
+      llm: { provider: 'gemini', model: 'gemini-3.5-flash-lite', thinkingLevel: 'minimal' },
+    }).success).toBe(true);
+    expect(characterProfileSchema.safeParse({
+      ...configured,
+      llm: { provider: 'gemini', model: 'gemini-3.5-flash-lite', thinkingBudget: 8_192 },
     }).success).toBe(false);
   });
 

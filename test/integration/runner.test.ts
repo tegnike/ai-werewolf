@@ -88,7 +88,9 @@ describe('MatchRunner', () => {
         ...profile,
         llmProvider: character.llm.provider,
         openaiReasoningEffort: character.llm.provider === 'openai' ? character.llm.reasoningEffort : 'low',
-        geminiThinkingBudget: character.llm.provider === 'gemini' ? character.llm.thinkingBudget : -1,
+        geminiThinkingBudget: character.llm.provider === 'gemini' && character.llm.model === 'gemini-2.5-pro'
+          ? character.llm.thinkingBudget
+          : -1,
         ttsProvider: character.tts.provider,
         voice: character.tts.voice,
       };
@@ -111,21 +113,20 @@ describe('MatchRunner', () => {
   });
 
   it('選択したLLM・モデル・TTSを試合へスナップショット保存する', async () => {
-    process.env.GEMINI_MODEL = 'gemini-test-model';
     const manager = new MatchRunnerManager();
     const original = manager.repo.characterRoster()[0];
     manager.repo.saveCharacter({
       ...original, name: 'Geminiキャラクター',
-      llm: { provider: 'gemini', thinkingBudget: 8_192 },
+      llm: { provider: 'gemini', model: 'gemini-3.5-flash-lite', thinkingLevel: 'high' },
       tts: { provider: 'aivisspeech', voice: { ...original.tts.voice, speakerId: 888753760 } },
     });
     const match = manager.create({ seed: 'provider-snapshot', speed: 0, ai: 'mock' });
     const configured = match.config.characters?.find((character) => character.name === 'Geminiキャラクター');
     expect(configured).toMatchObject({
-      llm: { provider: 'gemini', thinkingBudget: 8_192 },
+      llm: { provider: 'gemini', model: 'gemini-3.5-flash-lite', thinkingLevel: 'high' },
       tts: { provider: 'aivisspeech', voice: { speakerId: 888753760 } },
     });
-    expect(match.config.characterLlmModels?.[configured!.seat]).toBe('gemini-test-model');
+    expect(match.config.characterLlmModels?.[configured!.seat]).toBe('gemini-3.5-flash-lite');
     await waitFor(manager.repo, match.id, 'finished');
     const saved = manager.repo.getMatch(match.id)?.config.characters?.find((character) => character.name === 'Geminiキャラクター');
     expect(saved).toEqual(configured);
@@ -286,7 +287,11 @@ describe('MatchRunner', () => {
     delete process.env.GEMINI_API_KEY;
     const manager = new MatchRunnerManager();
     const original = manager.repo.characterRoster()[0];
-    manager.repo.saveCharacter({ ...original, name: 'Gemini担当', llm: { provider: 'gemini', thinkingBudget: -1 } });
+    manager.repo.saveCharacter({
+      ...original,
+      name: 'Gemini担当',
+      llm: { provider: 'gemini', model: 'gemini-2.5-pro', thinkingBudget: -1 },
+    });
     expect(() => manager.create({ seed: 'mixed-provider-keys', speed: 0, ai: 'real' })).toThrow('REAL_AI_NOT_CONFIGURED');
     expect(manager.repo.listMatches()).toHaveLength(0);
   });

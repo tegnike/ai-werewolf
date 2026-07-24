@@ -58,7 +58,7 @@
 
 Geminiで既定以外のモデルを使う場合は、サーバー側の`GEMINI_MODEL`設定も必要であることを伝えてください。対話相手が「おまかせ」と回答した場合は、アプリの既定値であるOpenAI `gpt-5.6-luna`、推論レベル `low`を提案し、了承後に進めてください。
 
-選択したLLMだけを`llm`へ入れます。OpenAIなら`{ "provider": "openai", "reasoningEffort": "low" }`、Geminiなら`{ "provider": "gemini", "thinkingBudget": -1 }`の形です。選択していないLLM用の設定を同時に入れてはいけません。APIキーを聞き出したり、JSONへ含めたりしないでください。
+選択したLLMだけを`llm`へ入れます。OpenAIなら`{ "provider": "openai", "reasoningEffort": "low" }`、Gemini 2.5 Proなら`{ "provider": "gemini", "model": "gemini-2.5-pro", "thinkingBudget": -1 }`、Gemini 3.6 Flashなら`{ "provider": "gemini", "model": "gemini-3.6-flash", "thinkingLevel": "medium" }`、Gemini 3.5 Flash-Liteなら`{ "provider": "gemini", "model": "gemini-3.5-flash-lite", "thinkingLevel": "minimal" }`の形です。選択していないLLM・モデル用の設定を同時に入れてはいけません。APIキーを聞き出したり、JSONへ含めたりしないでください。
 
 ### 3. 使用するTTS
 

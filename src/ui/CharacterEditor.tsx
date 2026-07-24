@@ -5,8 +5,12 @@ import Link from 'next/link';
 import { ChangeEvent, DragEvent as ReactDragEvent, FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import type { CharacterAddressStyle, CharacterProfile } from '@/domain/characters';
 import { formatCharacterPresetErrors, parseCharacterPresetJson } from '@/domain/character-preset-validation';
-import { GEMINI_THINKING_BUDGET_PRESETS, OPENAI_REASONING_EFFORTS } from '@/domain/types';
-import type { GeminiThinkingBudget, LlmProvider, OpenAiReasoningEffort, Role, SeatId, TtsProvider } from '@/domain/types';
+import {
+  GEMINI_MODELS, GEMINI_THINKING_BUDGET_PRESETS, GEMINI_THINKING_LEVELS, OPENAI_REASONING_EFFORTS,
+} from '@/domain/types';
+import type {
+  GeminiThinkingBudget, GeminiThinkingLevel, LlmProvider, OpenAiReasoningEffort, Role, SeatId, TtsProvider,
+} from '@/domain/types';
 
 const roles: Array<{ key: Role; label: string }> = [
   { key: 'villager', label: '村人' },
@@ -32,7 +36,10 @@ const clone = <T,>(value: T): T => structuredClone(value);
 
 export function CharacterEditor() {
   const [characters, setCharacters] = useState<CharacterProfile[]>([]);
-  const [llmModels, setLlmModels] = useState<Record<LlmProvider, string>>({ openai: 'gpt-5.6-luna', gemini: 'gemini-2.5-pro' });
+  const [llmModels, setLlmModels] = useState<Record<LlmProvider, readonly string[]>>({
+    openai: ['gpt-5.6-luna'],
+    gemini: GEMINI_MODELS,
+  });
   const [selectedSeat, setSelectedSeat] = useState<SeatId>('seat-1');
   const [draft, setDraft] = useState<CharacterProfile | null>(null);
   const [saved, setSaved] = useState<CharacterProfile | null>(null);
@@ -47,7 +54,12 @@ export function CharacterEditor() {
   useEffect(() => {
     void fetch('/api/characters', { cache: 'no-store' })
       .then(async (response) => {
-        const data = await response.json() as { characters?: CharacterProfile[]; customizedSeats?: SeatId[]; llmModels?: Record<LlmProvider, string>; error?: { message?: string } };
+        const data = await response.json() as {
+          characters?: CharacterProfile[];
+          customizedSeats?: SeatId[];
+          llmModels?: Record<LlmProvider, string[]>;
+          error?: { message?: string };
+        };
         if (!response.ok || !data.characters) throw new Error(data.error?.message ?? '読み込めませんでした。');
         setCharacters(data.characters);
         if (data.llmModels) setLlmModels(data.llmModels);
@@ -67,6 +79,13 @@ export function CharacterEditor() {
 
   const update = <K extends keyof CharacterProfile>(key: K, value: CharacterProfile[K]) => {
     setDraft((current) => current ? { ...current, [key]: value } : current);
+  };
+
+  const updateGeminiThinkingLevel = (thinkingLevel: GeminiThinkingLevel) => {
+    setDraft((current) => {
+      if (!current || current.llm.provider !== 'gemini' || current.llm.model === 'gemini-2.5-pro') return current;
+      return { ...current, llm: { ...current.llm, thinkingLevel } };
+    });
   };
 
   const save = async (event: FormEvent) => {
@@ -238,9 +257,14 @@ export function CharacterEditor() {
 
           <section className="editor-section"><div className="editor-section-head"><span>04</span><div><h2>AIと音声</h2><p>このキャラクターが使用するLLM・推論設定・TTSと、それぞれの話者を設定します。</p></div></div><div className="editor-fields two-column">
             <h3 className="voice-provider-heading">キャラクター実行設定</h3>
-            <label>言語モデル<select aria-label="キャラクターの言語モデル" value={draft.llm.provider} onChange={(event) => update('llm', event.target.value === 'gemini' ? { provider: 'gemini', thinkingBudget: -1 } : { provider: 'openai', reasoningEffort: 'low' })}><option value="openai">OpenAI — {llmModels.openai}</option><option value="gemini">Gemini — {llmModels.gemini}</option></select></label>
+            <label>言語モデル<select aria-label="キャラクターの言語モデル" value={draft.llm.provider} onChange={(event) => update('llm', event.target.value === 'gemini' ? { provider: 'gemini', model: 'gemini-2.5-pro', thinkingBudget: -1 } : { provider: 'openai', reasoningEffort: 'low' })}><option value="openai">OpenAI — {llmModels.openai[0]}</option><option value="gemini">Gemini</option></select></label>
             <label>音声エンジン<select aria-label="キャラクターの音声エンジン" value={draft.tts.provider} onChange={(event) => update('tts', { provider: event.target.value as TtsProvider, voice: draft.tts.voice } as CharacterProfile['tts'])}><option value="voicevox">VOICEVOX</option><option value="aivisspeech">AivisSpeech</option></select></label>
-            {draft.llm.provider === 'openai' ? <label className="full-width">OpenAI推論レベル<select aria-label="キャラクターのOpenAI推論レベル" value={draft.llm.reasoningEffort} onChange={(event) => update('llm', { provider: 'openai', reasoningEffort: event.target.value as OpenAiReasoningEffort })}>{OPENAI_REASONING_EFFORTS.map((effort) => <option key={effort} value={effort}>{effort}</option>)}</select></label> : <label className="full-width">Gemini思考トークン予算<select aria-label="キャラクターのGemini思考トークン予算" value={draft.llm.thinkingBudget} onChange={(event) => update('llm', { provider: 'gemini', thinkingBudget: Number(event.target.value) as GeminiThinkingBudget })}>{GEMINI_THINKING_BUDGET_PRESETS.map((budget) => <option key={budget} value={budget}>{budget === -1 ? '自動（モデル既定）' : `${budget.toLocaleString('ja-JP')} tokens`}</option>)}</select></label>}
+            {draft.llm.provider === 'gemini' && <label className="full-width">Geminiモデル<select aria-label="キャラクターのGeminiモデル" value={draft.llm.model} onChange={(event) => update('llm', event.target.value === 'gemini-3.6-flash' ? { provider: 'gemini', model: 'gemini-3.6-flash', thinkingLevel: 'medium' } : event.target.value === 'gemini-3.5-flash-lite' ? { provider: 'gemini', model: 'gemini-3.5-flash-lite', thinkingLevel: 'minimal' } : { provider: 'gemini', model: 'gemini-2.5-pro', thinkingBudget: -1 })}>{llmModels.gemini.map((model) => <option key={model} value={model}>{model}</option>)}</select></label>}
+            {draft.llm.provider === 'openai'
+              ? <label className="full-width">OpenAI推論レベル<select aria-label="キャラクターのOpenAI推論レベル" value={draft.llm.reasoningEffort} onChange={(event) => update('llm', { provider: 'openai', reasoningEffort: event.target.value as OpenAiReasoningEffort })}>{OPENAI_REASONING_EFFORTS.map((effort) => <option key={effort} value={effort}>{effort}</option>)}</select></label>
+              : draft.llm.model !== 'gemini-2.5-pro'
+                ? <label className="full-width">Gemini思考レベル<select aria-label="キャラクターのGemini思考レベル" value={draft.llm.thinkingLevel} onChange={(event) => updateGeminiThinkingLevel(event.target.value as GeminiThinkingLevel)}>{GEMINI_THINKING_LEVELS.map((level) => <option key={level} value={level}>{level}</option>)}</select></label>
+                : <label className="full-width">Gemini思考トークン予算<select aria-label="キャラクターのGemini思考トークン予算" value={draft.llm.thinkingBudget} onChange={(event) => update('llm', { provider: 'gemini', model: 'gemini-2.5-pro', thinkingBudget: Number(event.target.value) as GeminiThinkingBudget })}>{GEMINI_THINKING_BUDGET_PRESETS.map((budget) => <option key={budget} value={budget}>{budget === -1 ? '自動（モデル既定）' : `${budget.toLocaleString('ja-JP')} tokens`}</option>)}</select></label>}
             <small className="full-width execution-settings-note">LLMとTTSは試合全体ではなく、このキャラクター専用です。APIキーはサーバー側のOpenAI・Gemini共通設定を使用し、JSONへは含めません。</small>
             <h3 className="voice-provider-heading">{draft.tts.provider === 'voicevox' ? 'VOICEVOX' : 'AivisSpeech'}</h3>
             <label>{draft.tts.provider === 'voicevox' ? '話者ID' : 'スタイルID'}<input type="number" min="0" value={draft.tts.voice.speakerId} onChange={(event) => update('tts', { ...draft.tts, voice: { ...draft.tts.voice, speakerId: Number(event.target.value) } })} /></label>

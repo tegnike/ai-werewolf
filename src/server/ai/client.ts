@@ -1,17 +1,19 @@
 import OpenAI from 'openai';
-import type { GoogleGenAI } from '@google/genai';
+import { ThinkingLevel } from '@google/genai';
+import type { GoogleGenAI, ThinkingConfig } from '@google/genai';
 import { zodTextFormat } from 'openai/helpers/zod';
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { ClaimContractError } from '@/domain/claims';
 import type {
-  DecisionContext, DecisionProvider, GeminiThinkingBudget, LlmProvider, OpenAiReasoningEffort,
+  DecisionContext, DecisionProvider, GeminiThinkingBudget, GeminiThinkingLevel, LlmProvider, OpenAiReasoningEffort,
   SpeechDecision, SpeechIntentDecision, TargetDecision,
 } from '@/domain/types';
 import type { MatchRepo } from '@/server/repo';
 import { buildPrompts } from './prompts';
 import {
-  apiKeyForProvider, DEFAULT_GEMINI_THINKING_BUDGET, DEFAULT_OPENAI_REASONING_EFFORT, modelForProvider,
+  apiKeyForProvider, defaultGeminiThinkingLevel, DEFAULT_GEMINI_THINKING_BUDGET,
+  DEFAULT_OPENAI_REASONING_EFFORT, modelForProvider,
 } from './provider';
 import { speechDecisionSchema, speechIntentDecisionSchema, targetDecisionSchema } from './schemas';
 import { validateSpeechDisclosure } from './disclosure';
@@ -33,8 +35,20 @@ export function openAiReasoningConfig(effort: OpenAiReasoningEffort): { effort: 
   return { effort };
 }
 
-export function geminiThinkingConfig(thinkingBudget: GeminiThinkingBudget): { thinkingBudget: GeminiThinkingBudget } {
-  return { thinkingBudget };
+export function geminiThinkingConfig(
+  model: string,
+  thinkingBudget: GeminiThinkingBudget,
+  thinkingLevel: GeminiThinkingLevel,
+): ThinkingConfig {
+  const levels = {
+    minimal: ThinkingLevel.MINIMAL,
+    low: ThinkingLevel.LOW,
+    medium: ThinkingLevel.MEDIUM,
+    high: ThinkingLevel.HIGH,
+  } as const;
+  return model === 'gemini-3.6-flash' || model === 'gemini-3.5-flash-lite'
+    ? { thinkingLevel: levels[thinkingLevel] }
+    : { thinkingBudget };
 }
 
 export type AIRetryClass = 'contract' | 'structured_output' | 'transport' | 'non_retryable';
@@ -91,6 +105,7 @@ export class RealAI implements DecisionProvider {
   private readonly openai: OpenAI | null;
   private gemini: GoogleGenAI | null;
   private readonly apiKey: string;
+  private readonly geminiThinkingLevel: GeminiThinkingLevel;
   readonly model: string;
 
   constructor(
@@ -99,12 +114,14 @@ export class RealAI implements DecisionProvider {
     model?: string,
     private readonly openaiReasoningEffort: OpenAiReasoningEffort = DEFAULT_OPENAI_REASONING_EFFORT,
     private readonly geminiThinkingBudget: GeminiThinkingBudget = DEFAULT_GEMINI_THINKING_BUDGET,
+    geminiThinkingLevel?: GeminiThinkingLevel,
   ) {
     if (process.env.ALLOW_REAL_AI !== '1') throw new Error('Real AI requires ALLOW_REAL_AI=1');
     const apiKey = apiKeyForProvider(provider);
     if (!apiKey) throw new Error(`${provider === 'gemini' ? 'GEMINI' : 'OPENAI'}_API_KEY is required`);
     this.apiKey = apiKey;
     this.model = model?.trim() || modelForProvider(provider);
+    this.geminiThinkingLevel = geminiThinkingLevel ?? defaultGeminiThinkingLevel(this.model);
     this.openai = provider === 'openai' ? new OpenAI({ apiKey, maxRetries: 0, timeout: 60_000 }) : null;
     this.gemini = null;
   }
@@ -152,7 +169,11 @@ export class RealAI implements DecisionProvider {
         contents: decisionPrompt,
         config: {
           systemInstruction: systemPrompt,
-          thinkingConfig: geminiThinkingConfig(this.geminiThinkingBudget),
+          thinkingConfig: geminiThinkingConfig(
+            this.model,
+            this.geminiThinkingBudget,
+            this.geminiThinkingLevel,
+          ),
           responseMimeType: 'application/json',
           responseJsonSchema: z.toJSONSchema(schema),
         },
@@ -184,7 +205,7 @@ export class RealAI implements DecisionProvider {
         ? `${decisionPrompt}\n修正指示: ${repairInstruction}`
         : decisionPrompt;
       const requestHash = createHash('sha256')
-        .update(`${this.provider}\n${this.model}\n${this.openaiReasoningEffort}\n${this.geminiThinkingBudget}\n${systemPrompt}\n${currentDecisionPrompt}`)
+        .update(`${this.provider}\n${this.model}\n${this.openaiReasoningEffort}\n${this.geminiThinkingBudget}\n${this.geminiThinkingLevel}\n${systemPrompt}\n${currentDecisionPrompt}`)
         .digest('hex');
       try {
         this.repo.beginAiAttempt(context.matchId, context.callKey, requestHash);
